@@ -1,0 +1,15 @@
+{
+  "name": "testapi",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "explore": "tsx explore-api-data-go-th.ts",
+    "rss": "tsx explore-egp-rss.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
