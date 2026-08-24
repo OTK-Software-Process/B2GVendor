@@ -1,5 +1,6 @@
 import mongoose, { Schema, Document, Model, Types } from 'mongoose';
 import { generateRawToken, hashToken } from '../utils/crypto';
+import { SESSION_TTL_MS } from '../config/cookie';
 
 export interface ISession extends Document {
   accountId: Types.ObjectId;
@@ -18,8 +19,6 @@ export interface ISession extends Document {
   createdAt: Date;
   updatedAt: Date;
 }
-
-export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const SessionSchema = new Schema<ISession>(
   {
@@ -71,6 +70,8 @@ export function issueSessionToken(): { raw: string; tokenHash: string } {
 export function hashSessionToken(raw: string): string {
   return hashToken(raw);
 }
+
+export { SESSION_TTL_MS };
 
 export const Session: Model<ISession> =
   mongoose.models.Session || mongoose.model<ISession>('Session', SessionSchema);

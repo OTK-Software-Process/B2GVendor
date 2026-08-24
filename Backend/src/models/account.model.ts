@@ -1,7 +1,6 @@
 import mongoose, { Schema, Document, Model } from 'mongoose';
 import bcrypt from 'bcryptjs';
-
-const BCRYPT_ROUNDS = 12;
+import { env } from '../config/env';
 
 export type AccountType = 'individual' | 'business';
 export type AccountStatus = 'active' | 'suspended';
@@ -142,7 +141,7 @@ AccountSchema.pre('validate', function (next) {
 
 AccountSchema.pre('save', async function (next) {
   if (!this.isModified('passwordHash')) return next();
-  this.passwordHash = await bcrypt.hash(this.passwordHash, BCRYPT_ROUNDS);
+  this.passwordHash = await bcrypt.hash(this.passwordHash, env.BCRYPT_ROUNDS);
   this.passwordChangedAt = new Date();
   next();
 });
