@@ -1,13 +1,19 @@
 # B2G Vendor — Requirements Specification (Side Project) — Revised
 
 **System:** Multi-agency Thai government procurement disclosure portal — a **read-only disclosure + notification portal**. Launch sites: **BMA** (Bangkok Metropolitan Administration), **Department of Highways**, **PEA** (Provincial Electricity Authority), **EGAT** (Electricity Generating Authority of Thailand), **สำนักงานปลัดกระทรวงสาธารณสุข** (Office of the Permanent Secretary, Ministry of Public Health), **depa** (Digital Economy Promotion Agency), and **DGA** (Digital Government Agency) — with more sites addable later without a redeploy.
-**Nature of system:** It does **not** run bidding, deals, or announcement publishing. It **ingests** procurement/TOR data from each connected government site via the official open-data API (**`api.data.go.th`**) — no scraping — stores it, shows **status**, **notifies** users about relevant new work, and provides **better search** across every connected site in one place.
+**Nature of system:** It does **not** run bidding, deals, or announcement publishing. It **polls** procurement/TOR data from each connected government site via **two official sources — no scraping of either**: the **e-GP RSS feed** (`process3.gprocurement.go.th`) for **live** new/updated TOR announcements, and the **`data.go.th`** open-data catalog for **historical/batch** contract-level enrichment (budget, winner) once a project is awarded. The system stores what it ingests, shows **status**, **notifies** users about relevant new work, and provides **better search** across every connected site in one place.
+**Target users:** Vendors & contractors, businesses/SMEs, public users (all served by the unified account model in N2), plus government agencies as the publishing side of the data.
 **Ordering:** New features first, existing features second, global NFS last.
 
 ## Data flow (mental model)
 ```
 Government sites (BMA, Dept. of Highways, PEA, EGAT, MOPH, depa, DGA, …)
-        │  via api.data.go.th — admin-controlled: manual or scheduled poll, per site
+        │
+        ├─ e-GP RSS feed (process3.gprocurement.go.th)  ── live: new/updated TOR announcements
+        │      per site (deptId) × per announce type (draft TOR, invitation, cancel, amend, winner)
+        │
+        └─ data.go.th open-data catalog                  ── batch: contract/budget/winner, agency lookup
+               admin-controlled: manual or scheduled poll, per site, per source
         ▼
    Ingestion pipeline  ──► normalize + upsert ──► Local data store (works, TOR, status)
         │                                               │
@@ -15,14 +21,14 @@ Government sites (BMA, Dept. of Highways, PEA, EGAT, MOPH, depa, DGA, …)
         ▼                                               ├─► Status display (search + detail)
   Notification engine ──► users with matching interests └─► Document store (TOR files)
 ```
-The **poll is the heartbeat**: it drives status updates, "new work" notifications, and search freshness — for every connected government site.
+The **poll is the heartbeat**: it drives status updates, "new work" notifications, and search freshness — for every connected government site. The **RSS feed is what makes a work exist and updates it live**; `data.go.th` only ever enriches an already-ingested work after the fact — it cannot itself discover a new TOR.
 
 **Actors**
 - **Public visitor** — browses/searches disclosure data across all connected sites, no login.
 - **Registered user** — account holder who sets interest topics (including specific government sites) and receives notifications.
 - **Admin** — triggers/schedules polling, monitors runs, manages the tag vocabulary, manages vendor accounts, reviews the audit log.
-- **Super Admin** — everything Admin can do, plus **source configuration**: which government sites are polled (add a new site, enable/disable one, point it at its `api.data.go.th` dataset), and each site's scope/request-rate. Split out as its own tier because a bad source-config change can affect data integrity for everyone, not just the person making it.
-- **System** — API poller (per government site), scheduler, change-detector, notification engine, search indexer.
+- **Super Admin** — everything Admin can do, plus **source configuration**: which government sites are polled (add a new site, enable/disable one, point it at its e-GP department code (`deptId`) for the live RSS feed and, where available, its `data.go.th` organization for enrichment), and each site's scope/request-rate. Split out as its own tier because a bad source-config change can affect data integrity for everyone, not just the person making it.
+- **System** — pollers (e-GP RSS live feed **and** `data.go.th` batch enrichment, per government site), scheduler, change-detector, notification engine, search indexer.
 
 ---
 
@@ -30,9 +36,13 @@ The **poll is the heartbeat**: it drives status updates, "new work" notification
 
 ---
 
-## N1. Admin-controlled TOR data ingestion (API polling across multiple government sites)
+## N1. Admin-controlled TOR data ingestion (dual-source polling across multiple government sites)
 
-> The site has no native data of its own; TOR and project data are pulled from **each connected government site** (BMA, Department of Highways, PEA, EGAT, สำนักงานปลัดกระทรวงสาธารณสุข, depa, DGA, and any future site an admin adds) via the official **`api.data.go.th`** open-data API — **no scraping**. An admin can **poll on demand** or **schedule interval polling**, per site.
+> The site has no native data of its own; TOR and project data are pulled from **each connected government site** (BMA, Department of Highways, PEA, EGAT, สำนักงานปลัดกระทรวงสาธารณสุข, depa, DGA, and any future site an admin adds) via **two official sources — no scraping of either**:
+> - The **e-GP RSS feed** (`process3.gprocurement.go.th/EPROCRssFeedWeb/egpannouncerss.xml?deptId={id}&anounceType={code}`) — a **live**, no-API-key-required feed of announcements per site (`deptId`) and per type: draft TOR (`B0`), invitation to bid (`D0`), cancellation (`D1`), amendment (`D2`), winner (`W0`), reference price (`15`), procurement plan (`P0`). This is the **essential** source — it is what makes a work exist in the system at all and what drives "new work" detection.
+> - The **`data.go.th`** open-data catalog (CKAN-based) — a **historical/batch** source of contract-level records (budget, contract number/dates, winner) published periodically per fiscal period, used only to **enrich** an already-ingested work after award, plus an agency/e-GP-participation lookup dataset. It cannot discover a new TOR on its own.
+>
+> An admin can **poll on demand** or **schedule interval polling**, per site, per source.
 
 ### User Stories
 - **US-N1.1** — As an admin, I want to **trigger a data pull manually ("Poll now")** for one or all sites, so that I can refresh TOR/project data immediately when needed.
@@ -44,22 +54,25 @@ The **poll is the heartbeat**: it drives status updates, "new work" notification
 ### Functional Specs
 - **FR-N1.1** **Manual poll:** an admin action immediately runs an ingestion job — against one site or all enabled sites — and reports results.
 - **FR-N1.2** **Scheduled poll:** admin-configurable interval (cron-style or presets), per site. Scheduler runs jobs automatically; can be paused/resumed.
-- **FR-N1.3** **API client** fetches from each configured government site via `api.data.go.th`: work/project records + metadata (title, publishing government site, agency/department, method, budget, dates, **status**) and **TOR documents/attachments** where the dataset provides them.
-- **FR-N1.4** **Normalize + upsert:** records from every configured site are mapped to one common local schema and **upserted by a stable key** (e.g. project/announcement ID, scoped per site) so re-polling updates rather than duplicates.
+- **FR-N1.3** **e-GP RSS client (primary/live):** for each configured site's `deptId`, polls the e-GP RSS feed across its enabled announce types and extracts, per item, a title, a project identifier, an announce-type label, a publish date, and a link — the link is **either a direct TOR/announcement PDF or an HTML detail page**, and the system must handle both (a direct PDF is stored immediately; an HTML-page link is recorded as a reference, not auto-fetched, to avoid scraping).
+- **FR-N1.3a** **`data.go.th` enrichment client (secondary/batch):** periodically fetches each configured site's contract-level dataset (where available) — budget, contract number/dates, winner — and the agency/e-GP-participation lookup dataset, and attaches these facts to the matching already-ingested work by its project identifier. Never creates a new work by itself.
+- **FR-N1.4** **Normalize + upsert:** records from every configured site and source are mapped to one common local schema and **upserted by a stable key** (the project identifier, scoped per site) so re-polling updates rather than duplicates, and so a `data.go.th` enrichment record correlates to the same work an earlier RSS item already created.
 - **FR-N1.5** **Change detection:** the pipeline flags (a) brand-new works and (b) changed fields (esp. **status**), for any connected site. New/changed items emit events consumed by notifications (N3) and search (N4).
-- **FR-N1.6** **TOR file handling:** documents are downloaded, deduplicated (hash), stored, and linked to the work; existing files aren't re-downloaded unnecessarily.
+- **FR-N1.6** **TOR file handling:** direct-PDF links from the RSS feed (FR-N1.3) are downloaded, deduplicated (hash), stored, and linked to the work; existing files aren't re-downloaded unnecessarily. HTML-detail-page links are stored as a reference URL only — the document itself is not auto-fetched from an HTML page.
 - **FR-N1.7** **Run history/log:** each poll records, per government site, start/end time, counts (fetched / new / updated / skipped / failed), and errors. Viewable in the admin panel, filterable by site.
 - **FR-N1.8** **Resilience:** retries with backoff on transient failures; a run failure is logged and alerted; a failure isolated to one government site doesn't corrupt already-ingested data or block polling of the others.
-- **FR-N1.9** **Source config:** **Super Admin** manages the list of government sites to poll — each entry has a name, its `api.data.go.th` dataset/endpoint ID, scope filters, an enabled/disabled toggle, and a request-rate limit. New sites can be added without code changes; regular Admins can see which sites exist but can't add, remove, or repoint one. Concurrency is a fixed internal safety limit, not exposed as a setting to anyone.
+- **FR-N1.9** **Source config:** **Super Admin** manages the list of government sites to poll — each entry has a name, its e-GP department code (`deptId`) for the RSS feed, optionally its `data.go.th` organization identifier for enrichment, scope filters (which announce types to poll), an enabled/disabled toggle, and a request-rate limit. New sites can be added without code changes; regular Admins can see which sites exist but can't add, remove, or repoint one. Concurrency is a fixed internal safety limit, not exposed as a setting to anyone.
 - **FR-N1.10** **Concurrency guard:** a manual poll and a scheduled poll for the same site cannot run destructively at the same time (locking / queueing).
+- **FR-N1.11** **Link resolution:** each RSS item's link is classified as a direct-PDF or an HTML-detail-page reference before storage, so downstream features (TOR download, admin review) know which works have an immediately-available document versus one that still needs a manual/future resolution step.
 
 ### NFS
-- **NFR-N1.1 (API etiquette / compliance)** Respect each government site's `api.data.go.th` rate limits, API key quota, and terms of use; throttle requests per site. Access only public disclosure datasets.
-- **NFR-N1.2 (Robustness to source changes)** Each government site's response mapping is isolated in its own adapter, since dataset schemas differ by organization; on a mapping failure, skip + log the item rather than crash the whole run.
-- **NFR-N1.3 (Idempotency)** Re-running a poll over the same source state produces no duplicates and no duplicate notifications.
-- **NFR-N1.4 (Observability)** Metrics + alerting on run success/failure, item counts, and latency; admin notified on repeated failures.
+- **NFR-N1.1 (API etiquette / compliance)** Respect rate limits and terms of use for **both** sources — the e-GP RSS feed (no key required, but still throttled per site) and `data.go.th` (works without a key in testing, but an API key should still be registered and used per its terms). Access only public disclosure data from either.
+- **NFR-N1.2 (Robustness to source changes)** Each government site's response mapping is isolated in its own adapter **per source** (RSS's XML/Windows-874-encoded feed vs. `data.go.th`'s JSON CKAN API are structurally different and must not share a parser); on a mapping failure, skip + log the item rather than crash the whole run.
+- **NFR-N1.3 (Idempotency)** Re-running a poll over the same source state produces no duplicates and no duplicate notifications, for either source.
+- **NFR-N1.4 (Observability)** Metrics + alerting on run success/failure, item counts, and latency, tagged by source; admin notified on repeated failures.
 - **NFR-N1.5 (Performance)** Incremental polling (only new/changed since last run where possible) to keep runs fast and light.
 - **NFR-N1.6 (Data integrity)** Ingestion is transactional per item; a crashed run resumes cleanly without half-written records.
+- **NFR-N1.7 (Correct encoding)** The e-GP RSS feed is Windows-874 (Thai codepage) encoded despite superficially looking like standard XML; the client must decode it explicitly as Windows-874, not assume UTF-8, or every Thai character in the feed is corrupted.
 
 ---
 
@@ -107,7 +120,7 @@ Entities: `User`, `Tag(tag_group)`, `Work`, join tables `user_tag`, `work_tag`, 
 
 ### Functional Specs
 - **FR-N3.1** Users follow interests by **selecting tags** from the controlled taxonomy (grouped by facet). A user may hold **many tags** (`user_tag`); tags addable/removable anytime.
-- **FR-N3.2** During ingestion, each work is **assigned 1..N tags** (`work_tag`) — system-derived from its **government site**, agency/method/category, and keyword extraction, optionally admin-curated.
+- **FR-N3.2** **AI-assisted auto-tagging:** during ingestion, each work is **assigned 1..N tags** (`work_tag`) — system-derived from its **government site** and agency/method (structured fields), plus **AI-based classification/keyword extraction over the Thai-language title and TOR text** for category and keyword tags, optionally admin-curated/overridden afterward.
 - **FR-N3.3** On the ingestion pipeline's **"new work" event** (from N1), the system computes `tags(W) ∩ tags_followed(U)` and queues notifications for matched users. *(Optionally also on meaningful status changes.)*
 - **FR-N3.4** **Tag admin:** create/retire tags and reassign a work's tags. *(No tag-merge tool — duplicate/near-duplicate tags are prevented at creation time and handled by retiring the redundant one, not by merging two tags into one.)*
 - **FR-N3.5** Channels: in-app notification center (required) + email (optional); extensible to LINE/SMS.
@@ -124,6 +137,7 @@ Entities: `User`, `Tag(tag_group)`, `Work`, join tables `user_tag`, `work_tag`, 
 - **NFR-N3.4 (Deliverability)** Authenticated email (SPF/DKIM/DMARC); bounce handling.
 - **NFR-N3.5 (Privacy)** Per-channel opt-in; PDPA-compliant storage of contact + preferences + followed tags.
 - **NFR-N3.6 (Idempotency)** Re-processing an ingestion event never double-sends.
+- **NFR-N3.7 (Tagging quality)** AI-assisted tagging (planned: Vertex AI) runs as a best-effort classification step, not a blocking dependency — a model failure or low-confidence result skips AI tags for that item (structured/site/agency tags still apply) rather than failing ingestion; admin-curated tags always take precedence over AI-suggested ones.
 
 ---
 
@@ -143,7 +157,7 @@ Entities: `User`, `Tag(tag_group)`, `Work`, join tables `user_tag`, `work_tag`, 
 - **FR-N4.2** Faceted filters: **status**, **government site**, agency/department, method, budget range, date range — the site/agency/method/category facets **reuse the same tag taxonomy as N3** (one vocabulary powers both search facets and interest follows). Sort by date, budget, closing date. Active-filter chips + result count.
 - **FR-N4.2a** From a work or a search facet, a user can **"follow this tag"** in one click, linking search directly to the N3 interest model.
 - **FR-N4.3** **Status badge per result row**, color-coded + text-labeled (Thai), reflecting the latest **ingested** status. Same source of truth on search and detail — they never disagree.
-- **FR-N4.4** Status values come **from the source data** via the ingestion pipeline (e.g. Planned / Draft TOR / Open for bidding / Cancelled / Awarded-Closed) — no manual editing, no announce action.
+- **FR-N4.4** Status values are derived **from the e-GP RSS announce-type signal** (e.g. draft TOR → Draft TOR, invitation → Open for bidding, cancellation → Cancelled, winner → Awarded-Closed) — no manual editing, no announce action. `data.go.th` enrichment records carry no status field at all, so they never override a work's status, only its budget/winner facts.
 - **FR-N4.5** Consistent empty state, loading skeletons, and retryable error state.
 - **FR-N4.6** Responsive layout; search usable on mobile.
 
@@ -203,9 +217,15 @@ Entities: `User`, `Tag(tag_group)`, `Work`, join tables `user_tag`, `work_tag`, 
 ---
 
 ### Notes / assumptions
-- **Source dependency (resolved):** the system polls each government site's dataset through the official `api.data.go.th` API rather than scraping HTML. Each site still needs its exact dataset/endpoint ID and field mapping confirmed with `api.data.go.th` before it's onboarded, since coverage and schema can vary by organization.
-- **Status vocabulary:** status labels in FR-N4.4 are a baseline; map them to the exact values each site's dataset exposes — they may not be identical across government sites.
-- **Legality/compliance:** accessing public procurement disclosure data via `api.data.go.th` still requires respecting each dataset's terms, API key quota, and rate limits (NFR-N1.1).
+- **Source dependency (resolved, verified live — two sources, not one):** the system pulls from **both** sources confirmed live during testing, not `data.go.th` alone.
+  - **e-GP RSS feed** (`process3.gprocurement.go.th`) — confirmed live, no API key needed; `deptId` genuinely filters to one agency; announce-type codes (`B0`/`D0`/`D1`/`D2`/`W0`/`15`/`P0`) confirmed live; each item's link resolves to **either a direct PDF (confirmed via a real `HEAD` request: `content-type: application/pdf`) or an HTML detail page — mixed even within the same announce type and agency**, so the ingestion client must classify each link rather than assume one shape.
+  - **`data.go.th`** open data catalog (CKAN-based; confirmed live, public reads work without an API key) hosts **620 government organizations publishing 42,853 datasets in total**; **75 of those organizations publish procurement/TOR-related data** (288 datasets combined); **all 7 launch sites — BMA, Department of Highways, PEA, EGAT, สำนักงานปลัดกระทรวงสาธารณสุข, depa, DGA — are confirmed present** among those 75, each resolvable to an exact organization identifier. Its procurement datasets are **periodic batch drops** (one per month/fiscal year), not a live filterable endpoint, and carry **no status field and no TOR/PDF link** — only budget, contract dates, and winner, once awarded. It therefore can only enrich a work the RSS feed already created; it cannot discover a new TOR.
+  - Each site still needs its exact `deptId` (RSS) and, where used, `data.go.th` organization/resource ID confirmed before onboarding, since coverage and schema vary by organization.
+- **Open risk — no `deptId` master list:** there is no published master list mapping every government agency to its e-GP `deptId`. For the 7-site launch scope this is manageable (collect the 7 IDs manually); if scope later grows toward national coverage, building that list is real, unscoped effort — not part of the API integration work itself.
+- **Status vocabulary:** status labels in FR-N4.4 are a baseline derived from RSS announce types; map them to the exact values each site's feed exposes — they may not be identical across government sites.
+- **Legality/compliance:** accessing public procurement disclosure data via either source still requires respecting each source's rate limits and terms of use (NFR-N1.1); the RSS feed needs no registration, `data.go.th` should still be used with a registered API key even though public reads worked without one in testing.
 - **Existing features (Part B)** are inferred from the portal's stated scope; confirm against the live site.
 - **Scope changes (previous revision):** account migration (N2) and tag merging (N3) were dropped — there's no legacy system to migrate from, and duplicate tags are handled by retiring the redundant one rather than merging two into one. In their place, admins get ongoing CRUD over vendor accounts and tags directly. Source configuration (N1) is gated behind a **Super Admin** tier, separate from regular Admin, since it controls where the system pulls data from.
-- **Scope changes (this revision):** the system moved from single-source scraping (BMA only, via egp2) to **multi-site API polling** via `api.data.go.th`, covering 7 government sites at launch (BMA, Department of Highways, PEA, EGAT, สำนักงานปลัดกระทรวงสาธารณสุข, depa, DGA) with more addable later. The site list itself is now Super Admin-managed data, not hardcoded. **Government site** was added as a first-class tag facet (N3) and search filter (N4), sitting alongside agency/method/category/keyword — so a user can follow or filter by an entire organization, not just its sub-departments.
+- **Scope changes (previous revision):** the system moved from single-source scraping (BMA only, via egp2) to **multi-site API polling** via `data.go.th`, covering 7 government sites at launch (BMA, Department of Highways, PEA, EGAT, สำนักงานปลัดกระทรวงสาธารณสุข, depa, DGA) with more addable later. The site list itself is now Super Admin-managed data, not hardcoded. **Government site** was added as a first-class tag facet (N3) and search filter (N4), sitting alongside agency/method/category/keyword — so a user can follow or filter by an entire organization, not just its sub-departments.
+- **Scope changes (previous revision):** aligned the spec with the pitch deck and live testing — corrected the polling host from the earlier placeholder `api.data.go.th` to the actual working host, **`data.go.th`** (`api.data.go.th` is only the sign-up portal page, not a callable API); added the verified organization/dataset counts as evidence for the source-dependency assumption; and made **AI-assisted auto-tagging** (planned: Vertex AI) an explicit part of N3's ingestion tagging step (FR-N3.2, NFR-N3.7) rather than an unnamed "keyword extraction," matching its weight as a standalone cost/effort line item.
+- **Scope changes (this revision):** corrected an over-simplification from the previous revision — ingestion is **not** `data.go.th` alone. Added the **e-GP RSS feed** (`process3.gprocurement.go.th`) as the primary, live source of new/updated TOR data (N1: FR-N1.3, FR-N1.3a, FR-N1.11, NFR-N1.7), with `data.go.th` correctly repositioned as a secondary, batch source used only for post-award enrichment. Updated FR-N4.4 to reflect that status comes from the RSS announce-type signal, not from `data.go.th` (which has no status field at all). Added the RSS feed's mixed direct-PDF/HTML-page link behavior and the missing `deptId` master list as newly-identified, real open risks.
