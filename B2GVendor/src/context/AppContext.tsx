@@ -65,7 +65,7 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [role, setRole] = useState<UserRole>('user'); // default to registered user so notification bell is active, can switch to visitor or admin anytime
+  const [role, setRole] = useState<UserRole>('visitor');
   const [account, setAccount] = useState<AccountView | null>(null);
   const [lang, setLang] = useState<AppLang>('th');
   const [followedTagIds, setFollowedTagIds] = useState<string[]>(['tag-1', 'tag-4', 'tag-8']);
@@ -78,12 +78,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  // On load, check for a real session cookie from the backend. This is
-  // additive to the Demo Mode role switcher below: if nobody has logged in
-  // for real, /auth/me 401s and the demo default role is left untouched. If a
-  // real session cookie exists (e.g. after a real register/login, then a page
-  // refresh), the app reflects the real account instead of the demo default —
-  // this is what actually proves the session persists.
+  // On load, check for a real session cookie from the backend. If nobody is
+  // logged in, /auth/me 401s and the default 'visitor' role stands. If a
+  // real session cookie exists (e.g. after login/register, then a page
+  // refresh), the app reflects the real account instead.
   useEffect(() => {
     let cancelled = false;
 
@@ -93,7 +91,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (!cancelled) signIn(me);
       })
       .catch(() => {
-        // Not logged in for real. Leave the Demo Mode default role as-is.
+        // Not logged in. Stay in the default 'visitor' state.
       });
 
     return () => {

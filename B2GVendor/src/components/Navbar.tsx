@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
-import { useApp, UserRole } from '@/context/AppContext';
+import { useApp } from '@/context/AppContext';
 import {
   Bell,
   Globe,
@@ -21,7 +21,7 @@ import {
 
 export function Navbar() {
   const pathname = usePathname();
-  const { role, setRole, lang, setLang, unreadCount, signOut } = useApp();
+  const { role, lang, setLang, unreadCount, signOut } = useApp();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -29,37 +29,6 @@ export function Navbar() {
 
   return (
     <header className="sticky top-0 z-40 w-full bg-white/95 backdrop-blur-md border-b border-slate-200">
-      {/* Demo Mode Role Switcher Banner */}
-      <div className="bg-slate-50 text-slate-600 text-xs px-4 py-1.5 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100">
-        <div className="flex items-center gap-2">
-          <span className="font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
-            Demo Mode
-          </span>
-          <span className="hidden sm:inline text-slate-500">
-            {lang === 'en'
-              ? 'Login bypass active. Switch views to test role behaviors:'
-              : 'โหมดสาธิต (เปิดผ่านทุกหน้าได้ตามต้องการ) เลือกสลับสิทธิ์การใช้งาน:'}
-          </span>
-        </div>
-
-        <div className="flex items-center gap-1.5 font-medium">
-          <span className="text-slate-400 mr-1">{lang === 'en' ? 'Current Role:' : 'สิทธิ์ปัจจุบัน:'}</span>
-          {(['visitor', 'user', 'admin', 'superadmin'] as UserRole[]).map((r) => (
-            <button
-              key={r}
-              onClick={() => setRole(r)}
-              className={`px-2.5 py-0.5 rounded-md transition-all duration-150 text-xs font-semibold capitalize ${
-                role === r
-                  ? 'bg-emerald-600 text-white shadow-sm'
-                  : 'bg-white text-slate-500 border border-slate-200 hover:border-emerald-300 hover:text-emerald-700'
-              }`}
-            >
-              {r === 'visitor' ? (lang === 'en' ? 'Visitor' : 'ผู้เยี่ยมชม') : r === 'user' ? (lang === 'en' ? 'User' : 'สมาชิก (User)') : r === 'admin' ? (lang === 'en' ? 'Admin' : 'ผู้ดูแลระบบ') : (lang === 'en' ? 'Super Admin' : 'ผู้ดูแลระบบสูงสุด')}
-            </button>
-          ))}
-        </div>
-      </div>
-
       {/* Main Nav Bar */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
         {/* Brand Logo */}
@@ -107,7 +76,7 @@ export function Navbar() {
               {lang === 'en' ? 'Gov. Sites' : 'หน่วยงานภาครัฐ'}
             </Link>
 
-            {/* Quick Link to Admin Shell if in Demo/Admin */}
+            {/* Quick Link to Admin Shell */}
             <Link
               href="/admin"
               className={`px-3 py-2 rounded-xl transition-colors duration-150 flex items-center gap-1.5 ${
