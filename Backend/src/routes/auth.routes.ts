@@ -12,3 +12,4 @@ authRouter.post('/register', registerLimiter, validate(registerSchema), asyncHan
 authRouter.post('/login', loginLimiter, validate(loginSchema), asyncHandler(login));
 authRouter.post('/logout', requireAuth, asyncHandler(logout));
 authRouter.get('/me', requireAuth, asyncHandler(me));
+
