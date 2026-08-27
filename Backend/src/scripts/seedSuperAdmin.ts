@@ -30,13 +30,11 @@ async function main(): Promise<void> {
     const wasSuperAdmin = existing.role === 'superadmin';
     existing.role = 'superadmin';
     existing.status = 'active';
-    existing.emailVerified = true;
-    existing.emailVerifiedAt = existing.emailVerifiedAt ?? new Date();
     await existing.save();
 
     console.log(
       wasSuperAdmin
-        ? `Account ${email} is already a superadmin. Status and verification confirmed.`
+        ? `Account ${email} is already a superadmin. Status confirmed.`
         : `Promoted existing account ${email} to superadmin.`
     );
     console.log('Password was left unchanged. Use the forgot-password flow if it is unknown.');
@@ -47,9 +45,7 @@ async function main(): Promise<void> {
       name,
       type: 'individual',
       role: 'superadmin',
-      status: 'active',
-      emailVerified: true,
-      emailVerifiedAt: new Date()
+      status: 'active'
     });
 
     console.log(`Created superadmin ${email}.`);

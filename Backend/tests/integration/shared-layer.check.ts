@@ -33,7 +33,6 @@ async function makeAccount(over: Record<string, unknown> = {}) {
     email: `u${Math.random().toString(36).slice(2)}@x.co.th`,
     passwordHash: 'SecurePass123',
     name: 'Somchai Jaidee',
-    emailVerified: true,
     ...over
   });
 }
@@ -86,7 +85,7 @@ async function main(): Promise<void> {
       headers: raw ? { Cookie: `${SESSION_COOKIE_NAME}=${raw}` } : {}
     });
     const body = (await res.json().catch(() => null)) as
-      | { success: boolean; data?: Record<string, unknown>; error?: { code: string } }
+      | { success: boolean; data?: Record<string, unknown>; error?: { code: string; fields?: Record<string, string> } }
       | null;
     return { status: res.status, body };
   }
@@ -121,9 +120,9 @@ async function main(): Promise<void> {
   res = await call('/me', await makeSession(suspended._id as mongoose.Types.ObjectId));
   record(res.status === 403 && res.body?.error?.code === 'ACCOUNT_SUSPENDED', 'suspended account is ejected mid-session');
 
-  const unverified = await makeAccount({ emailVerified: false });
-  res = await call('/me', await makeSession(unverified._id as mongoose.Types.ObjectId));
-  record(res.status === 403 && res.body?.error?.code === 'EMAIL_NOT_VERIFIED', 'unverified account is blocked (Q5)');
+  const freshAccount = await makeAccount();
+  res = await call('/me', await makeSession(freshAccount._id as mongoose.Types.ObjectId));
+  record(res.status === 200, 'a brand-new account can authenticate immediately (Q5: no verification gate)');
 
   res = await call('/me', 'forged-cookie-value');
   record(res.status === 401, 'forged cookie is rejected');
@@ -154,20 +153,38 @@ async function main(): Promise<void> {
     record((err as { code?: number }).code === 11000, 'duplicate email is rejected by the unique index');
   }
 
-  const issued = issueOneTimeToken('password_reset');
-  await Token.create({
-    accountId: user._id,
-    tokenHash: issued.tokenHash,
-    purpose: 'password_reset',
-    expiresAt: issued.expiresAt
-  });
-  const byHash = await Token.findOne({ tokenHash: hashOneTimeToken(issued.raw), purpose: 'password_reset' });
-  record(!!byHash && !byHash.usedAt, 'one-time token is found by the hash of the emailed value');
-  const wrongPurpose = await Token.findOne({
-    tokenHash: hashOneTimeToken(issued.raw),
-    purpose: 'email_verification'
-  });
-  record(wrongPurpose === null, 'a reset token cannot be redeemed as a verification token');
+  // Q3: account type is frozen after registration.
+  const switcher = await makeAccount({ type: 'individual' });
+  switcher.type = 'business';
+  switcher.businessProfile = { companyName: 'Somchai Co., Ltd.', taxId: '0105558123456' };
+  try {
+    await switcher.save();
+    record(false, 'switching account type after registration is rejected');
+  } catch (err) {
+    const validationError = err as mongoose.Error.ValidationError;
+    record(
+      validationError instanceof mongoose.Error.ValidationError && !!validationError.errors.type,
+      'switching account type after registration is rejected',
+      String(validationError?.errors?.type?.message)
+    );
+  }
+  const reloaded = await Account.findById(switcher._id);
+  record(reloaded?.type === 'individual', 'the rejected type change did not persist');
+
+  // A business account with no businessProfile should 400 with a field error,
+  // not 500 -- this was previously a plain Error that error.middleware could
+  // not recognise as a ValidationError.
+  try {
+    await Account.create({ email: 'no-profile@x.co.th', passwordHash: 'x', name: 'n', type: 'business' });
+    record(false, 'a business account without a profile is rejected as a validation error');
+  } catch (err) {
+    const validationError = err as mongoose.Error.ValidationError;
+    record(
+      validationError instanceof mongoose.Error.ValidationError && !!validationError.errors.businessProfile,
+      'a business account without a profile is rejected as a validation error',
+      String(validationError?.errors?.businessProfile?.message)
+    );
+  }
 
   const uaChrome = parseUserAgent(
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
@@ -197,51 +214,51 @@ async function main(): Promise<void> {
   record(views.every(v => !v.ipAddress || v.ipAddress.includes('xx')), 'no full IP address leaves the service');
   record(views.some(v => v.browser === 'Safari' && v.os === 'macOS'), 'session stores the parsed browser and os');
 
+  // Q4: DELETE /account/sessions ("log out other devices") still uses
+  // revokeOtherSessions -- distinct from change-password below, which now
+  // revokes everything including the current session.
   const revokedOthers = await revokeOtherSessions(sessionUserId, second.session._id as mongoose.Types.ObjectId);
   record(revokedOthers === 2, 'revokeOtherSessions revokes all but the current one', String(revokedOthers));
   record((await call('/me', second.rawToken)).status === 200, 'the kept session still works after revokeOtherSessions');
   record((await call('/me', first.rawToken)).status === 401, 'a revoked sibling session is dead');
   record((await call('/me', third.rawToken)).status === 401, 'the other revoked sibling is dead too');
 
+  // Q4 decided: change-password (and reset-password) revoke ALL sessions,
+  // including the one making the request. The frontend must treat this as a
+  // forced logout and redirect to /login, not stay on the settings page.
   const revokedAll = await revokeAllSessions(sessionUserId);
-  record(revokedAll === 1, 'revokeAllSessions revokes what is left', String(revokedAll));
-  record((await call('/me', second.rawToken)).status === 401, 'no session survives revokeAllSessions');
+  record(revokedAll === 1, 'revokeAllSessions revokes what is left, including the current session', String(revokedAll));
+  record((await call('/me', second.rawToken)).status === 401, 'no session survives revokeAllSessions, not even the current one');
   record((await listActiveSessions(sessionUserId)).length === 0, 'listActiveSessions is empty once everything is revoked');
 
   const tokenUser = await makeAccount();
   const tokenUserId = tokenUser._id as mongoose.Types.ObjectId;
-  const verifyToken = await issueToken(tokenUserId, 'email_verification');
-  const consumedId = await consumeToken(verifyToken, 'email_verification');
+
+  const firstReset = await issueToken(tokenUserId, 'password_reset');
+  const consumedId = await consumeToken(firstReset, 'password_reset');
   record(String(consumedId) === String(tokenUserId), 'consumeToken returns the owning account');
 
   try {
-    await consumeToken(verifyToken, 'email_verification');
+    await consumeToken(firstReset, 'password_reset');
     record(false, 'a consumed token cannot be replayed');
   } catch (err) {
     record((err as { code?: string }).code === 'TOKEN_INVALID', 'a consumed token cannot be replayed');
   }
 
-  const resetToken = await issueToken(tokenUserId, 'password_reset');
-  try {
-    await consumeToken(resetToken, 'email_verification');
-    record(false, 'a reset token is refused by the verification flow');
-  } catch (err) {
-    record((err as { code?: string }).code === 'TOKEN_INVALID', 'a reset token is refused by the verification flow');
-  }
-
   const secondReset = await issueToken(tokenUserId, 'password_reset');
+  const thirdReset = await issueToken(tokenUserId, 'password_reset');
   try {
-    await consumeToken(resetToken, 'password_reset');
+    await consumeToken(secondReset, 'password_reset');
     record(false, 'issuing a new reset token invalidates the previous one');
   } catch (err) {
     record((err as { code?: string }).code === 'TOKEN_INVALID', 'issuing a new reset token invalidates the previous one');
   }
-  record(String(await consumeToken(secondReset, 'password_reset')) === String(tokenUserId), 'the newest reset token still works');
+  record(String(await consumeToken(thirdReset, 'password_reset')) === String(tokenUserId), 'the newest reset token still works');
 
-  const expiredToken = await issueToken(tokenUserId, 'email_verification');
-  await Token.updateOne({ accountId: tokenUserId, purpose: 'email_verification' }, { expiresAt: new Date(Date.now() - 1000) });
+  const expiredToken = await issueToken(tokenUserId, 'password_reset');
+  await Token.updateOne({ accountId: tokenUserId, purpose: 'password_reset' }, { expiresAt: new Date(Date.now() - 1000) });
   try {
-    await consumeToken(expiredToken, 'email_verification');
+    await consumeToken(expiredToken, 'password_reset');
     record(false, 'an expired token is refused');
   } catch (err) {
     record((err as { code?: string }).code === 'TOKEN_INVALID', 'an expired token is refused');

@@ -35,9 +35,3 @@ export const passwordResetLimiter = createLimiter(
   5,
   'Too many password reset requests. Please try again later.'
 );
-
-export const verificationEmailLimiter = createLimiter(
-  60 * MINUTE,
-  5,
-  'Too many verification emails requested. Please try again later.'
-);

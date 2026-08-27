@@ -55,26 +55,6 @@ function layout(heading: string, body: string, buttonLabel: string, url: string)
 </html>`;
 }
 
-export async function sendVerificationEmail(
-  to: string,
-  name: string,
-  rawToken: string
-): Promise<void> {
-  const url = `${env.APP_URL}/verify-email/${rawToken}`;
-
-  await send({
-    to,
-    subject: 'ยืนยันอีเมลของคุณ | Verify your B2G Vendor email',
-    text: `สวัสดีคุณ ${name}\n\nกรุณายืนยันอีเมลของคุณภายใน 24 ชั่วโมง:\n${url}\n\nHi ${name}, please verify your email within 24 hours using the link above.`,
-    html: layout(
-      'ยืนยันอีเมลของคุณ',
-      `สวัสดีคุณ ${name} — กรุณายืนยันอีเมลเพื่อเริ่มใช้งานบัญชี B2G Vendor ลิงก์นี้มีอายุ 24 ชั่วโมง`,
-      'ยืนยันอีเมล',
-      url
-    )
-  });
-}
-
 export async function sendPasswordResetEmail(
   to: string,
   name: string,

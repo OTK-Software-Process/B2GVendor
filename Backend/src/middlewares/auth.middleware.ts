@@ -25,9 +25,6 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
     if (account.status === 'suspended') {
       throw AppError.accountSuspended();
     }
-    if (!account.emailVerified) {
-      throw AppError.emailNotVerified();
-    }
 
     req.account = account;
     req.authSession = session;

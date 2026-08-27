@@ -14,8 +14,6 @@ export interface IBusinessProfile {
 export interface IAccount extends Document {
   email: string;
   passwordHash: string;
-  emailVerified: boolean;
-  emailVerifiedAt?: Date;
 
   name: string;
   phone?: string;
@@ -75,8 +73,6 @@ const AccountSchema = new Schema<IAccount>(
       match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'Invalid email address'],
     },
     passwordHash: { type: String, required: true, select: false },
-    emailVerified: { type: Boolean, default: false },
-    emailVerifiedAt: { type: Date },
 
     name: { type: String, required: true, trim: true, maxlength: 150 },
     phone: {
@@ -131,10 +127,13 @@ AccountSchema.index({ createdAt: -1 });
 
 AccountSchema.pre('validate', function (next) {
   if (this.type === 'business' && !this.businessProfile) {
-    return next(new Error('A business account requires companyName and taxId'));
+    this.invalidate('businessProfile', 'A business account requires companyName and taxId');
   }
   if (this.type === 'individual' && this.businessProfile) {
     this.businessProfile = undefined;
+  }
+  if (!this.isNew && this.isModified('type')) {
+    this.invalidate('type', 'Account type cannot be changed after registration');
   }
   next();
 });

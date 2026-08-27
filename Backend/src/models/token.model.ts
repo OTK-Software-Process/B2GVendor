@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document, Model, Types } from 'mongoose';
 import { generateRawToken, hashToken } from '../utils/crypto';
 
-export type TokenPurpose = 'email_verification' | 'password_reset';
+export type TokenPurpose = 'password_reset';
 
 export interface IToken extends Document {
   accountId: Types.ObjectId;
@@ -15,7 +15,6 @@ export interface IToken extends Document {
 }
 
 export const TOKEN_TTL_MS: Record<TokenPurpose, number> = {
-  email_verification: 24 * 60 * 60 * 1000,
   password_reset: 60 * 60 * 1000,
 };
 
@@ -35,7 +34,7 @@ const TokenSchema = new Schema<IToken>(
     },
     purpose: {
       type: String,
-      enum: ['email_verification', 'password_reset'],
+      enum: ['password_reset'],
       required: true,
       index: true,
     },
