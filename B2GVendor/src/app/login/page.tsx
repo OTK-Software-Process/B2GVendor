@@ -4,19 +4,39 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { PublicShell } from '@/components/PublicShell';
-import { useApp } from '@/context/AppContext';
-import { Lock, Mail, ArrowRight, ShieldCheck } from 'lucide-react';
+import { useApp, AccountView } from '@/context/AppContext';
+import { api, ApiError } from '@/lib/api';
+import { Lock, Mail, ArrowRight } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
-  const { lang, setRole } = useApp();
-  const [email, setEmail] = useState('user@company.co.th');
-  const [password, setPassword] = useState('••••••••');
+  const { lang, signIn } = useApp();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setRole('user');
-    router.push('/account');
+    setFormError(null);
+    setFieldErrors({});
+    setSubmitting(true);
+
+    try {
+      const account = await api.post<AccountView>('/auth/login', { email, password });
+      signIn(account);
+      router.push('/account');
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setFormError(err.message);
+        setFieldErrors(err.fields ?? {});
+      } else {
+        setFormError(lang === 'en' ? 'Something went wrong. Please try again.' : 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง');
+      }
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -35,6 +55,12 @@ export default function LoginPage() {
             </p>
           </div>
 
+          {formError && (
+            <div className="text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-4 py-3">
+              {formError}
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">
@@ -50,6 +76,7 @@ export default function LoginPage() {
                   required
                 />
               </div>
+              {fieldErrors.email && <p className="mt-1 text-xs text-rose-600">{fieldErrors.email}</p>}
             </div>
 
             <div>
@@ -71,13 +98,19 @@ export default function LoginPage() {
                   required
                 />
               </div>
+              {fieldErrors.password && <p className="mt-1 text-xs text-rose-600">{fieldErrors.password}</p>}
             </div>
 
             <button
               type="submit"
-              className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition-colors flex items-center justify-center gap-2 shadow-xs"
+              disabled={submitting}
+              className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold text-sm transition-colors flex items-center justify-center gap-2 shadow-xs"
             >
-              <span>{lang === 'en' ? 'Sign In' : 'เข้าสู่ระบบ'}</span>
+              <span>
+                {submitting
+                  ? (lang === 'en' ? 'Signing in…' : 'กำลังเข้าสู่ระบบ…')
+                  : (lang === 'en' ? 'Sign In' : 'เข้าสู่ระบบ')}
+              </span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </form>

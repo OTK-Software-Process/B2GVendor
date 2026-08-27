@@ -1,6 +1,7 @@
 'use client';
 
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { api } from '@/lib/api';
 import {
   WorkItem,
   TagItem,
@@ -17,9 +18,28 @@ import {
 export type UserRole = 'visitor' | 'user' | 'admin' | 'superadmin';
 export type AppLang = 'th' | 'en';
 
+export interface AccountBusinessProfile {
+  companyName: string;
+  taxId: string;
+}
+
+export interface AccountView {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  type: 'individual' | 'business';
+  businessProfile?: AccountBusinessProfile;
+  status: 'active' | 'suspended';
+  role: 'user' | 'admin' | 'superadmin';
+}
+
 interface AppContextType {
   role: UserRole;
   setRole: (role: UserRole) => void;
+  account: AccountView | null;
+  signIn: (account: AccountView) => void;
+  signOut: () => Promise<void>;
   lang: AppLang;
   setLang: (lang: AppLang) => void;
   followedTagIds: string[];
@@ -46,6 +66,7 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [role, setRole] = useState<UserRole>('user'); // default to registered user so notification bell is active, can switch to visitor or admin anytime
+  const [account, setAccount] = useState<AccountView | null>(null);
   const [lang, setLang] = useState<AppLang>('th');
   const [followedTagIds, setFollowedTagIds] = useState<string[]>(['tag-1', 'tag-4', 'tag-8']);
   const [notifications, setNotifications] = useState<NotificationItem[]>(MOCK_NOTIFICATIONS);
@@ -56,6 +77,46 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [govSites, setGovSites] = useState<GovSiteItem[]>(MOCK_GOV_SITES);
 
   const unreadCount = notifications.filter(n => !n.read).length;
+
+  // On load, check for a real session cookie from the backend. This is
+  // additive to the Demo Mode role switcher below: if nobody has logged in
+  // for real, /auth/me 401s and the demo default role is left untouched. If a
+  // real session cookie exists (e.g. after a real register/login, then a page
+  // refresh), the app reflects the real account instead of the demo default —
+  // this is what actually proves the session persists.
+  useEffect(() => {
+    let cancelled = false;
+
+    api
+      .get<AccountView>('/auth/me')
+      .then(me => {
+        if (!cancelled) signIn(me);
+      })
+      .catch(() => {
+        // Not logged in for real. Leave the Demo Mode default role as-is.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const signIn = (nextAccount: AccountView) => {
+    setAccount(nextAccount);
+    setRole(nextAccount.role);
+  };
+
+  const signOut = async () => {
+    try {
+      await api.post('/auth/logout');
+    } catch {
+      // Best-effort: even if the network call fails, clear local state so the
+      // UI does not claim to be logged in.
+    }
+    setAccount(null);
+    setRole('visitor');
+  };
 
   const toggleFollowTag = (tagId: string) => {
     setFollowedTagIds(prev =>
@@ -161,6 +222,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       value={{
         role,
         setRole,
+        account,
+        signIn,
+        signOut,
         lang,
         setLang,
         followedTagIds,
