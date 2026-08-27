@@ -1,24 +1,59 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { PublicShell } from '@/components/PublicShell';
 import { useApp } from '@/context/AppContext';
-import { User, Building, Lock, ShieldCheck, Bookmark, Bell, SlidersHorizontal, Save } from 'lucide-react';
+import { api } from '@/lib/api';
+import type { AccountView } from '@/context/AppContext';
+import { User, Building, Lock, ShieldCheck, Save } from 'lucide-react';
 
 export default function AccountProfilePage() {
-  const { lang } = useApp();
-  const [name, setName] = useState('สมชาย ใจดี');
-  const [email, setEmail] = useState('user@company.co.th');
-  const [phone, setPhone] = useState('081-234-5678');
-  const [taxId, setTaxId] = useState('0105558123456');
-  const [companyName, setCompanyName] = useState('บริษัท บีเอ็มเอ ก่อสร้าง จำกัด');
+  const { lang, account, signIn } = useApp();
+  const [profile, setProfile] = useState<AccountView | null>(account);
+  const [name, setName] = useState(account?.name ?? '');
+  const [email, setEmail] = useState(account?.email ?? '');
+  const [phone, setPhone] = useState(account?.phone ?? '');
+  const [taxId, setTaxId] = useState(account?.businessProfile?.taxId ?? '');
+  const [companyName, setCompanyName] = useState(account?.businessProfile?.companyName ?? '');
   const [savedNotice, setSavedNotice] = useState(false);
+  const [errorNotice, setErrorNotice] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
-  const handleSave = (e: React.FormEvent) => {
+  useEffect(() => {
+    api.get<AccountView>('/api/v1/accounts/profile')
+      .then((loadedProfile) => {
+        setProfile(loadedProfile);
+        setName(loadedProfile.name);
+        setEmail(loadedProfile.email);
+        setPhone(loadedProfile.phone ?? '');
+        setTaxId(loadedProfile.businessProfile?.taxId ?? '');
+        setCompanyName(loadedProfile.businessProfile?.companyName ?? '');
+        signIn(loadedProfile);
+      })
+      .catch((error: Error) => setErrorNotice(error.message));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSavedNotice(true);
-    setTimeout(() => setSavedNotice(false), 3000);
+    setErrorNotice('');
+    setIsSaving(true);
+    try {
+      const updatedProfile = await api.patch<AccountView>('/api/v1/accounts/profile', {
+        name,
+        phone: phone || undefined,
+        ...(profile?.type === 'business' ? { businessProfile: { companyName, taxId } } : {}),
+      });
+      setProfile(updatedProfile);
+      signIn(updatedProfile);
+      setSavedNotice(true);
+      setTimeout(() => setSavedNotice(false), 3000);
+    } catch (error) {
+      setErrorNotice(error instanceof Error ? error.message : 'Unable to save profile.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -55,6 +90,12 @@ export default function AccountProfilePage() {
           </div>
         )}
 
+        {errorNotice && (
+          <div className="bg-red-50 text-red-800 border border-red-200 p-4 rounded-2xl text-xs font-bold">
+            {errorNotice}
+          </div>
+        )}
+
         <form onSubmit={handleSave} className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Main Profile Info */}
           <div className="lg:col-span-2 space-y-6">
@@ -85,7 +126,7 @@ export default function AccountProfilePage() {
                   <input
                     type="email"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    readOnly
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-900 outline-hidden"
                   />
                 </div>
@@ -105,6 +146,7 @@ export default function AccountProfilePage() {
             </div>
 
             {/* Optional Business Profile Section */}
+            {profile?.type === 'business' && (
             <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs space-y-4">
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
@@ -142,14 +184,16 @@ export default function AccountProfilePage() {
                 </div>
               </div>
             </div>
+            )}
 
             <div className="flex justify-end">
               <button
                 type="submit"
+                disabled={isSaving}
                 className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition-colors shadow-xs"
               >
                 <Save className="w-4 h-4" />
-                <span>{lang === 'en' ? 'Save Changes' : 'บันทึกข้อมูล'}</span>
+                <span>{isSaving ? (lang === 'en' ? 'Saving...' : 'กำลังบันทึก...') : (lang === 'en' ? 'Save Changes' : 'บันทึกข้อมูล')}</span>
               </button>
             </div>
           </div>
