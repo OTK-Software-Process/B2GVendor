@@ -9,6 +9,7 @@
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
     "check:shared": "tsx tests/integration/shared-layer.check.ts",
+    "check:auth": "tsx tests/integration/auth-flow.check.ts",
     "seed:superadmin": "tsx src/scripts/seedSuperAdmin.ts"
   },
   "dependencies": {
