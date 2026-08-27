@@ -26,6 +26,7 @@ export function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const isAdminPath = pathname.startsWith('/admin');
+  const isAdminRole = role === 'admin' || role === 'superadmin';
 
   return (
     <header className="sticky top-0 z-40 w-full bg-white/95 backdrop-blur-md border-b border-slate-200">
@@ -77,6 +78,7 @@ export function Navbar() {
             </Link>
 
             {/* Quick Link to Admin Shell */}
+            {isAdminRole && (
             <Link
               href="/admin"
               className={`px-3 py-2 rounded-xl transition-colors duration-150 flex items-center gap-1.5 ${
@@ -86,6 +88,7 @@ export function Navbar() {
               <ShieldAlert className="w-4 h-4" />
               <span>{lang === 'en' ? 'Admin Control' : 'ระบบผู้ดูแลระบบ'}</span>
             </Link>
+            )}
           </nav>
         </div>
 
@@ -255,6 +258,7 @@ export function Navbar() {
             <Building2 className="w-4 h-4" />
             <span>{lang === 'en' ? 'Gov. Sites' : 'หน่วยงานภาครัฐ'}</span>
           </Link>
+          {isAdminRole && (
           <Link
             href="/admin"
             onClick={() => setMobileMenuOpen(false)}
@@ -263,6 +267,7 @@ export function Navbar() {
             <ShieldAlert className="w-4 h-4" />
             <span>{lang === 'en' ? 'Admin Console' : 'ระบบผู้ดูแลระบบ'}</span>
           </Link>
+          )}
 
           {role === 'visitor' && (
             <div className="pt-3 flex flex-col gap-2">

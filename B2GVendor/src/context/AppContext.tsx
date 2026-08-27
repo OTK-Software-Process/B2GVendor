@@ -37,6 +37,7 @@ export interface AccountView {
 interface AppContextType {
   role: UserRole;
   setRole: (role: UserRole) => void;
+  authChecked: boolean;
   account: AccountView | null;
   signIn: (account: AccountView) => void;
   signOut: () => Promise<void>;
@@ -67,6 +68,7 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [role, setRole] = useState<UserRole>('visitor');
   const [account, setAccount] = useState<AccountView | null>(null);
+  const [authChecked, setAuthChecked] = useState<boolean>(false);
   const [lang, setLang] = useState<AppLang>('th');
   const [followedTagIds, setFollowedTagIds] = useState<string[]>(['tag-1', 'tag-4', 'tag-8']);
   const [notifications, setNotifications] = useState<NotificationItem[]>(MOCK_NOTIFICATIONS);
@@ -92,6 +94,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       })
       .catch(() => {
         // Not logged in. Stay in the default 'visitor' state.
+      })
+      .finally(() => {
+        if (!cancelled) setAuthChecked(true);
       });
 
     return () => {
@@ -220,6 +225,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       value={{
         role,
         setRole,
+        authChecked,
         account,
         signIn,
         signOut,
