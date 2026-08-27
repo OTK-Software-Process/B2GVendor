@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { PublicShell } from '@/components/PublicShell';
 import { useApp } from '@/context/AppContext';
 import { api } from '@/lib/api';
@@ -9,7 +10,9 @@ import type { AccountView } from '@/context/AppContext';
 import { User, Building, Lock, ShieldCheck, Save } from 'lucide-react';
 
 export default function AccountProfilePage() {
-  const { lang, account, signIn } = useApp();
+  const router = useRouter();
+  const { lang, account, signIn, role, authChecked } = useApp();
+  const isLoggedIn = role !== 'visitor';
   const [profile, setProfile] = useState<AccountView | null>(account);
   const [name, setName] = useState(account?.name ?? '');
   const [email, setEmail] = useState(account?.email ?? '');
@@ -21,7 +24,7 @@ export default function AccountProfilePage() {
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-    api.get<AccountView>('/api/v1/accounts/profile')
+    api.get<AccountView>('/account/profile')
       .then((loadedProfile) => {
         setProfile(loadedProfile);
         setName(loadedProfile.name);
@@ -35,12 +38,18 @@ export default function AccountProfilePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (authChecked && !isLoggedIn) {
+      router.replace('/login');
+    }
+  }, [authChecked, isLoggedIn, router]);
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorNotice('');
     setIsSaving(true);
     try {
-      const updatedProfile = await api.patch<AccountView>('/api/v1/accounts/profile', {
+      const updatedProfile = await api.patch<AccountView>('/account/profile', {
         name,
         phone: phone || undefined,
         ...(profile?.type === 'business' ? { businessProfile: { companyName, taxId } } : {}),
@@ -55,6 +64,16 @@ export default function AccountProfilePage() {
       setIsSaving(false);
     }
   };
+
+  if (!authChecked || !isLoggedIn) {
+    return (
+      <PublicShell>
+        <div className="py-16 text-center text-sm text-slate-500">
+          {lang === 'en' ? 'Checking access…' : 'กำลังตรวจสอบสิทธิ์การเข้าใช้งาน…'}
+        </div>
+      </PublicShell>
+    );
+  }
 
   return (
     <PublicShell>

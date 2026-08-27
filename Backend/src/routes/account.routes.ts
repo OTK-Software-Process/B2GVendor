@@ -29,12 +29,12 @@ export const accountRouter = Router();
 
 accountRouter.use(requireAuth);
 
-accountRouter.get('/api/v1/accounts/profile', accountController.getProfile);
+accountRouter.get('/profile', accountController.getProfile);
 
-accountRouter.patch('/api/v1/accounts/profile', validate(updateProfileSchema), accountController.updateProfile);
+accountRouter.patch('/profile', validate(updateProfileSchema), accountController.updateProfile);
 
 accountRouter.post(
-	'/api/v1/accounts/change-password',
+	'/change-password',
 	validate(changePasswordSchema),
 	accountController.changePassword,
 );
