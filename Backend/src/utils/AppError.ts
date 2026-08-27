@@ -7,6 +7,7 @@ export type ErrorCode =
   | 'NOT_AUTHENTICATED'
   | 'FORBIDDEN'
   | 'TOKEN_INVALID'
+  | 'BAD_REQUEST'
   | 'RATE_LIMITED'
   | 'NOT_FOUND'
   | 'INTERNAL_ERROR';
@@ -63,5 +64,13 @@ export class AppError extends Error {
 
   static notFound(message = 'Not found.'): AppError {
     return new AppError(404, 'NOT_FOUND', message);
+  }
+
+  static badRequest(message = 'Bad request.'): AppError {
+    return new AppError(400, 'BAD_REQUEST', message);
+  }
+
+  static internalError(message = 'An unexpected error occurred.'): AppError {
+    return new AppError(500, 'INTERNAL_ERROR', message);
   }
 }
