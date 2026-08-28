@@ -4,7 +4,7 @@ import * as accountController from '../controllers/account.controller';
 import { validate } from '../middlewares/validate.middleware';
 
 const forgotPasswordSchema = z.object({
-	email: z.string().trim().email(),
+	email: z.string().trim().toLowerCase().regex(/^\S+$/, 'Email cannot contain spaces').email(),
 }).strict();
 
 const resetPasswordSchema = z.object({

@@ -9,6 +9,14 @@ import { api } from '@/lib/api';
 import type { AccountView } from '@/context/AppContext';
 import { User, Building, Lock, ShieldCheck, Save } from 'lucide-react';
 
+function sanitizeName(raw: string): string {
+  const noBadChars = raw.replace(/[^\p{L}\p{M}\s'-]/gu, '');
+  const normalizedSpaces = noBadChars.replace(/\s/g, ' ');
+  const firstSpace = normalizedSpaces.indexOf(' ');
+  if (firstSpace === -1) return normalizedSpaces;
+  return normalizedSpaces.slice(0, firstSpace + 1) + normalizedSpaces.slice(firstSpace + 1).replace(/ /g, '');
+}
+
 export default function AccountProfilePage() {
   const router = useRouter();
   const { lang, account, signIn, role, authChecked } = useApp();
@@ -35,7 +43,7 @@ export default function AccountProfilePage() {
         signIn(loadedProfile);
       })
       .catch((error: Error) => setErrorNotice(error.message));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, []);
 
   useEffect(() => {
@@ -133,7 +141,8 @@ export default function AccountProfilePage() {
                   <input
                     type="text"
                     value={name}
-                    onChange={(e) => setName(e.target.value)}
+                    onChange={(e) => setName(sanitizeName(e.target.value))}
+                    onBlur={() => setName((v) => v.trim())}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-900 outline-hidden"
                   />
                 </div>
@@ -185,7 +194,7 @@ export default function AccountProfilePage() {
                   <input
                     type="text"
                     value={taxId}
-                    onChange={(e) => setTaxId(e.target.value)}
+                    onChange={(e) => setTaxId(e.target.value.replace(/\D/g, '').slice(0, 13))}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-mono text-slate-900 outline-hidden"
                   />
                 </div>

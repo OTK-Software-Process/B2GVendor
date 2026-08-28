@@ -8,6 +8,14 @@ import { useApp, AccountView } from '@/context/AppContext';
 import { api, ApiError } from '@/lib/api';
 import { Building, ArrowRight } from 'lucide-react';
 
+function sanitizeName(raw: string): string {
+  const noBadChars = raw.replace(/[^\p{L}\p{M}\s'-]/gu, '');
+  const normalizedSpaces = noBadChars.replace(/\s/g, ' ');
+  const firstSpace = normalizedSpaces.indexOf(' ');
+  if (firstSpace === -1) return normalizedSpaces;
+  return normalizedSpaces.slice(0, firstSpace + 1) + normalizedSpaces.slice(firstSpace + 1).replace(/ /g, '');
+}
+
 export default function RegisterPage() {
   const router = useRouter();
   const { lang, signIn } = useApp();
@@ -32,12 +40,12 @@ export default function RegisterPage() {
 
     try {
       const account = await api.post<AccountView>('/auth/register', {
-        name,
-        email,
+        name: name.trim(),
+        email: email.trim(),
         password,
         confirmPassword,
         type: includeBusinessProfile ? 'business' : 'individual',
-        ...(includeBusinessProfile ? { businessProfile: { companyName, taxId } } : {})
+        ...(includeBusinessProfile ? { businessProfile: { companyName: companyName.trim(), taxId: taxId.trim() } } : {})
       });
       signIn(account);
       router.push('/account');
@@ -88,7 +96,8 @@ export default function RegisterPage() {
                     type="text"
                     required
                     value={name}
-                    onChange={(e) => setName(e.target.value)}
+                    onChange={(e) => setName(sanitizeName(e.target.value))}
+                    onBlur={() => setName((v) => v.trim())}
                     placeholder="สมชาย ใจดี"
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-900 outline-hidden focus:ring-2 focus:ring-emerald-500"
                   />
@@ -103,7 +112,7 @@ export default function RegisterPage() {
                     type="email"
                     required
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    onChange={(e) => setEmail(e.target.value.replace(/\s/g, ''))}
                     placeholder="user@example.co.th"
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-900 outline-hidden focus:ring-2 focus:ring-emerald-500"
                   />
@@ -179,7 +188,8 @@ export default function RegisterPage() {
                     <input
                       type="text"
                       value={taxId}
-                      onChange={(e) => setTaxId(e.target.value)}
+                      onChange={(e) => setTaxId(e.target.value.replace(/\D/g, '').slice(0, 13))}
+                      onBlur={() => setTaxId((v) => v.trim())}
                       placeholder="0105558123456"
                       className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-900 outline-hidden focus:ring-2 focus:ring-emerald-500"
                     />
@@ -196,6 +206,7 @@ export default function RegisterPage() {
                       type="text"
                       value={companyName}
                       onChange={(e) => setCompanyName(e.target.value)}
+                      onBlur={() => setCompanyName((v) => v.trim())}
                       placeholder="บริษัท บีเอ็มเอ ก่อสร้าง จำกัด"
                       className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-900 outline-hidden focus:ring-2 focus:ring-emerald-500"
                     />
