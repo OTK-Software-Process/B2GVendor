@@ -78,7 +78,7 @@ function FilterBarContent() {
     : (lang === 'en' ? 'Budget' : 'งบประมาณ');
 
   const pillClass = (active: boolean) =>
-    `inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border text-xs sm:text-sm font-semibold whitespace-nowrap transition-all duration-150 ${
+    `inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border text-xs sm:text-sm font-semibold whitespace-nowrap transition-all duration-150 cursor-pointer ${
       active
         ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
         : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:text-emerald-700'
@@ -110,7 +110,7 @@ function FilterBarContent() {
                 <button
                   key={opt.value}
                   onClick={() => { updateParam('status', currentStatus === opt.value ? '' : opt.value); setOpenKey(null); }}
-                  className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                  className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer ${
                     currentStatus === opt.value ? 'bg-emerald-50 text-emerald-700 font-semibold' : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
@@ -144,7 +144,7 @@ function FilterBarContent() {
                     router.push(`/search?${params.toString()}`);
                     setOpenKey(null);
                   }}
-                  className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center justify-between gap-2 transition-colors ${
+                  className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center justify-between gap-2 transition-colors cursor-pointer ${
                     currentSite === site.id ? 'bg-emerald-50 text-emerald-700 font-semibold' : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
@@ -168,7 +168,7 @@ function FilterBarContent() {
                 <button
                   key={a.id}
                   onClick={() => { updateParam('agency', currentAgency === a.id ? '' : a.id); setOpenKey(null); }}
-                  className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                  className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer ${
                     currentAgency === a.id ? 'bg-emerald-50 text-emerald-700 font-semibold' : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
@@ -191,7 +191,7 @@ function FilterBarContent() {
                 <button
                   key={tag.id}
                   onClick={() => { updateParam('category', currentCategory === tag.name ? '' : tag.name); setOpenKey(null); }}
-                  className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center justify-between gap-2 transition-colors ${
+                  className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center justify-between gap-2 transition-colors cursor-pointer ${
                     currentCategory === tag.name ? 'bg-emerald-50 text-emerald-700 font-semibold' : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
@@ -215,7 +215,7 @@ function FilterBarContent() {
                 <button
                   key={tag.id}
                   onClick={() => { updateParam('method', currentMethod === tag.name ? '' : tag.name); setOpenKey(null); }}
-                  className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                  className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer ${
                     currentMethod === tag.name ? 'bg-emerald-50 text-emerald-700 font-semibold' : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
@@ -238,7 +238,7 @@ function FilterBarContent() {
                 <button
                   key={opt.value}
                   onClick={() => { updateParam('budgetMax', currentBudgetMax === opt.value ? '' : opt.value); setOpenKey(null); }}
-                  className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                  className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer ${
                     currentBudgetMax === opt.value ? 'bg-emerald-50 text-emerald-700 font-semibold' : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
@@ -252,7 +252,7 @@ function FilterBarContent() {
         {hasActiveFilters && (
           <button
             onClick={clearAllFilters}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold text-rose-600 hover:bg-rose-50 transition-colors duration-150"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold text-rose-600 hover:bg-rose-50 transition-colors duration-150 cursor-pointer"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             <span>{lang === 'en' ? `Clear (${activeCount})` : `ล้างตัวกรอง (${activeCount})`}</span>

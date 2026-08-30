@@ -18,7 +18,7 @@ export function ViewToggle({ view, onChange }: ViewToggleProps) {
         onClick={() => onChange('row')}
         title={lang === 'en' ? 'Row view' : 'มุมมองแถว'}
         aria-pressed={view === 'row'}
-        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 ${
+        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 cursor-pointer ${
           view === 'row' ? 'bg-emerald-600 text-white' : 'text-slate-500 hover:text-emerald-700'
         }`}
       >
@@ -29,7 +29,7 @@ export function ViewToggle({ view, onChange }: ViewToggleProps) {
         onClick={() => onChange('grid')}
         title={lang === 'en' ? 'Grid view' : 'มุมมองตาราง'}
         aria-pressed={view === 'grid'}
-        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 ${
+        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 cursor-pointer ${
           view === 'grid' ? 'bg-emerald-600 text-white' : 'text-slate-500 hover:text-emerald-700'
         }`}
       >

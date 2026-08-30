@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { PublicShell } from '@/components/PublicShell';
@@ -44,8 +45,15 @@ export default function LoginPage() {
       <div className="max-w-md mx-auto py-8 space-y-6">
         <div className="bg-white border border-slate-200 rounded-3xl p-8 shadow-xs space-y-6">
           <div className="text-center space-y-2">
-            <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto font-bold text-xl">
-              BMA
+            <div className="mx-auto flex h-14 w-14 items-center justify-center overflow-hidden">
+              <Image
+                src="/Logo.png"
+                alt="B2G Vendor logo"
+                width={56}
+                height={56}
+                priority
+                className="h-full w-full object-contain"
+              />
             </div>
             <h1 className="text-2xl font-extrabold text-slate-900">
               {lang === 'en' ? 'Unified Portal Login' : 'เข้าสู่ระบบ B2G Vendor'}
@@ -63,13 +71,17 @@ export default function LoginPage() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
+              <label htmlFor="email" className="block text-xs font-bold text-slate-700 mb-1">
                 {lang === 'en' ? 'Email Address' : 'อีเมลผู้ใช้งาน'}
               </label>
               <div className="relative flex items-center">
                 <Mail className="w-4 h-4 text-slate-400 absolute left-3" />
                 <input
+                  id="email"
+                  name="email"
                   type="email"
+                  inputMode="email"
+                  autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value.replace(/\s/g, ''))}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2.5 text-sm text-slate-900 outline-hidden focus:ring-2 focus:ring-emerald-500"
@@ -81,22 +93,27 @@ export default function LoginPage() {
 
             <div>
               <div className="flex justify-between items-center mb-1">
-                <label className="block text-xs font-bold text-slate-700">
+                <label htmlFor="password" className="block text-xs font-bold text-slate-700">
                   {lang === 'en' ? 'Password' : 'รหัสผ่าน'}
                 </label>
-                <Link href="/forgot-password" className="text-xs text-emerald-600 hover:underline">
-                  {lang === 'en' ? 'Forgot Password?' : 'ลืมรหัสผ่าน?'}
-                </Link>
               </div>
               <div className="relative flex items-center">
                 <Lock className="w-4 h-4 text-slate-400 absolute left-3" />
                 <input
+                  id="password"
+                  name="password"
                   type="password"
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2.5 text-sm text-slate-900 outline-hidden focus:ring-2 focus:ring-emerald-500"
                   required
                 />
+              </div>
+              <div className="mt-2 flex justify-end">
+                <Link href="/forgot-password" className="text-xs text-emerald-600 hover:underline">
+                  {lang === 'en' ? 'Forgot Password?' : 'ลืมรหัสผ่าน?'}
+                </Link>
               </div>
               {fieldErrors.password && <p className="mt-1 text-xs text-rose-600">{fieldErrors.password}</p>}
             </div>
@@ -104,7 +121,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={submitting}
-              className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold text-sm transition-colors flex items-center justify-center gap-2 shadow-xs"
+              className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold text-sm transition-colors flex items-center justify-center gap-2 shadow-xs cursor-pointer"
             >
               <span>
                 {submitting

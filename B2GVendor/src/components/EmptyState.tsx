@@ -30,7 +30,7 @@ export function EmptyState({ title, description, onReset }: EmptyStateProps) {
       {onReset && (
         <button
           onClick={onReset}
-          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl text-emerald-700 hover:bg-emerald-50 border border-emerald-200 transition-colors duration-150"
+          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl text-emerald-700 hover:bg-emerald-50 border border-emerald-200 transition-colors duration-150 cursor-pointer"
         >
           <RefreshCw className="w-4 h-4" />
           <span>{lang === 'en' ? 'Reset Filters' : 'รีเซ็ตการค้นหา'}</span>

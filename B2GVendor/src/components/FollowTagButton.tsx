@@ -30,7 +30,7 @@ export function FollowTagButton({ tagId, tagName, variant = 'badge', size = 'sm'
       <button
         onClick={handleClick}
         title={followed ? (lang === 'en' ? `Unfollow ${tagName}` : `เลิกติดตาม ${tagName}`) : (lang === 'en' ? `Follow ${tagName}` : `ติดตาม ${tagName}`)}
-        className={`p-1.5 rounded-lg transition-colors duration-150 ${
+        className={`p-1.5 rounded-lg transition-colors duration-150 cursor-pointer ${
           followed
             ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
             : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -45,7 +45,7 @@ export function FollowTagButton({ tagId, tagName, variant = 'badge', size = 'sm'
     return (
       <button
         onClick={handleClick}
-        className={`inline-flex items-center gap-1.5 font-medium rounded-lg transition-all duration-150 ${
+        className={`inline-flex items-center gap-1.5 font-medium rounded-lg transition-all duration-150 cursor-pointer ${
           size === 'sm' ? 'px-3 py-1.5 text-xs' : 'px-4 py-2 text-sm'
         } ${
           followed
@@ -66,7 +66,7 @@ export function FollowTagButton({ tagId, tagName, variant = 'badge', size = 'sm'
   return (
     <button
       onClick={handleClick}
-      className={`font-medium rounded-full transition-all duration-150 ${
+      className={`font-medium rounded-full transition-all duration-150 cursor-pointer ${
         size === 'sm' ? 'px-2.5 py-0.5 text-xs' : 'px-3 py-1 text-sm'
       } ${
         followed

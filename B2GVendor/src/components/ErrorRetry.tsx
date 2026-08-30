@@ -28,7 +28,7 @@ export function ErrorRetry({ message, onRetry }: ErrorRetryProps) {
 
       <button
         onClick={onRetry}
-        className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl bg-rose-600 text-white hover:bg-rose-700 transition-colors duration-150"
+        className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl bg-rose-600 text-white hover:bg-rose-700 transition-colors duration-150 cursor-pointer"
       >
         <RefreshCw className="w-3.5 h-3.5" />
         <span>{lang === 'en' ? 'Retry' : 'ลองใหม่อีกครั้ง'}</span>

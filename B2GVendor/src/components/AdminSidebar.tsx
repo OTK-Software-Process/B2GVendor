@@ -86,7 +86,7 @@ export function AdminSidebar() {
         <button
           onClick={() => triggerPollNow()}
           disabled={isPolling}
-          className={`w-full py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all duration-150 ${
+          className={`w-full py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all duration-150 cursor-pointer ${
             isPolling
               ? 'bg-amber-50 text-amber-700 border border-amber-200'
               : 'bg-sky-600 hover:bg-sky-700 text-white'
@@ -150,7 +150,7 @@ export function AdminSidebar() {
         </div>
         <button
           onClick={() => setMobileOpen(!mobileOpen)}
-          className="p-2 rounded-lg border border-slate-200 text-slate-600"
+          className="p-2 rounded-lg border border-slate-200 text-slate-600 cursor-pointer"
         >
           {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
         </button>
