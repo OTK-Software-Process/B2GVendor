@@ -3,6 +3,8 @@ import { AppError } from "../utils/AppError";
 import { Token, hashOneTimeToken } from "../models/token.model";
 import * as cryptoUtils from "../utils/crypto";
 import nodemailer from "nodemailer";
+import { Session } from "../models/session.model";
+import { toSessionView } from "./session.service";
 
 export async function getProfile(accountId: string): Promise<IAccount> {
   const account = await Account.findById(accountId);
@@ -109,4 +111,20 @@ export async function resetPassword(
 
   account.passwordHash = newPassword;
   await account.save();
+}
+
+export async function getSession(
+  accountId: string,
+): Promise<any> {
+  const session = await Session.findOne({
+    accountId: accountId,
+    revokedAt: { $exists: false },
+    expiresAt: { $gt: new Date() },
+  }).sort({ lastActiveAt: -1 });
+
+  if (!session) {
+    throw AppError.notFound("No active session found.");
+  }
+
+  return toSessionView(session, String(session._id));
 }

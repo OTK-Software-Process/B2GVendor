@@ -29,11 +29,9 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
     req.account = account;
     req.authSession = session;
 
-    const now = Date.now();
-    if (now - session.lastActiveAt.getTime() > LAST_ACTIVE_REFRESH_MS) {
-      session.lastActiveAt = new Date(now);
-      await Session.updateOne({ _id: session._id }, { lastActiveAt: session.lastActiveAt });
-    }
+    const now = new Date();
+    session.lastActiveAt = now;
+    await Session.updateOne({ _id: session._id }, { lastActiveAt: now });
 
     next();
   } catch (err) {

@@ -30,6 +30,7 @@ export const accountRouter = Router();
 accountRouter.use(requireAuth);
 
 accountRouter.get('/profile', accountController.getProfile);
+accountRouter.get('/session', accountController.getSession);
 
 accountRouter.patch('/profile', validate(updateProfileSchema), accountController.updateProfile);
 

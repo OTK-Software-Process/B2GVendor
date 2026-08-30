@@ -44,11 +44,11 @@ export function maskIpAddress(ip?: string): string | undefined {
 
   if (normalized.includes('.')) {
     const parts = normalized.split('.');
-    if (parts.length !== 4) return 'unknown';
+    if (parts.length !== 4) return undefined;
     return `${parts[0]}.${parts[1]}.xx.xx`;
   }
 
   const groups = normalized.split(':').filter(Boolean);
-  if (groups.length < 2) return 'unknown';
+  if (groups.length < 2) return undefined;
   return `${groups[0]}:${groups[1]}:xxxx:xxxx`;
 }
