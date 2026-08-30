@@ -6,6 +6,7 @@ import { corsOrigins, isProduction } from './config/env';
 import { healthRouter } from './routes/health.route';
 import { apiRouter } from './routes';
 import { errorHandler, notFoundHandler } from './middlewares/error.middleware';
+import { sanitizeInput } from './middlewares/sanitize.middleware';
 
 export function createApp() {
   const app = express();
@@ -21,6 +22,7 @@ export function createApp() {
     })
   );
   app.use(express.json({ limit: '1mb' }));
+  app.use(sanitizeInput);
   app.use(cookieParser());
   app.use(morgan(isProduction ? 'combined' : 'dev'));
 
