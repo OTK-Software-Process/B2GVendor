@@ -1,10 +1,9 @@
 import { Account, IAccount } from "../models/account.model";
 import { AppError } from "../utils/AppError";
-import { Token, hashOneTimeToken } from "../models/token.model";
-import * as cryptoUtils from "../utils/crypto";
-import nodemailer from "nodemailer";
 import { Session } from "../models/session.model";
 import { toSessionView } from "./session.service";
+import { consumeToken, issueToken } from "./token.service";
+import { sendPasswordResetEmail } from "./email.service";
 
 export async function getProfile(accountId: string): Promise<IAccount> {
   const account = await Account.findById(accountId);
@@ -36,52 +35,31 @@ export async function changePassword(
   currentPassword: string,
   newPassword: string,
 ): Promise<void> {
-  const account = await Account.findById(accountId);
+  const account = await Account.findById(accountId).select('+passwordHash');
 
   if (!account) {
     throw AppError.notFound("Account not found.");
   }
 
-  return account.comparePassword(currentPassword).then(async (isMatch) => {
-    if (!isMatch) {
-      throw AppError.invalidCredentials();
-    }
+  const isMatch = await account.comparePassword(currentPassword);
+  if (!isMatch) {
+    throw AppError.invalidCredentials();
+  }
 
-    account.passwordHash = newPassword;
-    await account.save();
-  });
+  account.passwordHash = newPassword;
+  await account.save();
 }
 
 export async function forgotPassword(email: string): Promise<void> {
   try {
-    const resetToken = cryptoUtils.generateRawToken(32);
-    const hashedToken = cryptoUtils.hashToken(resetToken);
+    const account = await Account.findOne({ email: email.trim().toLowerCase() });
 
-    const resetURL = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
-    const transporter = nodemailer.createTransport({
-      service: "Gmail",
-      host: "smtp.gmail.com",
-      port: 587,
-      secure: true,
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: email,
-      subject: "Password Reset Request",
-      text: `You requested a password reset. Click the link to reset your password: ${resetURL}`, // can use html instead of text for HTML emails
-    };
-      await transporter.sendMail(mailOptions, function (error, info) {
-      if (error) {
-        console.error("Error sending email:", error);
-        throw AppError.internalError("Failed to send password reset email.");
-      } else {
-        console.log("Email sent: " + info.response);
-      }
-    });
+    if (!account) {
+      return;
+    }
+
+    const rawToken = await issueToken(account._id, "password_reset");
+    await sendPasswordResetEmail(account.email, account.name, rawToken);
   } catch (error) {
     console.error("Error in forgotPassword:", error);
     throw AppError.internalError(
@@ -94,17 +72,9 @@ export async function resetPassword(
   token: string,
   newPassword: string,
 ): Promise<void> {
-  const tokenDoc = await Token.findOne({
-    tokenHash: hashOneTimeToken(token),
-    purpose: "password_reset",
-    usedAt: null,
-  });
+  const accountId = await consumeToken(token, "password_reset");
 
-  if (!tokenDoc) {
-    throw AppError.badRequest("Invalid or expired token.");
-  }
-
-  const account = await Account.findById(tokenDoc.accountId);
+  const account = await Account.findById(accountId).select('+passwordHash');
   if (!account) {
     throw AppError.notFound("Account not found.");
   }

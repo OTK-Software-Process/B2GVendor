@@ -53,7 +53,7 @@ export async function changePassword(
       throw AppError.badRequest("New passwords do not match.");
     }
     await services.changePassword(accountId, currentPassword, newPassword);
-    res.status(204).send({
+    res.status(200).send({
       success: true,
       data: { sessionRevoked: true, message: "Password updated" },
     });

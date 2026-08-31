@@ -251,7 +251,7 @@ export default function AccountProfilePage() {
               <div className="space-y-3">
                 <button
                   type="button"
-                  onClick={() => alert(lang === 'en' ? 'Password change modal simulation' : 'จำลองหน้าเปลี่ยนรหัสผ่าน')}
+                  onClick={() => router.push("/change-password")}
                   className="w-full text-left px-4 cursor-pointer py-2.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-800 hover:border-emerald-500 transition-colors"
                 >
                   {lang === 'en' ? 'Change Password' : 'เปลี่ยนรหัสผ่าน'}
