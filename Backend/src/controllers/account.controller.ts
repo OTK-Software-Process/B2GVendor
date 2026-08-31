@@ -70,7 +70,7 @@ export async function forgotPassword(
   try {
     const { email } = req.body;
     await services.forgotPassword(email);
-    res.status(204).send({
+    res.status(200).send({
       success: true,
       data: {
         message: "If that email is registered, a reset link has been sent.",
@@ -93,7 +93,7 @@ export async function resetPassword(
       throw AppError.badRequest("New passwords do not match.");
     }
     await services.resetPassword(token, newPassword);
-    res.status(204).send({
+    res.status(200).send({
       success: true,
       data: { message: "Password reset. Please log in." },
     });

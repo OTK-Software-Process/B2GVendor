@@ -36,6 +36,13 @@ async function main(): Promise<void> {
 
   console.log(JSON.stringify({ forgotStatus: forgotRes.status, forgotJson, tokenExists: !!tokenDoc }, null, 2));
 
+  if (forgotRes.status !== 200 || !forgotJson?.success) {
+    server.close();
+    await mongoose.connection.dropDatabase();
+    await mongoose.disconnect();
+    process.exit(1);
+  }
+
   if (!tokenDoc) {
     server.close();
     await mongoose.connection.dropDatabase();
@@ -61,7 +68,7 @@ async function main(): Promise<void> {
   await mongoose.connection.dropDatabase();
   await mongoose.disconnect();
 
-  process.exit(resetRes.status === 204 ? 0 : 1);
+  process.exit(resetRes.status === 200 && resetJson?.success ? 0 : 1);
 }
 
 main().catch((error) => {
