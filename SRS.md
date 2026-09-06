@@ -112,15 +112,17 @@ The system is constrained to **7 government sites at launch** (BMA, Department o
 
 ### 1.5 Stakeholders
 
-- **Product Owner:** The Visionary. Defines which government sites and features ship first, and ensures the search and notification experience matches real vendor workflows.
+A stakeholder is anyone affected by, or with a vested interest in, this project's outcome — distinct from the delivery-team roles listed in Section 1.3.
 
-- **Developers:** The Builders. Write the per-site ingestion adapters, the tag-matching and notification engine, and the search/status layer, and manage the database.
+- **Product Owner / Project Sponsor:** The Visionary. Accountable for the business outcome — which government sites and features ship first — and bears the consequence if the platform fails to match real vendor workflows.
 
-- **Testers:** The Quality Gatekeeper. Verify poll reliability across sites, tag-notification accuracy, and that role-based access (Admin vs. Super Admin) is enforced everywhere it matters.
+- **Registered Users (Vendors & Contractors, Businesses/SMEs):** The End-Consumers. Directly affected by the platform's accuracy and timeliness — a missed or late notification can mean a missed bidding opportunity.
 
-- **Registered Users (Vendors, Businesses/SMEs, Public researchers):** The End-Consumers. Follow interest tags, search and filter work, and download TOR documents.
+- **Public Visitors:** The Researchers. Affected by how easily public procurement disclosure can be found and verified, without needing an account.
 
-- **Government Agencies:** The Data Publishers. An indirect stakeholder — the system depends on the continued availability and schema stability of their published datasets, but does not interact with or modify their systems.
+- **Admin & Super Admin (Portal Operations Staff):** The Operators. Affected daily by the usability of the ingestion, tagging, and account-management tooling they rely on to keep the platform trustworthy.
+
+- **Government Agencies:** The Data Publishers. An indirect stakeholder — the system depends entirely on the continued availability and schema stability of their published data, and their name/brand is what appears in every search result and notification, even though they do not interact with or control this system.
 
 ### 1.6 References
 
@@ -142,38 +144,34 @@ The system is constrained to **7 government sites at launch** (BMA, Department o
 
 B2G Vendor is a web application that functions as a unifying interface between the public/vendors and the scattered procurement-disclosure datasets published by multiple government agencies. It is not part of any government e-GP system and does not modify or publish to those systems — it is strictly read-only.
 
-The system is designed with a **Modular Architecture**, decoupling the **"Ingestion/Polling Engine"** (one adapter per connected government site, per source) from the **"Web & Search Application."** This ensures a schema change or outage at any one government site — or at either source — is isolated to its own adapter, and that the search and notification layers keep operating on already-ingested data even if the newest poll for one site is delayed or failing.
-
-System Interfaces:
-
-- **User Interface:** Accessible via modern web browsers (Chrome, Edge, Safari, Firefox).
-- **Live Data Source Interface:** Polls the e-GP RSS feed (`process3.gprocurement.go.th`) per government site and per announcement type — the primary source of new/updated TOR data.
-- **Historical Data Source Interface:** Polls the `data.go.th` open-data catalog (CKAN Action API) to enrich already-ingested work with post-award contract/budget/winner facts.
-- **Notification Interface:** In-app notification center plus authenticated transactional email (SPF/DKIM/DMARC).
-- **Search Interface:** A dedicated search index with Thai tokenization and typo tolerance.
+The product is standalone: it has no native data of its own, and its usefulness is entirely dependent on data that government agencies choose to publish through their official channels. Internally, ingestion is kept independent from the public-facing site, so that a problem fetching data from one government site never takes down search or browsing for everyone else. The full technical detail of how and where data is fetched is specified in Section 4.2 and Section 5, not repeated here.
 
 ### 2.2 Product Functions
 
-B2G Vendor provides four major functional groups:
+B2G Vendor provides five major functional groups, each expanded into full detail as its own System Feature in Section 4:
 
-- **Account & Access Management**
+- **Account & Access Management** *(Section 4.1)*
   - Unified registration/login for individual and business accounts.
   - Role-based access: Visitor, Registered User, Admin, Super Admin.
 
-- **Government Data Ingestion**
+- **Government Data Ingestion & Source Management** *(Section 4.2)*
   - Manual ("Poll Now") and scheduled polling, per government site.
   - Per-site run history (fetched / new / updated / failed).
   - Source configuration (which sites are polled) restricted to Super Admin.
 
-- **Interest Tags & Notifications**
+- **Interest Tags & Notifications** *(Section 4.3)*
   - Follow tags across government site, agency, method, category, and keyword.
   - Automatic, AI-assisted tagging of newly ingested work.
   - In-app and email notification when a followed tag matches new work.
 
-- **Search & Status Display**
+- **Search, Browse & Status Display** *(Section 4.4)*
   - Full-text and faceted search across every connected site.
+  - Browse by government site, drillable into department/agency.
   - Status badge sourced only from ingested data — never manually edited.
-  - TOR document download.
+
+- **TOR Document Access** *(Section 4.5)*
+  - Work detail page with status history.
+  - TOR and attachment download.
 
 ### 2.3 User Classes and Characteristics
 
@@ -547,6 +545,7 @@ UC8 ..> UC7 : <<configures>>
 | Basic Flow | 1. Visitor selects **Register** or **Log In**.<br>2. New user: enters email, password, and optionally a business profile (tax ID, company name); system creates a single unified `Account`.<br>3. Returning user: enters email/password; system hashes and validates against the stored Argon2/bcrypt hash.<br>4. System establishes a session.<br>5. System redirects the user to their previous page or the account dashboard. |
 | Alternative Flow | Invalid Credentials: display "Invalid email or password."<br>Duplicate Email: display "An account with this email already exists." |
 | Post-conditions | The user is authenticated and can follow tags and manage notification settings. |
+| Traceability | US-1.1, US-1.2 → FR-1.1, FR-1.2, FR-1.3 |
 
 **Search & Filter Work**
 - **Actor:** Visitor
@@ -558,6 +557,7 @@ UC8 ..> UC7 : <<configures>>
 | Basic Flow | 1. Visitor enters a keyword and/or selects filters (status, government site, agency, method, budget, date).<br>2. System queries the search index and returns matching works with a status badge on each row.<br>3. Visitor adjusts sort order or paginates results. |
 | Alternative Flow | No Results: display the empty state with a "clear filters" action.<br>Search Error: display a retryable error state. |
 | Post-conditions | Visitor sees a filtered, sorted list of matching works. |
+| Traceability | US-4.1, US-4.2, US-4.5 → FR-4.1, FR-4.2, FR-4.5, FR-4.6 |
 
 **View Work Detail & Status History**
 - **Actor:** Visitor
@@ -569,6 +569,7 @@ UC8 ..> UC7 : <<configures>>
 | Basic Flow | 1. System displays full metadata: title, agency, method, budget, dates, current status.<br>2. System displays a chronological status-change history.<br>3. System displays the applied tags, each followable in one click. |
 | Alternative Flow | Work Not Found: display "This work is no longer available." |
 | Post-conditions | Visitor has full context on the work, including its current and past status. |
+| Traceability | US-4.3, US-5.1 → FR-4.3, FR-5.1, FR-5.4 |
 
 **Download TOR Document**
 - **Actor:** Visitor
@@ -580,6 +581,7 @@ UC8 ..> UC7 : <<configures>>
 | Basic Flow | 1. Visitor clicks a document in the TOR/attachments list.<br>2. System serves the file over HTTPS from document storage.<br>3. Browser downloads the file. |
 | Alternative Flow | Dead Link: log the failure for admin review and display "This document is temporarily unavailable." |
 | Post-conditions | The document is downloaded to the visitor's device. |
+| Traceability | US-5.2 → FR-5.2, FR-5.3 |
 
 **Follow Interest Tag**
 - **Actor:** Registered User
@@ -591,6 +593,7 @@ UC8 ..> UC7 : <<configures>>
 | Basic Flow | 1. User browses the tag taxonomy by facet (site, agency, method, category, keyword) or clicks "Follow" from a search result.<br>2. System adds the tag to the user's followed-tags list.<br>3. User optionally sets channel (in-app/email) and frequency (instant/digest). |
 | Alternative Flow | Already Followed: toggle acts as "Unfollow" instead. |
 | Post-conditions | The user will be notified the next time ingested work carries this tag. |
+| Traceability | US-3.1, US-3.4 → FR-3.1, FR-3.7 |
 
 **Receive Notification**
 - **Actor:** Registered User, System
@@ -602,6 +605,7 @@ UC8 ..> UC7 : <<configures>>
 | Basic Flow | 1. System computes the intersection of the work's tags and each user's followed tags.<br>2. System queues one notification per matched user (deduplicated).<br>3. System delivers the notification via the user's chosen channel and frequency.<br>4. User opens the notification and is deep-linked to the work's detail page. |
 | Alternative Flow | Digest Mode: notification is batched and sent at the next scheduled digest time instead of instantly. |
 | Post-conditions | The user is aware of the new or changed work without having searched for it. |
+| Traceability | US-3.2, US-3.3 → FR-3.2, FR-3.3, FR-3.5, FR-3.6 |
 
 **Poll Government Site**
 - **Actor:** Admin, System
@@ -613,6 +617,7 @@ UC8 ..> UC7 : <<configures>>
 | Basic Flow | 1. Admin triggers **Poll Now** for one or all enabled sites, or a scheduled interval elapses.<br>2. System calls the e-GP RSS feed for each targeted site's `deptId`, across its enabled announcement types — this is the live source that discovers new/updated TOR.<br>3. System classifies each item's link (direct document vs. HTML reference) and stores or references accordingly.<br>4. System separately (on its own schedule) calls `data.go.th` for that site's contract dataset, where one exists, and attaches budget/winner facts to already-ingested works — this step never creates a new work.<br>5. System normalizes and upserts records by a stable project-identifier key.<br>6. System flags new/changed works and emits events for notifications and search indexing.<br>7. System records the run's counts (fetched/new/updated/skipped/failed), per source, in run history. |
 | Alternative Flow | Site Failure: isolate the failure to that site and source, retry with backoff, and alert the Admin without affecting other sites or the other source.<br>Concurrent Poll: if a poll for the same site and source is already running, the new request is queued rather than run destructively in parallel. |
 | Post-conditions | Newly ingested or updated works are available in search and eligible for notifications. |
+| Traceability | US-2.1, US-2.2, US-2.3, US-2.6 → FR-2.1, FR-2.2, FR-2.3, FR-2.3a, FR-2.5, FR-2.6, FR-2.7, FR-2.9, FR-2.10 |
 
 **Manage Source Configuration**
 - **Actor:** Super Admin
@@ -624,6 +629,7 @@ UC8 ..> UC7 : <<configures>>
 | Basic Flow | 1. Super Admin opens Source Configuration.<br>2. Super Admin adds a new government site with its name, e-GP department code (`deptId`) for the live feed, optionally its `data.go.th` organization identifier for enrichment, scope filters (which announcement types to poll), and request-rate limit — or enables/disables an existing one.<br>3. System saves the configuration; it takes effect on the next poll without a redeploy. |
 | Alternative Flow | Invalid Identifier: display a validation error before saving.<br>Insufficient Privilege: an Admin (non-Super) attempting this action is blocked server-side, not just hidden in the UI. |
 | Post-conditions | The list of polled government sites reflects the change on the next run. |
+| Traceability | US-2.4, US-2.5 → FR-2.8 |
 
 **Manage Tag Vocabulary**
 - **Actor:** Admin
@@ -635,6 +641,7 @@ UC8 ..> UC7 : <<configures>>
 | Basic Flow | 1. Admin creates a new tag under a facet (agency/method/category/keyword) or retires an unused one.<br>2. Admin optionally reassigns tags on a specific work from its detail page. |
 | Alternative Flow | Duplicate Tag: system warns and suggests retiring the redundant one instead of creating a near-duplicate. |
 | Post-conditions | The tag vocabulary used by both search facets and interest-following stays accurate. |
+| Traceability | US-3.5 → FR-3.4 |
 
 **Manage Vendor Accounts**
 - **Actor:** Admin
@@ -646,6 +653,7 @@ UC8 ..> UC7 : <<configures>>
 | Basic Flow | 1. Admin searches the account list by name, email, or status.<br>2. Admin adds, suspends/reactivates, or deletes an account.<br>3. System logs the action with actor and timestamp to the audit log. |
 | Alternative Flow | None. |
 | Post-conditions | The account's status is updated and the change is auditable. |
+| Traceability | US-1.5 → FR-1.5, FR-1.6 |
 
 ---
 
