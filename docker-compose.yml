@@ -20,6 +20,27 @@ services:
       - ./Backend/.env
     ports:
       - "${BACKEND_PORT:-4000}:4000"
+    volumes:
+      - tor-storage:/app/storage
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  # Runs the actual polling (e-GP RSS + data.go.th) in its own process, on
+  # its own schedule, separate from the request/response API container.
+  # "Poll Now" from the API only inserts a PollJob row (see
+  # src/services/pollJob.service.ts) -- this container is what claims and
+  # executes it, so ingestion keeps running even if the API is redeployed
+  # or briefly down, and vice versa.
+  ingestion-worker:
+    build:
+      context: ./Backend
+    restart: unless-stopped
+    command: ["node", "dist/worker.js"]
+    env_file:
+      - ./Backend/.env
+    volumes:
+      - tor-storage:/app/storage
     depends_on:
       mongo:
         condition: service_healthy
@@ -39,3 +60,4 @@ services:
 
 volumes:
   mongo-data:
+  tor-storage:

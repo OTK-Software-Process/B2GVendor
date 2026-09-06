@@ -18,6 +18,10 @@ next-env.d.ts
 dist/
 build/
 
+# Downloaded TOR files (runtime data, not source -- see docker-compose's
+# tor-storage volume)
+Backend/storage/
+
 # Logs
 npm-debug.log*
 yarn-debug.log*
