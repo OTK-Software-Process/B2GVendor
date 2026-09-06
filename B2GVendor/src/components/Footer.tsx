@@ -6,7 +6,8 @@ import Image from 'next/image';
 import { useApp } from '@/context/AppContext';
 
 export function Footer() {
-  const { lang, ingestionRuns } = useApp();
+  const { lang, ingestionRuns, role } = useApp();
+  const isAdminRole = role === 'admin' || role === 'superadmin';
   const latestRun = ingestionRuns[0];
 
   return (
@@ -34,7 +35,9 @@ export function Footer() {
               <li><Link href="/search" className="text-slate-500 hover:text-emerald-700 transition-colors">{lang === 'en' ? 'Search Works' : 'ค้นหาโครงการ'}</Link></li>
               <li><Link href="/agencies" className="text-slate-500 hover:text-emerald-700 transition-colors">{lang === 'en' ? 'Government Sites' : 'หน่วยงานภาครัฐ'}</Link></li>
               <li><Link href="/account/interests" className="text-slate-500 hover:text-emerald-700 transition-colors">{lang === 'en' ? 'Tag Vocabulary' : 'แท็กที่ติดตาม'}</Link></li>
-              <li><Link href="/admin" className="text-slate-500 hover:text-sky-700 transition-colors">{lang === 'en' ? 'Admin Dashboard' : 'แดชบอร์ดผู้ดูแลระบบ'}</Link></li>
+              {isAdminRole && (
+                <li><Link href="/admin" className="text-slate-500 hover:text-sky-700 transition-colors">{lang === 'en' ? 'Admin Dashboard' : 'แดชบอร์ดผู้ดูแลระบบ'}</Link></li>
+              )}
             </ul>
           </div>
 

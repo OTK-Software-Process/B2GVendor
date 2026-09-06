@@ -115,7 +115,7 @@ function SearchBarForm({ placeholder, size = 'normal', autoFocus = false }: Sear
               setSuggestions([]);
               setTypoNotice(null);
             }}
-            className="p-1 text-slate-400 hover:text-slate-600 mr-1 transition-colors"
+            className="p-1 text-slate-400 hover:text-slate-600 mr-1 transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -123,7 +123,7 @@ function SearchBarForm({ placeholder, size = 'normal', autoFocus = false }: Sear
 
         <button
           onClick={() => executeSearch()}
-          className={`inline-flex items-center gap-1.5 font-semibold rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 transition-colors duration-150 shrink-0 ${
+          className={`inline-flex items-center gap-1.5 font-semibold rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 transition-colors duration-150 shrink-0 cursor-pointer ${
             size === 'large' ? 'px-5 py-2.5 text-sm sm:text-base' : 'px-3.5 py-1.5 text-sm'
           }`}
         >
@@ -141,7 +141,7 @@ function SearchBarForm({ placeholder, size = 'normal', autoFocus = false }: Sear
               setQuery(typoNotice.split(' ')[0]);
               executeSearch(typoNotice.split(' ')[0]);
             }}
-            className="ml-auto underline font-medium text-amber-900"
+            className="ml-auto underline font-medium text-amber-900 cursor-pointer"
           >
             {lang === 'en' ? 'Apply' : 'ใช้คำนี้'}
           </button>
@@ -161,7 +161,7 @@ function SearchBarForm({ placeholder, size = 'normal', autoFocus = false }: Sear
                 setQuery(cleanItem);
                 executeSearch(cleanItem);
               }}
-              className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 flex items-center justify-between transition-colors"
+              className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 flex items-center justify-between transition-colors cursor-pointer"
             >
               <span>{item}</span>
               <span className="text-xs text-slate-400">{lang === 'en' ? 'Search tag' : 'ค้นหาตามแท็ก'}</span>

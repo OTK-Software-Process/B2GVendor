@@ -1,25 +1,101 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { PublicShell } from '@/components/PublicShell';
 import { useApp } from '@/context/AppContext';
-import { User, Building, Lock, ShieldCheck, Bookmark, Bell, SlidersHorizontal, Save } from 'lucide-react';
+import { api } from '@/lib/api';
+import type { AccountView } from '@/context/AppContext';
+import { User, Building, Lock, ShieldCheck, Save } from 'lucide-react';
+
+interface CurrentSessionView {
+  browser: string;
+  os: string;
+  ipAddress?: string;
+  location?: string;
+  lastActiveAt?: string | Date;
+  isCurrent: boolean;
+}
+
+function sanitizeName(raw: string): string {
+  const noBadChars = raw.replace(/[^\p{L}\p{M}\s'-]/gu, '');
+  const normalizedSpaces = noBadChars.replace(/\s/g, ' ');
+  const firstSpace = normalizedSpaces.indexOf(' ');
+  if (firstSpace === -1) return normalizedSpaces;
+  return normalizedSpaces.slice(0, firstSpace + 1) + normalizedSpaces.slice(firstSpace + 1).replace(/ /g, '');
+}
 
 export default function AccountProfilePage() {
-  const { lang } = useApp();
-  const [name, setName] = useState('สมชาย ใจดี');
-  const [email, setEmail] = useState('user@company.co.th');
-  const [phone, setPhone] = useState('081-234-5678');
-  const [taxId, setTaxId] = useState('0105558123456');
-  const [companyName, setCompanyName] = useState('บริษัท บีเอ็มเอ ก่อสร้าง จำกัด');
+  const router = useRouter();
+  const { lang, account, signIn, role, authChecked } = useApp();
+  const isLoggedIn = role !== 'visitor';
+  const [profile, setProfile] = useState<AccountView | null>(account);
+  const [name, setName] = useState(account?.name ?? '');
+  const [email, setEmail] = useState(account?.email ?? '');
+  const [phone, setPhone] = useState(account?.phone ?? '');
+  const [taxId, setTaxId] = useState(account?.businessProfile?.taxId ?? '');
+  const [companyName, setCompanyName] = useState(account?.businessProfile?.companyName ?? '');
   const [savedNotice, setSavedNotice] = useState(false);
+  const [errorNotice, setErrorNotice] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [currentSession, setCurrentSession] = useState<CurrentSessionView | null>(null);
 
-  const handleSave = (e: React.FormEvent) => {
+  useEffect(() => {
+    api.get<AccountView>('/account/profile')
+      .then((loadedProfile) => {
+        setProfile(loadedProfile);
+        setName(loadedProfile.name);
+        setEmail(loadedProfile.email);
+        setPhone(loadedProfile.phone ?? '');
+        setTaxId(loadedProfile.businessProfile?.taxId ?? '');
+        setCompanyName(loadedProfile.businessProfile?.companyName ?? '');
+        signIn(loadedProfile);
+      })
+      .catch((error: Error) => setErrorNotice(error.message));
+
+    api.get<CurrentSessionView>('/account/session')
+      .then((session) => setCurrentSession(session))
+      .catch(() => setCurrentSession(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (authChecked && !isLoggedIn) {
+      router.replace('/login');
+    }
+  }, [authChecked, isLoggedIn, router]);
+
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSavedNotice(true);
-    setTimeout(() => setSavedNotice(false), 3000);
+    setErrorNotice('');
+    setIsSaving(true);
+    try {
+      const updatedProfile = await api.patch<AccountView>('/account/profile', {
+        name,
+        phone: phone || undefined,
+        ...(profile?.type === 'business' ? { businessProfile: { companyName, taxId } } : {}),
+      });
+      setProfile(updatedProfile);
+      signIn(updatedProfile);
+      setSavedNotice(true);
+      setTimeout(() => setSavedNotice(false), 3000);
+    } catch (error) {
+      setErrorNotice(error instanceof Error ? error.message : 'Unable to save profile.');
+    } finally {
+      setIsSaving(false);
+    }
   };
+
+  if (!authChecked || !isLoggedIn) {
+    return (
+      <PublicShell>
+        <div className="py-16 text-center text-sm text-slate-500">
+          {lang === 'en' ? 'Checking access…' : 'กำลังตรวจสอบสิทธิ์การเข้าใช้งาน…'}
+        </div>
+      </PublicShell>
+    );
+  }
 
   return (
     <PublicShell>
@@ -55,6 +131,12 @@ export default function AccountProfilePage() {
           </div>
         )}
 
+        {errorNotice && (
+          <div className="bg-red-50 text-red-800 border border-red-200 p-4 rounded-2xl text-xs font-bold">
+            {errorNotice}
+          </div>
+        )}
+
         <form onSubmit={handleSave} className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Main Profile Info */}
           <div className="lg:col-span-2 space-y-6">
@@ -73,7 +155,8 @@ export default function AccountProfilePage() {
                   <input
                     type="text"
                     value={name}
-                    onChange={(e) => setName(e.target.value)}
+                    onChange={(e) => setName(sanitizeName(e.target.value))}
+                    onBlur={() => setName((v) => v.trim())}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-900 outline-hidden"
                   />
                 </div>
@@ -85,7 +168,7 @@ export default function AccountProfilePage() {
                   <input
                     type="email"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    readOnly
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-900 outline-hidden"
                   />
                 </div>
@@ -105,6 +188,7 @@ export default function AccountProfilePage() {
             </div>
 
             {/* Optional Business Profile Section */}
+            {profile?.type === 'business' && (
             <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs space-y-4">
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
@@ -124,7 +208,7 @@ export default function AccountProfilePage() {
                   <input
                     type="text"
                     value={taxId}
-                    onChange={(e) => setTaxId(e.target.value)}
+                    onChange={(e) => setTaxId(e.target.value.replace(/\D/g, '').slice(0, 13))}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-mono text-slate-900 outline-hidden"
                   />
                 </div>
@@ -142,14 +226,16 @@ export default function AccountProfilePage() {
                 </div>
               </div>
             </div>
+            )}
 
             <div className="flex justify-end">
               <button
                 type="submit"
-                className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition-colors shadow-xs"
+                disabled={isSaving}
+                className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition-colors shadow-xs cursor-pointer"
               >
                 <Save className="w-4 h-4" />
-                <span>{lang === 'en' ? 'Save Changes' : 'บันทึกข้อมูล'}</span>
+                <span>{isSaving ? (lang === 'en' ? 'Saving...' : 'กำลังบันทึก...') : (lang === 'en' ? 'Save Changes' : 'บันทึกข้อมูล')}</span>
               </button>
             </div>
           </div>
@@ -165,8 +251,8 @@ export default function AccountProfilePage() {
               <div className="space-y-3">
                 <button
                   type="button"
-                  onClick={() => alert(lang === 'en' ? 'Password change modal simulation' : 'จำลองหน้าเปลี่ยนรหัสผ่าน')}
-                  className="w-full text-left px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-800 hover:border-emerald-500 transition-colors"
+                  onClick={() => router.push("/change-password")}
+                  className="w-full text-left px-4 cursor-pointer py-2.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-800 hover:border-emerald-500 transition-colors"
                 >
                   {lang === 'en' ? 'Change Password' : 'เปลี่ยนรหัสผ่าน'}
                 </button>
@@ -177,8 +263,17 @@ export default function AccountProfilePage() {
                   {lang === 'en' ? 'Active Sessions' : 'เซสชันที่เชื่อมต่ออยู่'}
                 </h4>
                 <div className="text-xs space-y-1 bg-slate-50 p-3 rounded-xl">
-                  <p className="font-bold text-slate-900">Windows Chrome • Current Session</p>
-                  <p className="text-slate-400">IP: 182.52.xx.xx • Bangkok, Thailand</p>
+                  <p className="font-bold text-slate-900">
+                    {currentSession
+                      ? `${currentSession.os} ${currentSession.browser}`
+                      : lang === 'en'
+                        ? 'Current device'
+                        : 'อุปกรณ์ที่ใช้อยู่'}
+                    {currentSession?.isCurrent ? ` • ${lang === 'en' ? 'Current Session' : 'เซสชันปัจจุบัน'}` : ''}
+                  </p>
+                  <p className="text-slate-400">
+                    IP: {currentSession?.ipAddress ?? (lang === 'en' ? 'Unavailable' : 'ไม่สามารถระบุได้')} • {(lang === 'en' ? 'Current location: ' : 'ตำแหน่งปัจจุบัน: ')}{currentSession?.location ?? (lang === 'en' ? 'Unavailable' : 'ไม่สามารถระบุได้')}
+                  </p>
                 </div>
               </div>
             </div>

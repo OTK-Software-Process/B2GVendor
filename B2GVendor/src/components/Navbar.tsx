@@ -1,14 +1,17 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
-import { useApp, UserRole } from '@/context/AppContext';
+import { useApp } from '@/context/AppContext';
+import { api } from '@/lib/api';
+import type { AccountView } from '@/context/AppContext';
 import {
   Bell,
   Globe,
   User,
+  ShieldUser,
   ShieldAlert,
   ChevronDown,
   Menu,
@@ -16,50 +19,41 @@ import {
   Bookmark,
   Building2,
   SlidersHorizontal,
-  LogOut
+  LogOut,
 } from 'lucide-react';
 
 export function Navbar() {
   const pathname = usePathname();
-  const { role, setRole, lang, setLang, unreadCount } = useApp();
+  const { role, lang, setLang, unreadCount, signOut, account, signIn } = useApp();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-
+  const [profile, setProfile] = useState<AccountView | null>(account);
+  const [name, setName] = useState(account?.name ?? '');
+  const [email, setEmail] = useState(account?.email ?? '');
+  const [phone, setPhone] = useState(account?.phone ?? '');
+  const [taxId, setTaxId] = useState(account?.businessProfile?.taxId ?? '');
+  const [companyName, setCompanyName] = useState(account?.businessProfile?.companyName ?? '');
   const isAdminPath = pathname.startsWith('/admin');
+  const isAdminRole = role === 'admin' || role === 'superadmin';
+  const [errorNotice, setErrorNotice] = useState('');  
+
+  useEffect(() => {
+      api.get<AccountView>('/account/profile')
+        .then((loadedProfile) => {
+          setProfile(loadedProfile);
+          setName(loadedProfile.name);
+          setEmail(loadedProfile.email);
+          setPhone(loadedProfile.phone ?? '');
+          setTaxId(loadedProfile.businessProfile?.taxId ?? '');
+          setCompanyName(loadedProfile.businessProfile?.companyName ?? '');
+          signIn(loadedProfile);
+        })
+        .catch((error: Error) => setErrorNotice(error.message));
+
+    }, []);
 
   return (
     <header className="sticky top-0 z-40 w-full bg-white/95 backdrop-blur-md border-b border-slate-200">
-      {/* Demo Mode Role Switcher Banner */}
-      <div className="bg-slate-50 text-slate-600 text-xs px-4 py-1.5 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100">
-        <div className="flex items-center gap-2">
-          <span className="font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
-            Demo Mode
-          </span>
-          <span className="hidden sm:inline text-slate-500">
-            {lang === 'en'
-              ? 'Login bypass active. Switch views to test role behaviors:'
-              : 'โหมดสาธิต (เปิดผ่านทุกหน้าได้ตามต้องการ) เลือกสลับสิทธิ์การใช้งาน:'}
-          </span>
-        </div>
-
-        <div className="flex items-center gap-1.5 font-medium">
-          <span className="text-slate-400 mr-1">{lang === 'en' ? 'Current Role:' : 'สิทธิ์ปัจจุบัน:'}</span>
-          {(['visitor', 'user', 'admin', 'superadmin'] as UserRole[]).map((r) => (
-            <button
-              key={r}
-              onClick={() => setRole(r)}
-              className={`px-2.5 py-0.5 rounded-md transition-all duration-150 text-xs font-semibold capitalize ${
-                role === r
-                  ? 'bg-emerald-600 text-white shadow-sm'
-                  : 'bg-white text-slate-500 border border-slate-200 hover:border-emerald-300 hover:text-emerald-700'
-              }`}
-            >
-              {r === 'visitor' ? (lang === 'en' ? 'Visitor' : 'ผู้เยี่ยมชม') : r === 'user' ? (lang === 'en' ? 'User' : 'สมาชิก (User)') : r === 'admin' ? (lang === 'en' ? 'Admin' : 'ผู้ดูแลระบบ') : (lang === 'en' ? 'Super Admin' : 'ผู้ดูแลระบบสูงสุด')}
-            </button>
-          ))}
-        </div>
-      </div>
-
       {/* Main Nav Bar */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
         {/* Brand Logo */}
@@ -107,7 +101,8 @@ export function Navbar() {
               {lang === 'en' ? 'Gov. Sites' : 'หน่วยงานภาครัฐ'}
             </Link>
 
-            {/* Quick Link to Admin Shell if in Demo/Admin */}
+            {/* Quick Link to Admin Shell */}
+            {isAdminRole && (
             <Link
               href="/admin"
               className={`px-3 py-2 rounded-xl transition-colors duration-150 flex items-center gap-1.5 ${
@@ -117,6 +112,7 @@ export function Navbar() {
               <ShieldAlert className="w-4 h-4" />
               <span>{lang === 'en' ? 'Admin Control' : 'ระบบผู้ดูแลระบบ'}</span>
             </Link>
+            )}
           </nav>
         </div>
 
@@ -126,7 +122,7 @@ export function Navbar() {
           <button
             hidden
             onClick={() => setLang(lang === 'th' ? 'en' : 'th')}
-            className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-xl border border-slate-200 text-slate-600 hover:border-emerald-300 hover:text-emerald-700 transition-colors duration-150"
+            className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-xl border border-slate-200 text-slate-600 hover:border-emerald-300 hover:text-emerald-700 transition-colors duration-150 cursor-pointer"
           >
             <Globe className="w-3.5 h-3.5 text-emerald-600" />
             <span>{lang === 'th' ? 'TH | EN' : 'EN | TH'}</span>
@@ -168,13 +164,17 @@ export function Navbar() {
               <div className="relative">
                 <button
                   onClick={() => setUserMenuOpen(!userMenuOpen)}
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-slate-200 hover:border-emerald-300 transition-colors duration-150"
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-slate-200 hover:border-emerald-300 transition-colors duration-150 cursor-pointer"
                 >
-                  <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold text-xs">
-                    {role === 'admin' || role === 'superadmin' ? 'AD' : 'US'}
+                  <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center">
+                    {isAdminRole ? (
+                      <ShieldUser className="w-4 h-4" />
+                    ) : (
+                      <User className="w-4 h-4" />
+                    )}
                   </div>
                   <span className="hidden sm:inline text-sm font-semibold text-slate-700">
-                    {role === 'admin' || role === 'superadmin' ? 'Admin Staff' : 'ผู้ใช้งานทั่วไป'}
+                    {name ?? (lang === 'en' ? 'Unavailable' : 'ไม่สามารถระบุได้')}
                   </span>
                   <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform duration-150 ${userMenuOpen ? 'rotate-180' : ''}`} />
                 </button>
@@ -187,7 +187,7 @@ export function Navbar() {
                     <div className="px-4 py-2">
                       <p className="text-xs text-slate-400 font-medium">{lang === 'en' ? 'Signed in as' : 'เข้าใช้งานในนาม'}</p>
                       <p className="text-sm font-bold text-slate-900 truncate">
-                        {role === 'admin' || role === 'superadmin' ? 'admin@bma.go.th' : 'user@company.co.th'}
+                        {email ?? (lang === 'en' ? 'Unavailable' : 'ไม่สามารถระบุได้')}
                       </p>
                     </div>
 
@@ -236,10 +236,10 @@ export function Navbar() {
                     <div className="py-1">
                       <button
                         onClick={() => {
-                          setRole('visitor');
+                          void signOut();
                           setUserMenuOpen(false);
                         }}
-                        className="w-full flex items-center gap-2.5 px-4 py-2 text-sm font-semibold text-rose-600 hover:bg-rose-50 transition-colors"
+                        className="w-full flex items-center gap-2.5 px-4 py-2 text-sm font-semibold text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
                       >
                         <LogOut className="w-4 h-4" />
                         <span>{lang === 'en' ? 'Log Out' : 'ออกจากระบบ'}</span>
@@ -254,7 +254,7 @@ export function Navbar() {
           {/* Mobile Menu Toggle */}
           <button
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="md:hidden p-2 rounded-xl border border-slate-200 text-slate-600 hover:border-emerald-300 transition-colors duration-150"
+            className="md:hidden p-2 rounded-xl border border-slate-200 text-slate-600 hover:border-emerald-300 transition-colors duration-150 cursor-pointer"
           >
             {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
           </button>
@@ -286,6 +286,7 @@ export function Navbar() {
             <Building2 className="w-4 h-4" />
             <span>{lang === 'en' ? 'Gov. Sites' : 'หน่วยงานภาครัฐ'}</span>
           </Link>
+          {isAdminRole && (
           <Link
             href="/admin"
             onClick={() => setMobileMenuOpen(false)}
@@ -294,6 +295,7 @@ export function Navbar() {
             <ShieldAlert className="w-4 h-4" />
             <span>{lang === 'en' ? 'Admin Console' : 'ระบบผู้ดูแลระบบ'}</span>
           </Link>
+          )}
 
           {role === 'visitor' && (
             <div className="pt-3 flex flex-col gap-2">

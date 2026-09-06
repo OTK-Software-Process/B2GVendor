@@ -4,19 +4,61 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { PublicShell } from '@/components/PublicShell';
-import { useApp } from '@/context/AppContext';
-import { User, Mail, Lock, Building, FileText, CheckCircle2, ArrowRight } from 'lucide-react';
+import { useApp, AccountView } from '@/context/AppContext';
+import { api, ApiError } from '@/lib/api';
+import { Building, ArrowRight } from 'lucide-react';
+
+function sanitizeName(raw: string): string {
+  const noBadChars = raw.replace(/[^\p{L}\p{M}\s'-]/gu, '');
+  const normalizedSpaces = noBadChars.replace(/\s/g, ' ');
+  const firstSpace = normalizedSpaces.indexOf(' ');
+  if (firstSpace === -1) return normalizedSpaces;
+  return normalizedSpaces.slice(0, firstSpace + 1) + normalizedSpaces.slice(firstSpace + 1).replace(/ /g, '');
+}
 
 export default function RegisterPage() {
   const router = useRouter();
-  const { lang, setRole } = useApp();
+  const { lang, signIn } = useApp();
   const [includeBusinessProfile, setIncludeBusinessProfile] = useState(true);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [companyName, setCompanyName] = useState('');
+  const [taxId, setTaxId] = useState('');
+
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setRole('user');
-    alert(lang === 'en' ? 'Registration complete! Check your email to verify.' : 'ลงทะเบียนสำเร็จ! กรุณาตรวจสอบอีเมลเพื่อยืนยันตัวตน');
-    router.push('/account');
+    setFormError(null);
+    setFieldErrors({});
+    setSubmitting(true);
+
+    try {
+      const account = await api.post<AccountView>('/auth/register', {
+        name: name.trim(),
+        email: email.trim(),
+        password,
+        confirmPassword,
+        type: includeBusinessProfile ? 'business' : 'individual',
+        ...(includeBusinessProfile ? { businessProfile: { companyName: companyName.trim(), taxId: taxId.trim() } } : {})
+      });
+      signIn(account);
+      router.push('/account');
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setFormError(err.message);
+        setFieldErrors(err.fields ?? {});
+      } else {
+        setFormError(lang === 'en' ? 'Something went wrong. Please try again.' : 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง');
+      }
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -31,6 +73,12 @@ export default function RegisterPage() {
               {lang === 'en' ? 'Single registration for all users with optional business profile section' : 'แบบฟอร์มสมัครสมาชิกรวมศูนย์ (เพิ่มข้อมูลนิติบุคคล/SME ได้ในขั้นตอนเดียว)'}
             </p>
           </div>
+
+          {formError && (
+            <div className="text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-4 py-3">
+              {formError}
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Step 1: User Account Details */}
@@ -47,9 +95,13 @@ export default function RegisterPage() {
                   <input
                     type="text"
                     required
+                    value={name}
+                    onChange={(e) => setName(sanitizeName(e.target.value))}
+                    onBlur={() => setName((v) => v.trim())}
                     placeholder="สมชาย ใจดี"
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-900 outline-hidden focus:ring-2 focus:ring-emerald-500"
                   />
+                  {fieldErrors.name && <p className="mt-1 text-xs text-rose-600">{fieldErrors.name}</p>}
                 </div>
 
                 <div>
@@ -59,9 +111,12 @@ export default function RegisterPage() {
                   <input
                     type="email"
                     required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value.replace(/\s/g, ''))}
                     placeholder="user@example.co.th"
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-900 outline-hidden focus:ring-2 focus:ring-emerald-500"
                   />
+                  {fieldErrors.email && <p className="mt-1 text-xs text-rose-600">{fieldErrors.email}</p>}
                 </div>
               </div>
 
@@ -73,8 +128,11 @@ export default function RegisterPage() {
                   <input
                     type="password"
                     required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-900 outline-hidden focus:ring-2 focus:ring-emerald-500"
                   />
+                  {fieldErrors.password && <p className="mt-1 text-xs text-rose-600">{fieldErrors.password}</p>}
                 </div>
 
                 <div>
@@ -84,8 +142,11 @@ export default function RegisterPage() {
                   <input
                     type="password"
                     required
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-900 outline-hidden focus:ring-2 focus:ring-emerald-500"
                   />
+                  {fieldErrors.confirmPassword && <p className="mt-1 text-xs text-rose-600">{fieldErrors.confirmPassword}</p>}
                 </div>
               </div>
             </div>
@@ -116,15 +177,25 @@ export default function RegisterPage() {
                     <span>2. {lang === 'en' ? 'Business Profile Section' : 'ข้อมูลสถานประกอบการ'}</span>
                   </h3>
 
+                  {fieldErrors.businessProfile && (
+                    <p className="text-xs text-rose-600">{fieldErrors.businessProfile}</p>
+                  )}
+
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">
                       {lang === 'en' ? 'Tax ID (13 digits)' : 'เลขประจำตัวผู้เสียภาษี (13 หลัก)'}
                     </label>
                     <input
                       type="text"
+                      value={taxId}
+                      onChange={(e) => setTaxId(e.target.value.replace(/\D/g, '').slice(0, 13))}
+                      onBlur={() => setTaxId((v) => v.trim())}
                       placeholder="0105558123456"
                       className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-900 outline-hidden focus:ring-2 focus:ring-emerald-500"
                     />
+                    {fieldErrors['businessProfile.taxId'] && (
+                      <p className="mt-1 text-xs text-rose-600">{fieldErrors['businessProfile.taxId']}</p>
+                    )}
                   </div>
 
                   <div>
@@ -133,9 +204,15 @@ export default function RegisterPage() {
                     </label>
                     <input
                       type="text"
+                      value={companyName}
+                      onChange={(e) => setCompanyName(e.target.value)}
+                      onBlur={() => setCompanyName((v) => v.trim())}
                       placeholder="บริษัท บีเอ็มเอ ก่อสร้าง จำกัด"
                       className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-900 outline-hidden focus:ring-2 focus:ring-emerald-500"
                     />
+                    {fieldErrors['businessProfile.companyName'] && (
+                      <p className="mt-1 text-xs text-rose-600">{fieldErrors['businessProfile.companyName']}</p>
+                    )}
                   </div>
                 </div>
               )}
@@ -143,9 +220,14 @@ export default function RegisterPage() {
 
             <button
               type="submit"
-              className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition-colors flex items-center justify-center gap-2 shadow-xs"
+              disabled={submitting}
+              className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold text-sm transition-colors flex items-center justify-center gap-2 shadow-xs cursor-pointer"
             >
-              <span>{lang === 'en' ? 'Create Unified Account' : 'ยืนยันการลงทะเบียนบัญชี'}</span>
+              <span>
+                {submitting
+                  ? (lang === 'en' ? 'Creating account…' : 'กำลังสร้างบัญชี…')
+                  : (lang === 'en' ? 'Create Unified Account' : 'ยืนยันการลงทะเบียนบัญชี')}
+              </span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </form>

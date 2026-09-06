@@ -64,7 +64,7 @@ export function TORDownloadList({ files }: TORDownloadListProps) {
 
             <button
               onClick={() => handleDownload(file)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl bg-white border border-slate-200 text-slate-700 hover:border-emerald-500 hover:text-emerald-600 transition-all shadow-2xs"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl bg-white border border-slate-200 text-slate-700 hover:border-emerald-500 hover:text-emerald-600 transition-all shadow-2xs cursor-pointer"
             >
               <Download className="w-3.5 h-3.5 text-emerald-600" />
               <span>{lang === 'en' ? 'Download' : 'ดาวน์โหลด'}</span>
