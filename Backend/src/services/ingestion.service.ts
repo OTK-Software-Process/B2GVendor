@@ -1,12 +1,14 @@
 import { Types } from 'mongoose';
 import { GovSite, IGovSite, AnnounceType } from '../models/govSite.model';
-import { Work, IWork, STATUS_BY_ANNOUNCE_TYPE } from '../models/work.model';
+import { Work, IWork, ITorFile, STATUS_BY_ANNOUNCE_TYPE } from '../models/work.model';
 import { Tag } from '../models/tag.model';
 import { IngestionRun, IIngestionRun } from '../models/ingestionRun.model';
-import { fetchEgpRssFeed, downloadTorPdf, EgpRssItem } from '../integrations/egpRss.client';
+import { fetchEgpRssFeed, downloadTorFile, EgpRssItem } from '../integrations/egpRss.client';
 import { datastoreSearch } from '../integrations/dataGoTh.client';
-import { classifyTags, TagCandidate } from '../integrations/vertexAi.client';
+import { analyzeTorDocument, TagCandidate } from '../integrations/vertexAi.client';
 import { saveTorFile } from './fileStorage.service';
+import { extractPdfText } from './pdfText.service';
+import { extractPdfsFromZip, pickPrimaryPdf } from './zipExtraction.service';
 import { logger } from '../utils/logger';
 import { withRetry, sleep } from '../utils/retry';
 
@@ -91,6 +93,13 @@ export async function runRssPoll(site: IGovSite, triggeredBy: TriggeredBy): Prom
     }
   }
 
+  try {
+    const fixed = await retryMissingTorDownloads(site, candidateTags);
+    if (fixed > 0) logger.info('ingestion', `Retried and recovered ${fixed} previously-failed TOR download(s) for ${site.shortCode}`);
+  } catch (err) {
+    logger.warn('ingestion', `TOR download retry sweep failed for ${site.shortCode}`, err);
+  }
+
   run.fetchedCount = fetchedCount;
   run.newCount = newCount;
   run.updatedCount = updatedCount;
@@ -101,6 +110,154 @@ export async function runRssPoll(site: IGovSite, triggeredBy: TriggeredBy): Prom
   await run.save();
 
   return run;
+}
+
+// Safety net for a download (or text extraction) that failed transiently on
+// its first attempt -- the inline download in upsertWorkFromRssItem doesn't
+// retry itself; this sweep does, once per poll. If a work still has no
+// description (meaning its original AI analysis had no PDF text to work
+// with), a successful recovery here also re-runs the analysis so it isn't
+// stuck title-only forever.
+async function retryMissingTorDownloads(site: IGovSite, candidateTags: TagCandidate[]): Promise<number> {
+  const works = await Work.find({
+    siteId: site._id,
+    torFiles: { $elemMatch: { linkType: { $in: ['pdf', 'zip'] }, storageKey: { $exists: false }, supersededAt: { $exists: false } } }
+  });
+
+  let recovered = 0;
+  for (const work of works) {
+    let mutated = false;
+
+    // Group by sourceUrl, not by individual file -- a 'zip' link's
+    // placeholder is a single entry (the file count inside isn't known
+    // until it's actually downloaded), so recovery must re-derive the whole
+    // group rather than patch one entry's fields in place.
+    const missingBySourceUrl = new Map<string, { announceType: AnnounceType; linkType: EgpRssItem['linkType'] }>();
+    for (const file of work.torFiles) {
+      if (file.storageKey || file.supersededAt) continue;
+      if (file.linkType !== 'pdf' && file.linkType !== 'zip') continue;
+      missingBySourceUrl.set(file.sourceUrl, { announceType: file.announceType, linkType: file.linkType });
+    }
+
+    for (const [sourceUrl, { announceType, linkType }] of missingBySourceUrl) {
+      try {
+        const item: EgpRssItem = { title: work.title, link: sourceUrl, linkType, description: '', pubDate: null, projectId: work.projectId };
+        const extracted = await downloadAndExtractTorFiles(item);
+        if (!extracted || extracted.length === 0) continue;
+
+        for (let i = work.torFiles.length - 1; i >= 0; i--) {
+          const f = work.torFiles[i];
+          if (f.sourceUrl === sourceUrl && !f.storageKey && !f.supersededAt) work.torFiles.splice(i, 1);
+        }
+        work.torFiles.push(...buildTorFiles(announceType, item, extracted));
+        mutated = true;
+
+        if (!work.description) {
+          const primary = extracted.find(f => f.role !== 'attachment');
+          if (primary) {
+            const analysis = await analyzeTorDocument({ title: work.title, pdfText: primary.pdfText }, candidateTags);
+            if (analysis.description) work.description = analysis.description;
+            for (const tagIdStr of analysis.tagIds) {
+              const tagId = new Types.ObjectId(tagIdStr);
+              if (!work.tags.some(t => t.equals(tagId))) work.tags.push(tagId);
+            }
+          }
+        }
+      } catch (err) {
+        logger.warn('ingestion', `Retry download still failing for work ${work.projectId}`, err);
+      }
+    }
+
+    if (mutated) {
+      await work.save();
+      recovered += 1;
+    }
+  }
+
+  return recovered;
+}
+
+interface ExtractedTorFile {
+  storageKey: string;
+  filename: string;
+  role?: 'primary' | 'attachment';
+  pdfText: string | null;
+}
+
+// Only ever called for linkType 'pdf' | 'zip' -- an 'html'/'other' link is
+// never fetched (that would be scraping). Downloads, stores (deduplicated by
+// content hash), and extracts text so the AI analysis call right after can
+// read the real document, not just the title.
+//
+// A 'zip' (seen on B0/draft-TOR items, delivered via egp-upload-service)
+// can bundle several PDFs -- all are stored so a vendor can download any of
+// them, but only the primary one (pickPrimaryPdf) is text-extracted and
+// sent to Vertex AI; the rest are attachments.
+async function downloadAndExtractTorFiles(item: EgpRssItem): Promise<ExtractedTorFile[] | null> {
+  if (item.linkType === 'pdf') {
+    try {
+      const downloaded = await downloadTorFile(item.link, 'pdf');
+      const saved = await saveTorFile(downloaded.buffer, downloaded.filename);
+      const pdfText = await extractPdfText(downloaded.buffer);
+      return [{ storageKey: saved.storageKey, filename: saved.filename, pdfText }];
+    } catch (err) {
+      logger.warn('ingestion', `Failed to download/extract TOR PDF from ${item.link}`, err);
+      return null; // a later poll's retryMissingTorDownloads() sweep will try again
+    }
+  }
+
+  if (item.linkType === 'zip') {
+    try {
+      const downloaded = await downloadTorFile(item.link, 'zip');
+      const pdfEntries = extractPdfsFromZip(downloaded.buffer);
+      if (pdfEntries.length === 0) {
+        logger.warn('ingestion', `Zip from ${item.link} contained no PDF entries`);
+        return null;
+      }
+
+      const primaryEntry = pickPrimaryPdf(pdfEntries);
+      const results: ExtractedTorFile[] = [];
+      for (const entry of pdfEntries) {
+        const saved = await saveTorFile(entry.buffer, entry.filename);
+        const isPrimary = entry === primaryEntry;
+        const pdfText = isPrimary ? await extractPdfText(entry.buffer) : null;
+        results.push({
+          storageKey: saved.storageKey,
+          filename: saved.filename,
+          role: isPrimary ? 'primary' : 'attachment',
+          pdfText
+        });
+      }
+      // Primary first, so callers that just want "the" analyzable document
+      // can take results[0] without searching.
+      results.sort((a, b) => (a.role === 'primary' ? -1 : b.role === 'primary' ? 1 : 0));
+      return results;
+    } catch (err) {
+      logger.warn('ingestion', `Failed to download/extract TOR zip from ${item.link}`, err);
+      return null; // a later poll's retryMissingTorDownloads() sweep will try again
+    }
+  }
+
+  return null;
+}
+
+function buildTorFiles(announceType: AnnounceType, item: EgpRssItem, extracted: ExtractedTorFile[] | null): ITorFile[] {
+  if (!extracted || extracted.length === 0) {
+    // Nothing downloaded yet (transient failure, or a link type that's
+    // never fetched at all) -- still record the link itself so a later
+    // poll's retry sweep (pdf/zip) or a human (html/other) can act on it.
+    return [{ announceType, linkType: item.linkType, sourceUrl: item.link }];
+  }
+
+  return extracted.map(f => ({
+    announceType,
+    linkType: item.linkType,
+    sourceUrl: item.link,
+    storageKey: f.storageKey,
+    filename: f.filename,
+    downloadedAt: new Date(),
+    role: f.role
+  }));
 }
 
 async function upsertWorkFromRssItem(
@@ -119,27 +276,34 @@ async function upsertWorkFromRssItem(
   const existing = await Work.findOne({ siteId: site._id, projectId: item.projectId });
 
   if (!existing) {
-    const tagIds: Types.ObjectId[] = siteTagId ? [siteTagId] : [];
-    const aiTagIds = await classifyTags(item.title, candidateTags);
-    tagIds.push(...aiTagIds.map(id => new Types.ObjectId(id)));
+    // Download+extract BEFORE analysis, so a real PDF (when one exists --
+    // possibly one of several bundled in a zip) informs both the tags and
+    // the description -- FR-3.2.
+    const extracted = await downloadAndExtractTorFiles(item);
+    const primary = extracted?.find(f => f.role !== 'attachment') ?? null;
+    const analysis = await analyzeTorDocument({ title: item.title, pdfText: primary?.pdfText }, candidateTags);
 
-    const work = await Work.create({
+    const tagIds: Types.ObjectId[] = siteTagId ? [siteTagId] : [];
+    tagIds.push(...analysis.tagIds.map(id => new Types.ObjectId(id)));
+
+    await Work.create({
       siteId: site._id,
       projectId: item.projectId,
       title: item.title,
+      description: analysis.description ?? undefined,
       status,
       announceType,
       pubDate: item.pubDate ?? undefined,
-      torFiles: [{ announceType, linkType: item.linkType, sourceUrl: item.link }],
+      torFiles: buildTorFiles(announceType, item, extracted),
       statusHistory: [{ status, announceType, changedAt: item.pubDate ?? new Date() }],
       tags: tagIds
     });
 
-    await maybeDownloadTorFile(work);
     return 'new';
   }
 
   let changed = false;
+  let newExtracted: ExtractedTorFile[] | null = null;
 
   // Log every distinct lifecycle event, not only ones that change the
   // derived status -- e.g. D1 (cancellation) and W1 (winner cancellation)
@@ -156,45 +320,50 @@ async function upsertWorkFromRssItem(
   // check -- a Draft-TOR PDF and an Invitation PDF are different documents
   // and must both stay visible. Within the SAME announce-type, a new link
   // means the government re-issued/corrected that document: keep the old
-  // one (marked superseded) and add the new one as current.
-  const currentForType = existing.torFiles.find(f => f.announceType === announceType && !f.supersededAt);
-  if (!currentForType) {
-    existing.torFiles.push({ announceType, linkType: item.linkType, sourceUrl: item.link });
+  // one(s) (marked superseded) and add the new one(s) as current. Grouped
+  // by sourceUrl rather than a single entry, since a 'zip' link expands
+  // into several files that all share it.
+  const currentGroup = existing.torFiles.filter(f => f.announceType === announceType && !f.supersededAt);
+  const currentUrl = currentGroup[0]?.sourceUrl;
+  if (currentGroup.length === 0) {
+    newExtracted = await downloadAndExtractTorFiles(item);
+    existing.torFiles.push(...buildTorFiles(announceType, item, newExtracted));
     changed = true;
-  } else if (currentForType.sourceUrl !== item.link) {
-    currentForType.supersededAt = new Date();
-    existing.torFiles.push({ announceType, linkType: item.linkType, sourceUrl: item.link });
+  } else if (currentUrl !== item.link) {
+    for (const f of currentGroup) f.supersededAt = new Date();
+    newExtracted = await downloadAndExtractTorFiles(item);
+    existing.torFiles.push(...buildTorFiles(announceType, item, newExtracted));
     changed = true;
+  }
+
+  // Only re-run AI when a genuinely new document arrived -- re-analyzing an
+  // unchanged item on every poll would waste calls and could flip tags for
+  // no reason. Tags are MERGED (never replaced), and the description is
+  // only overwritten when the new analysis actually produced one, so an
+  // html-only re-poll never blanks out a description an earlier PDF gave us.
+  if (newExtracted) {
+    const primary = newExtracted.find(f => f.role !== 'attachment') ?? null;
+    const analysis = await analyzeTorDocument({ title: item.title, pdfText: primary?.pdfText }, candidateTags);
+
+    if (analysis.description) {
+      existing.description = analysis.description;
+      changed = true;
+    }
+    for (const tagIdStr of analysis.tagIds) {
+      const tagId = new Types.ObjectId(tagIdStr);
+      if (!existing.tags.some(t => t.equals(tagId))) {
+        existing.tags.push(tagId);
+        changed = true;
+      }
+    }
   }
 
   if (changed) {
     await existing.save();
-    await maybeDownloadTorFile(existing);
     return 'updated';
   }
 
   return 'skipped';
-}
-
-async function maybeDownloadTorFile(work: IWork): Promise<void> {
-  let mutated = false;
-
-  for (const file of work.torFiles) {
-    if (file.linkType !== 'pdf' || file.storageKey) continue; // only fetch direct PDFs, once
-    try {
-      const downloaded = await downloadTorPdf(file.sourceUrl);
-      const saved = await saveTorFile(downloaded.buffer, downloaded.filename);
-      file.storageKey = saved.storageKey;
-      file.filename = saved.filename;
-      file.downloadedAt = new Date();
-      mutated = true;
-    } catch (err) {
-      logger.warn('ingestion', `Failed to download TOR PDF for work ${work.projectId}`, err);
-      // Leave storageKey unset -- a future poll (or a manual retry) can try again.
-    }
-  }
-
-  if (mutated) await work.save();
 }
 
 export async function runDataGoThEnrichment(site: IGovSite, triggeredBy: TriggeredBy): Promise<IIngestionRun> {

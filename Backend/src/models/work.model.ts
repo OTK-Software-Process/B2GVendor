@@ -23,15 +23,20 @@ export const STATUS_BY_ANNOUNCE_TYPE: Record<AnnounceType, WorkStatus> = {
   W2: 'AMENDED'
 };
 
-export type TorLinkType = 'pdf' | 'html' | 'other';
+export type TorLinkType = 'pdf' | 'zip' | 'html' | 'other';
 
 export interface ITorFile {
   announceType: AnnounceType; // which lifecycle stage this document belongs to
   linkType: TorLinkType;
-  sourceUrl: string; // the RSS <link> as-is
-  storageKey?: string; // set once a 'pdf' link has been downloaded and stored
+  sourceUrl: string; // the RSS <link> as-is -- shared by every file extracted from the same zip
+  storageKey?: string; // set once a 'pdf' link (or a file extracted from a 'zip' link) has been downloaded and stored
   filename?: string;
   downloadedAt?: Date;
+  // A 'zip' link can yield several PDFs. 'primary' is the one AI-analyzed
+  // (draft TOR body); 'attachment' are the rest (cover sheets, annexes),
+  // stored for download but not sent to Vertex AI. Undefined for plain
+  // 'pdf'/'html'/'other' entries, which are always a single file.
+  role?: 'primary' | 'attachment';
   // Set when a later item for the SAME announceType arrives with a different
   // link (e.g. a corrected/re-issued document) -- lets the frontend show
   // only the current document per stage while still keeping history.
@@ -50,6 +55,10 @@ export interface IWork extends Document {
   projectId: string; // the e-GP project identifier -- stable key for upsert
 
   title: string;
+  // AI-generated summary of the TOR PDF's actual content (FR-3.2) -- only
+  // present when a downloadable PDF was available and text extraction +
+  // Vertex AI both succeeded; null/absent otherwise (title-only fallback).
+  description?: string;
   status: WorkStatus;
   announceType: AnnounceType;
   pubDate?: Date;
@@ -74,11 +83,12 @@ export interface IWork extends Document {
 const TorFileSchema = new Schema<ITorFile>(
   {
     announceType: { type: String, required: true },
-    linkType: { type: String, enum: ['pdf', 'html', 'other'], required: true },
+    linkType: { type: String, enum: ['pdf', 'zip', 'html', 'other'], required: true },
     sourceUrl: { type: String, required: true },
     storageKey: { type: String },
     filename: { type: String },
     downloadedAt: { type: Date },
+    role: { type: String, enum: ['primary', 'attachment'] },
     supersededAt: { type: Date }
   },
   { _id: false }
@@ -100,6 +110,7 @@ const WorkSchema = new Schema<IWork>(
     projectId: { type: String, required: true, trim: true },
 
     title: { type: String, required: true, trim: true },
+    description: { type: String, trim: true, maxlength: 2000 },
     status: { type: String, required: true, index: true },
     announceType: { type: String, required: true },
     pubDate: { type: Date },
@@ -122,7 +133,7 @@ const WorkSchema = new Schema<IWork>(
 // Stable upsert key -- FR-N1.4: correlates RSS items and data.go.th
 // enrichment records for the same site to the same work.
 WorkSchema.index({ siteId: 1, projectId: 1 }, { unique: true });
-WorkSchema.index({ title: 'text' });
+WorkSchema.index({ title: 'text', description: 'text' });
 WorkSchema.index({ tags: 1 });
 
 export const Work: Model<IWork> = mongoose.models.Work || mongoose.model<IWork>('Work', WorkSchema);

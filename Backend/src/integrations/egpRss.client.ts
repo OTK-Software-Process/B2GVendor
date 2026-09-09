@@ -16,12 +16,13 @@ import { logger } from '../utils/logger';
  *   - The feed is Windows-874 (Thai codepage) encoded, NOT UTF-8, despite
  *     declaring itself as standard XML -- must decode the raw bytes
  *     explicitly as windows-874 or every Thai character is corrupted.
- *   - Each item's <link> is EITHER a direct PDF download or an HTML detail
- *     page, mixed even within the same announceType/agency -- classify it,
- *     never assume one shape.
+ *   - Each item's <link> is a direct PDF download, a zip archive of several
+ *     PDFs (seen on B0/draft-TOR items -- egp-upload-service), or an HTML
+ *     detail page, mixed even within the same announceType/agency --
+ *     classify it, never assume one shape.
  */
 
-export type TorLinkType = 'pdf' | 'html' | 'other';
+export type TorLinkType = 'pdf' | 'zip' | 'html' | 'other';
 
 export interface EgpRssItem {
   title: string;
@@ -32,8 +33,9 @@ export interface EgpRssItem {
   projectId: string | null;
 }
 
-function classifyLink(link: string): TorLinkType {
+export function classifyLink(link: string): TorLinkType {
   if (link.includes('/egp-template-service/dwnt/view-pdf-file')) return 'pdf';
+  if (link.includes('/egp-upload-service/')) return 'zip';
   if (link.includes('ShowHTMLFile')) return 'html';
   return 'other';
 }
@@ -104,9 +106,11 @@ export interface DownloadedFile {
   filename: string;
 }
 
-// Only ever called for linkType === 'pdf' items -- an 'html' link is a page
-// for a human, never fetched (that would be scraping).
-export async function downloadTorPdf(url: string): Promise<DownloadedFile> {
+// Only ever called for linkType === 'pdf' | 'zip' items -- an 'html' link is
+// a page for a human, never fetched (that would be scraping). Generic over
+// both since the download step itself (fetch + content-disposition filename
+// parse) doesn't care what's inside.
+export async function downloadTorFile(url: string, extensionFallback: 'pdf' | 'zip' = 'pdf'): Promise<DownloadedFile> {
   const res = await fetch(url);
   if (!res.ok) {
     throw new Error(`Failed to download TOR file (HTTP ${res.status}) from ${url}`);
@@ -114,7 +118,7 @@ export async function downloadTorPdf(url: string): Promise<DownloadedFile> {
 
   const contentDisposition = res.headers.get('content-disposition') ?? '';
   const filenameMatch = contentDisposition.match(/filename=("?)([^";]+)\1/);
-  const filename = filenameMatch ? filenameMatch[2] : `tor-${Date.now()}.pdf`;
+  const filename = filenameMatch ? filenameMatch[2] : `tor-${Date.now()}.${extensionFallback}`;
 
   const arrayBuffer = await res.arrayBuffer();
   return { buffer: Buffer.from(arrayBuffer), filename };
