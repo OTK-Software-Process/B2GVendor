@@ -10,6 +10,8 @@ export interface CreateGovSiteInput {
   announceTypes?: AnnounceType[];
   dataGoThOrgSlug?: string;
   dataGoThResourceId?: string;
+  dataGoThPackageId?: string;
+  dataGoThSearchQuery?: string;
   requestsPerMinute?: number;
   pollIntervalMinutes?: number;
 }
@@ -45,6 +47,8 @@ export async function createGovSite(input: CreateGovSiteInput): Promise<IGovSite
     announceTypes: input.announceTypes,
     dataGoThOrgSlug: input.dataGoThOrgSlug,
     dataGoThResourceId: input.dataGoThResourceId,
+    dataGoThPackageId: input.dataGoThPackageId,
+    dataGoThSearchQuery: input.dataGoThSearchQuery,
     requestsPerMinute: input.requestsPerMinute,
     pollIntervalMinutes: input.pollIntervalMinutes
   });

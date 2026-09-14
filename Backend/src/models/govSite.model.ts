@@ -20,7 +20,20 @@ export interface IGovSite extends Document {
   // Historical/enrichment source (data.go.th) -- optional, not every site has
   // a resolvable CGD contract dataset (see ProjectDescription.md N1 notes).
   dataGoThOrgSlug?: string;
+  // Manual pin, wins outright when set (see dataGoThResource.service.ts).
+  // Left unset, dataGoThPackageId (falling back to the shared
+  // DATA_GO_TH_DEFAULT_PACKAGE_ID) is resolved via package_show at poll time
+  // instead -- CGD's contract dataset is a periodic batch drop, so a
+  // hardcoded resource_id here silently ages out every fiscal period.
   dataGoThResourceId?: string;
+  dataGoThPackageId?: string;
+  // Fallback for a dataset published as one new CKAN package per fiscal
+  // period rather than one package with several dated resources (confirmed
+  // true of CGD's own contract data -- see dataGoTh.client.ts) -- a raw CKAN
+  // package_search query (e.g. 'organization:cgd title:สัญญา') used to find
+  // the newest matching package when dataGoThPackageId can't track the
+  // rollover by itself.
+  dataGoThSearchQuery?: string;
 
   enabled: boolean;
   requestsPerMinute: number;
@@ -45,6 +58,8 @@ const GovSiteSchema = new Schema<IGovSite>(
 
     dataGoThOrgSlug: { type: String, trim: true },
     dataGoThResourceId: { type: String, trim: true },
+    dataGoThPackageId: { type: String, trim: true },
+    dataGoThSearchQuery: { type: String, trim: true },
 
     enabled: { type: Boolean, default: true, required: true, index: true },
     requestsPerMinute: { type: Number, default: 60, min: 1, max: 600 },

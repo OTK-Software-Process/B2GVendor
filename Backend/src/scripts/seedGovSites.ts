@@ -7,8 +7,15 @@ import { GovSite, AnnounceType } from '../models/govSite.model';
  * Seeds a small number of TEST government sites so the ingestion pipeline
  * can be exercised end-to-end. These are NOT the 7 launch sites from the
  * spec -- there is no published master list mapping an agency to its e-GP
- * deptId (see ProjectDescription.md N1 "Open risk"), so the real BMA/DOH/
- * PEA/etc deptIds still need to be collected manually before launch.
+ * deptId (see ProjectDescription.md N1 "Open risk"), and confirmed live
+ * (2026-09-14) that data.go.th's own datasets carry no equivalent
+ * deptId/agency-code field either (see dataGoTh.client.ts's header comment)
+ * -- this backend does not and cannot resolve deptId on its own. The real
+ * BMA/DOH/PEA/etc deptIds must come from wherever they're already sourced
+ * from outside this codebase before launch (the admin-only
+ * /admin/data-go-th/* endpoints in dataGoThDiscovery.controller.ts are a
+ * resource_id lookup tool for the SEPARATE data.go.th enrichment side --
+ * budget/winner facts -- not a deptId finder).
  *
  * deptId 0304 and 4520101 were confirmed live (real, small, agency-specific
  * result sets) during testAPI exploration -- see

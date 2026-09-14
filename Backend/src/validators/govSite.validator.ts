@@ -11,6 +11,8 @@ export const createGovSiteSchema = z
     announceTypes: z.array(announceTypeSchema).optional(),
     dataGoThOrgSlug: z.string().trim().optional(),
     dataGoThResourceId: z.string().trim().optional(),
+    dataGoThPackageId: z.string().trim().optional(),
+    dataGoThSearchQuery: z.string().trim().optional(),
     requestsPerMinute: z.coerce.number().int().min(1).max(600).optional(),
     pollIntervalMinutes: z.coerce.number().int().min(1).optional()
   })

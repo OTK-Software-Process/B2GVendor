@@ -9,6 +9,12 @@ export interface IIngestionRun extends Document {
   triggeredBy: 'scheduler' | Types.ObjectId; // Account._id when manually triggered
 
   status: IngestionRunStatus;
+  // 'data_go_th' runs only -- the resource_id actually queried, whether it
+  // came from GovSite.dataGoThResourceId directly or was resolved dynamically
+  // via package_show (see dataGoThResource.service.ts). Recorded so an admin
+  // looking at run history can see which dataset a run actually hit, since
+  // that can now change between runs without any config edit.
+  resolvedResourceId?: string;
   fetchedCount: number;
   newCount: number;
   updatedCount: number;
@@ -29,6 +35,7 @@ const IngestionRunSchema = new Schema<IIngestionRun>(
     triggeredBy: { type: Schema.Types.Mixed, required: true },
 
     status: { type: String, enum: ['running', 'success', 'partial', 'failed'], default: 'running', required: true, index: true },
+    resolvedResourceId: { type: String, trim: true },
     fetchedCount: { type: Number, default: 0 },
     newCount: { type: Number, default: 0 },
     updatedCount: { type: Number, default: 0 },

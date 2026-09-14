@@ -28,6 +28,19 @@ const envSchema = z.object({
     .default('https://process3.gprocurement.go.th/EPROCRssFeedWeb/egpannouncerss.xml'),
   DATA_GO_TH_BASE_URL: z.string().url().default('https://data.go.th'),
   DATA_GO_TH_API_KEY: z.string().optional(),
+  // CGD's contract/enrichment datasets are periodic batch drops -- a fixed
+  // resource_id ages out every fiscal period. When a GovSite has no manually
+  // pinned dataGoThResourceId, dataGoThResource.service.ts resolves the
+  // current one at poll time via package_show, from this default dataset id
+  // (override per-GovSite with dataGoThPackageId when a site uses a
+  // different CKAN package).
+  DATA_GO_TH_DEFAULT_PACKAGE_ID: z.string().optional(),
+  // Fallback for a dataset published as one new package per period rather
+  // than dated resources inside one stable package (confirmed true of CGD's
+  // own contract data -- see dataGoTh.client.ts): a raw CKAN package_search
+  // query used to find the newest matching package when neither a
+  // GovSite's nor this default package id resolves.
+  DATA_GO_TH_DEFAULT_SEARCH_QUERY: z.string().optional(),
 
   // How often (ms) the worker checks for queued PollJob rows.
   POLL_JOB_CLAIM_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
@@ -39,13 +52,24 @@ const envSchema = z.object({
   // call shape -- see services/fileStorage.service.ts.
   TOR_STORAGE_DIR: z.string().default('storage/tor'),
 
-  // --- AI-assisted tagging (N3, planned: Vertex AI) ---
+  // --- AI-assisted tagging (N3) ---
   // Soft on/off switch -- ingestion must keep working with this off (e.g. no
-  // GCP credentials in local dev); see NFR-N3.7, AI tagging is best-effort.
+  // credentials in local dev); see NFR-N3.7, AI tagging is best-effort.
   AI_TAGGING_ENABLED: z
     .string()
     .default('false')
     .transform(v => v === 'true'),
+  // Which backend actually serves analyzeTorDocument() -- see
+  // integrations/ai/index.ts. Swappable per-environment with no code change.
+  AI_PROVIDER: z.enum(['openrouter', 'vertexai']).default('openrouter'),
+
+  // OpenRouter (https://openrouter.ai) -- OpenAI-compatible chat-completions
+  // API, one API key covers many hosted models.
+  OPENROUTER_API_KEY: z.string().optional(),
+  OPENROUTER_MODEL: z.string().default('qwen/qwen3.5-flash-02-23'),
+  OPENROUTER_BASE_URL: z.string().url().default('https://openrouter.ai/api/v1'),
+
+  // Vertex AI (Google Cloud) -- the original provider, kept as an alternative.
   GOOGLE_CLOUD_PROJECT: z.string().optional(),
   GOOGLE_CLOUD_LOCATION: z.string().default('asia-southeast1'),
   VERTEX_AI_MODEL: z.string().default('gemini-2.0-flash-001'),

@@ -5,7 +5,8 @@ import { Tag } from '../models/tag.model';
 import { IngestionRun, IIngestionRun } from '../models/ingestionRun.model';
 import { fetchEgpRssFeed, downloadTorFile, EgpRssItem } from '../integrations/egpRss.client';
 import { datastoreSearch } from '../integrations/dataGoTh.client';
-import { analyzeTorDocument, TagCandidate } from '../integrations/vertexAi.client';
+import { resolveDataGoThResourceId, hasDataGoThConfig } from './dataGoThResource.service';
+import { analyzeTorDocument, TagCandidate } from '../integrations/ai';
 import { saveTorFile } from './fileStorage.service';
 import { extractPdfText } from './pdfText.service';
 import { extractPdfsFromZip, pickPrimaryPdf } from './zipExtraction.service';
@@ -155,7 +156,7 @@ async function retryMissingTorDownloads(site: IGovSite, candidateTags: TagCandid
         if (!work.description) {
           const primary = extracted.find(f => f.role !== 'attachment');
           if (primary) {
-            const analysis = await analyzeTorDocument({ title: work.title, pdfText: primary.pdfText }, candidateTags);
+            const analysis = await analyzeTorDocument({ title: work.title, documentText: primary.pdfText }, candidateTags);
             if (analysis.description) work.description = analysis.description;
             for (const tagIdStr of analysis.tagIds) {
               const tagId = new Types.ObjectId(tagIdStr);
@@ -281,7 +282,7 @@ async function upsertWorkFromRssItem(
     // the description -- FR-3.2.
     const extracted = await downloadAndExtractTorFiles(item);
     const primary = extracted?.find(f => f.role !== 'attachment') ?? null;
-    const analysis = await analyzeTorDocument({ title: item.title, pdfText: primary?.pdfText }, candidateTags);
+    const analysis = await analyzeTorDocument({ title: item.title, documentText: primary?.pdfText }, candidateTags);
 
     const tagIds: Types.ObjectId[] = siteTagId ? [siteTagId] : [];
     tagIds.push(...analysis.tagIds.map(id => new Types.ObjectId(id)));
@@ -343,7 +344,7 @@ async function upsertWorkFromRssItem(
   // html-only re-poll never blanks out a description an earlier PDF gave us.
   if (newExtracted) {
     const primary = newExtracted.find(f => f.role !== 'attachment') ?? null;
-    const analysis = await analyzeTorDocument({ title: item.title, pdfText: primary?.pdfText }, candidateTags);
+    const analysis = await analyzeTorDocument({ title: item.title, documentText: primary?.pdfText }, candidateTags);
 
     if (analysis.description) {
       existing.description = analysis.description;
@@ -378,13 +379,15 @@ export async function runDataGoThEnrichment(site: IGovSite, triggeredBy: Trigger
     status: 'running'
   });
 
-  if (!site.dataGoThResourceId) {
+  const resourceId = await resolveDataGoThResourceId(site);
+  if (!resourceId) {
     run.status = 'success';
-    run.errorLog = ['No data.go.th resource configured for this site -- nothing to enrich.'];
+    run.errorLog = ['No data.go.th resource configured (or resolvable via package_show) for this site -- nothing to enrich.'];
     run.finishedAt = new Date();
     await run.save();
     return run;
   }
+  run.resolvedResourceId = resourceId;
 
   let fetchedCount = 0;
   let updatedCount = 0;
@@ -392,7 +395,7 @@ export async function runDataGoThEnrichment(site: IGovSite, triggeredBy: Trigger
   const errorLog: string[] = [];
 
   try {
-    const { records } = await withRetry(() => datastoreSearch(site.dataGoThResourceId as string, { limit: 200 }));
+    const { records } = await withRetry(() => datastoreSearch(resourceId, { limit: 200 }));
     fetchedCount = records.length;
 
     for (const record of records) {
@@ -467,7 +470,7 @@ export async function pollAllEnabledSites(triggeredBy: TriggeredBy): Promise<IIn
     } catch (err) {
       logger.warn('ingestion', `Skipped RSS poll for ${site.shortCode}`, err);
     }
-    if (site.dataGoThResourceId) {
+    if (hasDataGoThConfig(site)) {
       try {
         runs.push(await runDataGoThEnrichment(site, triggeredBy));
       } catch (err) {

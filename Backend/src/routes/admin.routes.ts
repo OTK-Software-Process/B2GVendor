@@ -4,6 +4,7 @@ import { requireAdmin } from '../middlewares/requireRole';
 import { govSiteRouter } from './govSite.routes';
 import { adminTagRouter } from './tag.routes';
 import { ingestionRouter } from './ingestion.routes';
+import { dataGoThDiscoveryRouter } from './dataGoThDiscovery.routes';
 
 export const adminRouter = Router();
 
@@ -14,3 +15,4 @@ adminRouter.use(requireAuth, requireAdmin);
 adminRouter.use('/gov-sites', govSiteRouter);
 adminRouter.use('/tags', adminTagRouter);
 adminRouter.use('/ingestion', ingestionRouter);
+adminRouter.use('/data-go-th', dataGoThDiscoveryRouter);

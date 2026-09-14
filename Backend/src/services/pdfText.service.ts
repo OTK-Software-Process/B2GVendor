@@ -14,10 +14,22 @@ import { logger } from '../utils/logger';
 // signal; a 40-page cost breakdown at the end doesn't add much for tagging.
 const MAX_CHARS = 8000;
 
+// pdf-parse's raw output carries the source PDF's own line-wrapping and
+// per-page whitespace padding -- collapsing runs of blank/whitespace-only
+// lines cuts a meaningful chunk of tokens off the AI prompt (this text is
+// the only thing ever sent to the AI provider -- see integrations/ai --
+// never the PDF bytes themselves) without losing any actual content.
+function normalizeForAi(text: string): string {
+  return text
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 export async function extractPdfText(buffer: Buffer): Promise<string | null> {
   try {
     const result = await pdfParse(buffer);
-    const text = result.text.trim();
+    const text = normalizeForAi(result.text);
     if (!text) return null;
     return text.length > MAX_CHARS ? text.slice(0, MAX_CHARS) : text;
   } catch (err) {
