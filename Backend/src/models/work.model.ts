@@ -66,7 +66,12 @@ export interface IWork extends Document {
   torFiles: ITorFile[];
   statusHistory: IStatusHistoryEntry[];
 
-  // data.go.th enrichment (optional, filled in after award -- FR-N1.3a)
+  // Pre-award: AI-extracted estimate (ราคากลาง/วงเงิน) read straight from
+  // the TOR document text, set as soon as a work is created/updated --
+  // see ingestion.service.ts. Post-award: overwritten with the real
+  // contract price from data.go.th enrichment once that's available
+  // (FR-N1.3a) -- enrichWorkFromContractRecord always wins when it has a
+  // value, so this field converges from "estimate" to "actual" over time.
   budget?: number;
   contractNumber?: string;
   contractDate?: Date;

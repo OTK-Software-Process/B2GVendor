@@ -18,6 +18,11 @@ export interface DocumentAnalysisInput {
 export interface DocumentAnalysisResult {
   description: string | null;
   tagIds: string[];
+  // Estimated/reference price (THB) actually stated in the document text --
+  // e.g. "ราคากลาง" or "วงเงินงบประมาณ" -- NOT the final award amount (that
+  // only exists post-award, via data.go.th enrichment). null when the
+  // document doesn't state one, or no document text was available at all.
+  budget: number | null;
 }
 
 // One text-in/text-out call, shared by every backend (Vertex AI, OpenRouter,

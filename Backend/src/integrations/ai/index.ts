@@ -30,7 +30,7 @@ export { TagCandidate, DocumentAnalysisInput, DocumentAnalysisResult } from './t
  * ingestion.
  */
 
-const EMPTY_RESULT: DocumentAnalysisResult = { description: null, tagIds: [] };
+const EMPTY_RESULT: DocumentAnalysisResult = { description: null, tagIds: [], budget: null };
 
 const providers: Record<string, AiProvider> = {
   vertexai: vertexProvider,
@@ -42,9 +42,23 @@ function getProvider(): AiProvider | null {
   return providers[env.AI_PROVIDER] ?? null;
 }
 
+// Some reasoning-capable models (e.g. Qwen3.5) bake a <think>...</think>
+// chain-of-thought block directly into `content` regardless of the
+// provider-level "exclude reasoning" request flag (openRouterProvider sets
+// it, but this model ignores it). That block often contains its own stray
+// '{'/'}' characters, which broke the brace-matching JSON extraction below
+// (it grabbed from a brace INSIDE the reasoning through to the real
+// answer's closing brace, producing garbage that always failed to parse --
+// silently, since this function's caller treats any failure as "no AI
+// result" rather than an error). Strip it before extracting JSON.
+function stripReasoning(text: string): string {
+  const closeTag = text.lastIndexOf('</think>');
+  return closeTag === -1 ? text : text.slice(closeTag + '</think>'.length);
+}
+
 function parseResult(text: string, validIds: Set<string>): DocumentAnalysisResult {
   try {
-    const match = text.match(/\{[\s\S]*\}/);
+    const match = stripReasoning(text).match(/\{[\s\S]*\}/);
     if (!match) return EMPTY_RESULT;
 
     const parsed = JSON.parse(match[0]);
@@ -55,8 +69,13 @@ function parseResult(text: string, validIds: Set<string>): DocumentAnalysisResul
       typeof parsed.description === 'string' && parsed.description.trim().length > 0
         ? parsed.description.trim().slice(0, 2000)
         : null;
+    // Coerce defensively -- models are inconsistent about emitting a numeric
+    // literal vs. a numeric string (e.g. "1250000" vs 1250000). Reject
+    // anything non-finite or <= 0 rather than trusting it as a real price.
+    const budgetNumber = Number(parsed.budget);
+    const budget = typeof parsed.budget !== 'object' && Number.isFinite(budgetNumber) && budgetNumber > 0 ? budgetNumber : null;
 
-    return { description, tagIds };
+    return { description, tagIds, budget };
   } catch {
     return EMPTY_RESULT;
   }

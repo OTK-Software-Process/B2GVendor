@@ -16,7 +16,7 @@ export const SYSTEM_PROMPT = [
   '',
   'You MUST respond with ONLY one JSON object -- no markdown code fences, no ' +
     'explanation before or after it -- matching EXACTLY this shape:',
-  '{"description": string or null, "tagIds": string[]}',
+  '{"description": string or null, "tagIds": string[], "budget": number or null}',
   '',
   'Rules (apply to every document, no exceptions):',
   '- "tagIds": choose ONLY from the candidate tag list given in the next ' +
@@ -25,8 +25,17 @@ export const SYSTEM_PROMPT = [
   '- "description": a short 1-2 sentence PLAIN-THAI summary of what the ' +
     'procurement is actually for. Never repeat the title verbatim. Never ' +
     'state a fact that is not present in the supplied document text.',
-  '- If no document text is supplied (title only), "description" MUST be ' +
-    'null -- do not guess a description from the title alone.',
+  '- "budget": the estimated/reference price stated IN THE DOCUMENT TEXT ' +
+    'itself -- usually labeled "ราคากลาง" (reference price) or ' +
+    '"วงเงินงบประมาณ" / "วงเงินในการจัดหา" (budget/procurement amount). ' +
+    'Return it as a plain number in Thai Baht -- no currency symbols, no ' +
+    'commas, no words (e.g. 1250000, not "1,250,000 บาท"). This is a ' +
+    'PRE-AWARD estimate the agency itself published, not a final contract ' +
+    'value. Return null if no such figure is clearly stated -- never ' +
+    'estimate, infer, or calculate one yourself from unrelated numbers ' +
+    '(e.g. quantities, page counts, project codes).',
+  '- If no document text is supplied (title only), "description" AND ' +
+    '"budget" MUST both be null -- do not guess either from the title alone.',
   '- When unsure about a field, prefer null / an empty array over a guess.',
   '- Output raw JSON only. It must parse directly with JSON.parse -- no ' +
     'trailing commentary, no ```json fences.'

@@ -158,6 +158,7 @@ async function retryMissingTorDownloads(site: IGovSite, candidateTags: TagCandid
           if (primary) {
             const analysis = await analyzeTorDocument({ title: work.title, documentText: primary.pdfText }, candidateTags);
             if (analysis.description) work.description = analysis.description;
+            if (analysis.budget && !work.budget) work.budget = analysis.budget;
             for (const tagIdStr of analysis.tagIds) {
               const tagId = new Types.ObjectId(tagIdStr);
               if (!work.tags.some(t => t.equals(tagId))) work.tags.push(tagId);
@@ -292,6 +293,12 @@ async function upsertWorkFromRssItem(
       projectId: item.projectId,
       title: item.title,
       description: analysis.description ?? undefined,
+      // AI-extracted pre-award estimate (from the doc's ราคากลาง/วงเงิน
+      // figure) -- gives the website a price to show immediately instead of
+      // waiting for data.go.th enrichment, which only has a figure AFTER
+      // award (enrichWorkFromContractRecord below always wins over this
+      // once it has a real value -- see its `?? work.budget` fallback).
+      budget: analysis.budget ?? undefined,
       status,
       announceType,
       pubDate: item.pubDate ?? undefined,
@@ -348,6 +355,13 @@ async function upsertWorkFromRssItem(
 
     if (analysis.description) {
       existing.description = analysis.description;
+      changed = true;
+    }
+    // Never overwrite a budget that's already set -- if data.go.th already
+    // enriched this work with the real post-award contract price, an
+    // AI-read pre-award estimate from a later document must not clobber it.
+    if (analysis.budget && !existing.budget) {
+      existing.budget = analysis.budget;
       changed = true;
     }
     for (const tagIdStr of analysis.tagIds) {
