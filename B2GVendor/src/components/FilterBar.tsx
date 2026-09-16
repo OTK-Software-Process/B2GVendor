@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
-import { MOCK_AGENCIES, ProcurementStatus } from '@/lib/mock-data';
+import { ProcurementStatus } from '@/lib/mock-data';
 import { ChevronDown, RotateCcw, SlidersHorizontal } from 'lucide-react';
 
 type FilterKey = 'status' | 'site' | 'agency' | 'category' | 'method' | 'budget';
@@ -16,9 +16,13 @@ function FilterBarContent() {
 
   const currentStatus = searchParams.get('status') || '';
   const currentSite = searchParams.get('site') || '';
-  const currentAgency = searchParams.get('agency') || '';
-  const currentCategory = searchParams.get('category') || '';
-  const currentMethod = searchParams.get('method') || '';
+  // Agency / category / method are all just different facets of the same
+  // Tag taxonomy on the real backend (Backend/src/models/tag.model.ts), and
+  // the /works API filters by tag id(s) via a single `tags` param (matches
+  // any, comma-separated) -- there's no separate agency/category/method
+  // field on a Work. So all three dropdowns below toggle membership in this
+  // one shared list.
+  const selectedTagIds = (searchParams.get('tags') || '').split(',').filter(Boolean);
   const currentBudgetMax = searchParams.get('budgetMax') || '';
 
   const updateParam = (key: string, value: string) => {
@@ -32,30 +36,40 @@ function FilterBarContent() {
     router.push(`/search?${params.toString()}`);
   };
 
+  const toggleTag = (tagId: string) => {
+    const next = selectedTagIds.includes(tagId)
+      ? selectedTagIds.filter(id => id !== tagId)
+      : [...selectedTagIds, tagId];
+    updateParam('tags', next.join(','));
+    setOpenKey(null);
+  };
+
   const clearAllFilters = () => {
     const q = searchParams.get('q');
     router.push(q ? `/search?q=${encodeURIComponent(q)}` : '/search');
     setOpenKey(null);
   };
 
-  const hasActiveFilters = currentStatus || currentSite || currentAgency || currentCategory || currentMethod || currentBudgetMax;
-  const activeCount = [currentStatus, currentSite, currentAgency, currentCategory, currentMethod, currentBudgetMax].filter(Boolean).length;
+  const hasActiveFilters = currentStatus || currentSite || selectedTagIds.length > 0 || currentBudgetMax;
+  const activeCount = [currentStatus, currentSite, currentBudgetMax].filter(Boolean).length + selectedTagIds.length;
 
   const statusOptions: { value: ProcurementStatus; labelTh: string; labelEn: string }[] = [
-    { value: 'INVITATION', labelTh: 'ประกาศเชิญชวน', labelEn: 'Invitation' },
+    { value: 'PLANNED', labelTh: 'อยู่ระหว่างวางแผน', labelEn: 'Planned' },
+    { value: 'DRAFT_TOR', labelTh: 'ร่าง TOR', labelEn: 'Draft TOR' },
     { value: 'BIDDING', labelTh: 'อยู่ระหว่างเสนอราคา', labelEn: 'Bidding Open' },
-    { value: 'EVALUATION', labelTh: 'พิจารณาผล', labelEn: 'Evaluation' },
+    { value: 'AMENDED', labelTh: 'แก้ไขประกาศ', labelEn: 'Amended' },
     { value: 'AWARDED', labelTh: 'ประกาศผู้ชนะ', labelEn: 'Awarded' },
-    { value: 'CANCELLED', labelTh: 'ยกเลิก', labelEn: 'Cancelled' },
+    { value: 'CANCELLED', labelTh: 'ยกเลิก', labelEn: 'Cancelled' }
   ];
 
   const budgetOptions = [
     { value: '10000000', label: '≤ 10M ฿' },
     { value: '30000000', label: '≤ 30M ฿' },
     { value: '50000000', label: '≤ 50M ฿' },
-    { value: '100000000', label: '≤ 100M ฿' },
+    { value: '100000000', label: '≤ 100M ฿' }
   ];
 
+  const agencyTags = tags.filter(t => t.facet === 'agency');
   const categoryTags = tags.filter(t => t.facet === 'category');
   const methodTags = tags.filter(t => t.facet === 'method');
 
@@ -67,12 +81,20 @@ function FilterBarContent() {
   const siteLabel = currentSite
     ? govSites.find(s => s.id === currentSite)?.shortCode
     : (lang === 'en' ? 'Gov. Site' : 'หน่วยงานภาครัฐ');
-  const agencyOptions = currentSite ? MOCK_AGENCIES.filter(a => a.siteId === currentSite) : MOCK_AGENCIES;
-  const agencyLabel = currentAgency
-    ? MOCK_AGENCIES.find(a => a.id === currentAgency)?.name.split(' ')[0]
+
+  const selectedAgencyCount = agencyTags.filter(t => selectedTagIds.includes(t.id)).length;
+  const selectedCategoryCount = categoryTags.filter(t => selectedTagIds.includes(t.id)).length;
+  const selectedMethodCount = methodTags.filter(t => selectedTagIds.includes(t.id)).length;
+
+  const agencyLabel = selectedAgencyCount > 0
+    ? `${lang === 'en' ? 'Agency' : 'หน่วยงาน'} (${selectedAgencyCount})`
     : (lang === 'en' ? 'Agency' : 'หน่วยงาน');
-  const categoryLabel = currentCategory || (lang === 'en' ? 'Category' : 'หมวดหมู่');
-  const methodLabel = currentMethod ? currentMethod.split(' ')[0] : (lang === 'en' ? 'Method' : 'วิธีจัดซื้อ');
+  const categoryLabel = selectedCategoryCount > 0
+    ? `${lang === 'en' ? 'Category' : 'หมวดหมู่'} (${selectedCategoryCount})`
+    : (lang === 'en' ? 'Category' : 'หมวดหมู่');
+  const methodLabel = selectedMethodCount > 0
+    ? `${lang === 'en' ? 'Method' : 'วิธีจัดซื้อ'} (${selectedMethodCount})`
+    : (lang === 'en' ? 'Method' : 'วิธีจัดซื้อ');
   const budgetLabel = currentBudgetMax
     ? budgetOptions.find(b => b.value === currentBudgetMax)?.label
     : (lang === 'en' ? 'Budget' : 'งบประมาณ');
@@ -84,7 +106,7 @@ function FilterBarContent() {
         : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:text-emerald-700'
     }`;
 
-  const panelClass = 'absolute top-full left-0 mt-2 min-w-[220px] max-w-xs bg-white rounded-2xl border border-slate-200 shadow-lg z-50 p-3 animate-fade-in-up';
+  const panelClass = 'absolute top-full left-0 mt-2 min-w-[220px] max-w-xs max-h-72 overflow-y-auto bg-white rounded-2xl border border-slate-200 shadow-lg z-50 p-3 animate-fade-in-up';
 
   return (
     <div className="relative">
@@ -139,7 +161,6 @@ function FilterBarContent() {
                     } else {
                       params.set('site', site.id);
                     }
-                    params.delete('agency');
                     params.delete('page');
                     router.push(`/search?${params.toString()}`);
                     setOpenKey(null);
@@ -158,21 +179,24 @@ function FilterBarContent() {
 
         {/* Agency */}
         <div className="relative">
-          <button onClick={() => toggle('agency')} className={pillClass(!!currentAgency)}>
+          <button onClick={() => toggle('agency')} className={pillClass(selectedAgencyCount > 0)}>
             <span className="truncate max-w-[120px]">{agencyLabel}</span>
             <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-150 ${openKey === 'agency' ? 'rotate-180' : ''}`} />
           </button>
           {openKey === 'agency' && (
             <div className={panelClass}>
-              {agencyOptions.map(a => (
+              {agencyTags.length === 0 && (
+                <p className="px-3 py-2 text-xs text-slate-400">{lang === 'en' ? 'No agency tags yet' : 'ยังไม่มีแท็กหน่วยงาน'}</p>
+              )}
+              {agencyTags.map(tag => (
                 <button
-                  key={a.id}
-                  onClick={() => { updateParam('agency', currentAgency === a.id ? '' : a.id); setOpenKey(null); }}
+                  key={tag.id}
+                  onClick={() => toggleTag(tag.id)}
                   className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer ${
-                    currentAgency === a.id ? 'bg-emerald-50 text-emerald-700 font-semibold' : 'text-slate-600 hover:bg-slate-50'
+                    selectedTagIds.includes(tag.id) ? 'bg-emerald-50 text-emerald-700 font-semibold' : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
-                  {a.name}
+                  {tag.name}
                 </button>
               ))}
             </div>
@@ -181,7 +205,7 @@ function FilterBarContent() {
 
         {/* Category */}
         <div className="relative">
-          <button onClick={() => toggle('category')} className={pillClass(!!currentCategory)}>
+          <button onClick={() => toggle('category')} className={pillClass(selectedCategoryCount > 0)}>
             <span className="truncate max-w-[120px]">{categoryLabel}</span>
             <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-150 ${openKey === 'category' ? 'rotate-180' : ''}`} />
           </button>
@@ -190,13 +214,12 @@ function FilterBarContent() {
               {categoryTags.map(tag => (
                 <button
                   key={tag.id}
-                  onClick={() => { updateParam('category', currentCategory === tag.name ? '' : tag.name); setOpenKey(null); }}
+                  onClick={() => toggleTag(tag.id)}
                   className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center justify-between gap-2 transition-colors cursor-pointer ${
-                    currentCategory === tag.name ? 'bg-emerald-50 text-emerald-700 font-semibold' : 'text-slate-600 hover:bg-slate-50'
+                    selectedTagIds.includes(tag.id) ? 'bg-emerald-50 text-emerald-700 font-semibold' : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
                   <span className="truncate">{tag.name}</span>
-                  <span className="text-[10px] text-slate-400 shrink-0">({tag.worksCount})</span>
                 </button>
               ))}
             </div>
@@ -205,7 +228,7 @@ function FilterBarContent() {
 
         {/* Method */}
         <div className="relative">
-          <button onClick={() => toggle('method')} className={pillClass(!!currentMethod)}>
+          <button onClick={() => toggle('method')} className={pillClass(selectedMethodCount > 0)}>
             <span className="truncate max-w-[120px]">{methodLabel}</span>
             <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-150 ${openKey === 'method' ? 'rotate-180' : ''}`} />
           </button>
@@ -214,9 +237,9 @@ function FilterBarContent() {
               {methodTags.map(tag => (
                 <button
                   key={tag.id}
-                  onClick={() => { updateParam('method', currentMethod === tag.name ? '' : tag.name); setOpenKey(null); }}
+                  onClick={() => toggleTag(tag.id)}
                   className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer ${
-                    currentMethod === tag.name ? 'bg-emerald-50 text-emerald-700 font-semibold' : 'text-slate-600 hover:bg-slate-50'
+                    selectedTagIds.includes(tag.id) ? 'bg-emerald-50 text-emerald-700 font-semibold' : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
                   {tag.name}

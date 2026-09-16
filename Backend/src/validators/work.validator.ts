@@ -6,6 +6,8 @@ export const listWorksQuerySchema = z
     status: z.enum(['PLANNED', 'DRAFT_TOR', 'BIDDING', 'CANCELLED', 'AMENDED', 'AWARDED']).optional(),
     tag: z.string().trim().optional(),
     q: z.string().trim().optional(),
+    budgetMax: z.coerce.number().min(0).optional(),
+    sort: z.enum(['date', 'budget-asc', 'budget-desc']).optional(),
     page: z.coerce.number().int().min(1).optional(),
     pageSize: z.coerce.number().int().min(1).max(50).optional()
   })

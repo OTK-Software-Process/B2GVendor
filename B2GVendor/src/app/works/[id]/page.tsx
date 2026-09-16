@@ -1,33 +1,77 @@
 'use client';
 
-import React from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import React, { useEffect, useState } from 'react';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { PublicShell } from '@/components/PublicShell';
 import { StatusBadge } from '@/components/StatusBadge';
 import { FollowTagButton } from '@/components/FollowTagButton';
 import { TORDownloadList } from '@/components/TORDownloadList';
+import { LoadingSkeleton } from '@/components/LoadingSkeleton';
+import { ErrorRetry } from '@/components/ErrorRetry';
 import { useApp } from '@/context/AppContext';
+import { fetchWorkById, toWorkItem } from '@/lib/backend';
+import { WorkItem } from '@/lib/mock-data';
 import {
-  Building2,
-  Calendar,
-  DollarSign,
   FileText,
   History,
   ArrowLeft,
   Share2,
-  ShieldCheck,
   Tag,
   Edit3
 } from 'lucide-react';
 
 export default function WorkDetailPage() {
   const params = useParams();
-  const router = useRouter();
   const { id } = params;
-  const { lang, works, role } = useApp();
+  const { lang, role } = useApp();
 
-  const work = works.find(w => w.id === id) || works[0]; // fallback to first work item if id not found for demo
+  const [work, setWork] = useState<WorkItem | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof id !== 'string') return;
+    let cancelled = false;
+
+    async function run() {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const w = await fetchWorkById(id as string);
+        if (!cancelled) setWork(toWorkItem(w));
+      } catch {
+        if (!cancelled) setError(lang === 'en' ? 'This work is no longer available.' : 'ไม่พบรายการนี้ หรือถูกลบไปแล้ว');
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    }
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, lang]);
+
+  if (isLoading) {
+    return (
+      <PublicShell>
+        <div className="max-w-4xl mx-auto pb-12">
+          <LoadingSkeleton count={3} />
+        </div>
+      </PublicShell>
+    );
+  }
+
+  if (error || !work) {
+    return (
+      <PublicShell>
+        <div className="max-w-4xl mx-auto pb-12">
+          <ErrorRetry message={error ?? (lang === 'en' ? 'This work is no longer available.' : 'ไม่พบรายการนี้')} onRetry={() => window.location.reload()} />
+        </div>
+      </PublicShell>
+    );
+  }
 
   const formattedBudget = new Intl.NumberFormat('th-TH', {
     style: 'currency',
@@ -85,13 +129,15 @@ export default function WorkDetailPage() {
             <h1 className="text-xl sm:text-3xl font-extrabold text-slate-900 leading-snug">
               {work.title}
             </h1>
-            <p className="text-xs sm:text-sm text-slate-600 mt-3 leading-relaxed">
-              {work.description}
-            </p>
+            {work.description && (
+              <p className="text-xs sm:text-sm text-slate-600 mt-3 leading-relaxed">
+                {work.description}
+              </p>
+            )}
           </div>
 
           {/* Key Metrics Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 pt-2">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
             <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/60">
               <span className="text-xs text-slate-400 font-medium block">{lang === 'en' ? 'Government Site' : 'หน่วยงานภาครัฐ'}</span>
               <span className="text-sm font-bold text-sky-700">{work.siteName}</span>
@@ -101,14 +147,19 @@ export default function WorkDetailPage() {
               <span className="text-lg font-bold text-emerald-700">{formattedBudget}</span>
             </div>
             <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/60">
-              <span className="text-xs text-slate-400 font-medium block">{lang === 'en' ? 'Agency Owner' : 'หน่วยงานเจ้าของโครงการ'}</span>
-              <Link href={`/agencies/${work.agencyId}`} className="text-sm font-bold text-slate-900 hover:text-emerald-600 truncate block">
-                {work.agencyName}
-              </Link>
-            </div>
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/60">
-              <span className="text-xs text-slate-400 font-medium block">{lang === 'en' ? 'Closing Date' : 'วันปิดรับซองเสนอราคา'}</span>
-              <span className="text-sm font-bold text-amber-700">{work.closingDate}</span>
+              {work.agencyId ? (
+                <>
+                  <span className="text-xs text-slate-400 font-medium block">{lang === 'en' ? 'Agency' : 'หน่วยงานเจ้าของโครงการ'}</span>
+                  <Link href={`/agencies/${work.agencyId}`} className="text-sm font-bold text-slate-900 hover:text-emerald-600 truncate block">
+                    {work.agencyName}
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <span className="text-xs text-slate-400 font-medium block">{lang === 'en' ? 'Published' : 'วันที่ประกาศ'}</span>
+                  <span className="text-sm font-bold text-slate-900">{work.publishDate || '—'}</span>
+                </>
+              )}
             </div>
           </div>
 
@@ -119,15 +170,26 @@ export default function WorkDetailPage() {
               <span>{lang === 'en' ? 'Tags Applied to this Work (Click to Follow):' : 'แท็กประจำโครงการนี้ (คลิกเพื่อติดตาม):'}</span>
             </h4>
             <div className="flex flex-wrap gap-2">
-              {work.tags.map(tag => (
-                <FollowTagButton key={tag.id} tagId={tag.id} tagName={tag.name} variant="badge" size="sm" />
-              ))}
+              {work.tags.length > 0 ? (
+                work.tags.map(tag => (
+                  <FollowTagButton key={tag.id} tagId={tag.id} tagName={tag.name} variant="badge" size="sm" />
+                ))
+              ) : (
+                <span className="text-xs text-slate-400">{lang === 'en' ? 'No tags yet' : 'ยังไม่มีแท็ก'}</span>
+              )}
             </div>
           </div>
         </div>
 
         {/* TOR Downloads Component */}
-        <TORDownloadList files={work.torFiles} />
+        {work.torFiles.length > 0 ? (
+          <TORDownloadList files={work.torFiles} />
+        ) : (
+          <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200 flex items-center gap-3 text-sm text-slate-500">
+            <FileText className="w-5 h-5 text-slate-300 shrink-0" />
+            <span>{lang === 'en' ? 'No TOR document has been ingested for this work yet.' : 'ยังไม่มีเอกสาร TOR สำหรับรายการนี้'}</span>
+          </div>
+        )}
 
         {/* Status Change Timeline */}
         <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 space-y-6">

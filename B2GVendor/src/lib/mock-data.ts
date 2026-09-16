@@ -1,4 +1,16 @@
-export type ProcurementStatus = 'INVITATION' | 'BIDDING' | 'EVALUATION' | 'AWARDED' | 'CANCELLED';
+// Mock-era statuses (INVITATION/EVALUATION) stay for the still-mock admin +
+// notification pages; PLANNED/DRAFT_TOR/AMENDED are the real backend's
+// WorkStatus values (see Backend/src/models/work.model.ts) used by every
+// page now wired to live data.
+export type ProcurementStatus =
+  | 'INVITATION'
+  | 'EVALUATION'
+  | 'PLANNED'
+  | 'DRAFT_TOR'
+  | 'BIDDING'
+  | 'AMENDED'
+  | 'AWARDED'
+  | 'CANCELLED';
 export type ProcurementMethod = 'e-bidding' | 'e-market' | 'specific' | 'selection';
 
 export interface TagItem {
@@ -29,6 +41,10 @@ export interface TORFile {
   url: string;
   date: string;
   type: string;
+  // true when `url` points at the source government site rather than a
+  // file downloaded by our own ingestion pipeline (e.g. an 'html'-type TOR
+  // link -- see Backend/src/models/work.model.ts ITorFile).
+  external?: boolean;
 }
 
 export interface StatusHistoryItem {
@@ -142,6 +158,24 @@ export const MOCK_STATUS_CONFIG: Record<ProcurementStatus, { label: string; labe
     labelEn: 'Invitation',
     boxClass: 'bg-blue-600 text-white',
     dotClass: 'bg-blue-500'
+  },
+  PLANNED: {
+    label: 'อยู่ระหว่างวางแผน',
+    labelEn: 'Planned',
+    boxClass: 'bg-slate-500 text-white',
+    dotClass: 'bg-slate-400'
+  },
+  DRAFT_TOR: {
+    label: 'ร่าง TOR',
+    labelEn: 'Draft TOR',
+    boxClass: 'bg-indigo-600 text-white',
+    dotClass: 'bg-indigo-500'
+  },
+  AMENDED: {
+    label: 'แก้ไขประกาศ',
+    labelEn: 'Amended',
+    boxClass: 'bg-amber-600 text-white',
+    dotClass: 'bg-amber-500'
   },
   BIDDING: {
     label: 'อยู่ระหว่างเสนอราคา',

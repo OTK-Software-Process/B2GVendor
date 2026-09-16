@@ -1,14 +1,15 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { MOCK_AGENCIES } from '@/lib/mock-data';
 import { useApp } from '@/context/AppContext';
+import { fetchWorks, toTagItem } from '@/lib/backend';
+import { TagItem } from '@/lib/mock-data';
 import { Building2, Search, ArrowRight, Landmark, X } from 'lucide-react';
 
 export function AgencyDirectoryClient() {
-  const { lang, govSites } = useApp();
+  const { lang, govSites, tags } = useApp();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [filterQuery, setFilterQuery] = useState('');
@@ -26,12 +27,52 @@ export function AgencyDirectoryClient() {
     router.push(`/agencies?${params.toString()}`);
   };
 
-  const scopedAgencies = selectedSiteId ? MOCK_AGENCIES.filter(a => a.siteId === selectedSiteId) : MOCK_AGENCIES;
+  // Agency (department) is just a Tag with facet='agency' -- there's no
+  // dedicated Agency entity on the backend. A Tag isn't itself scoped to a
+  // site, so to show "this site's departments" we derive it from the
+  // agency-facet tags actually present on that site's ingested works.
+  const [siteScopedAgencyTags, setSiteScopedAgencyTags] = useState<TagItem[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const allAgencyTags = tags.filter(t => t.facet === 'agency');
 
-  const filteredAgencies = scopedAgencies.filter(a =>
+  useEffect(() => {
+    if (!selectedSiteId) return;
+
+    let cancelled = false;
+
+    async function run() {
+      setIsLoading(true);
+      try {
+        const res = await fetchWorks({ siteId: selectedSiteId, pageSize: 50 });
+        if (cancelled) return;
+        const seen = new Map<string, TagItem>();
+        res.items.forEach(work => {
+          work.tags
+            .filter(t => t.facet === 'agency')
+            .forEach(t => {
+              if (!seen.has(t._id)) seen.set(t._id, toTagItem(t));
+            });
+        });
+        setSiteScopedAgencyTags(Array.from(seen.values()));
+      } catch {
+        if (!cancelled) setSiteScopedAgencyTags([]);
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    }
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSiteId]);
+
+  const agencyTags = selectedSiteId ? siteScopedAgencyTags : allAgencyTags;
+  const showLoading = isLoading && Boolean(selectedSiteId);
+
+  const filteredAgencies = agencyTags.filter(a =>
     a.name.toLowerCase().includes(filterQuery.toLowerCase()) ||
-    a.code.toLowerCase().includes(filterQuery.toLowerCase()) ||
-    a.category.toLowerCase().includes(filterQuery.toLowerCase())
+    a.aliases.some(alias => alias.toLowerCase().includes(filterQuery.toLowerCase()))
   );
 
   return (
@@ -43,7 +84,7 @@ export function AgencyDirectoryClient() {
             <span>{lang === 'en' ? 'Browse by Government Site' : 'เรียกดูตามหน่วยงานภาครัฐ'}</span>
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            {lang === 'en' ? 'Pick a government site to drill into its departments and procurement works' : 'เลือกหน่วยงานภาครัฐเพื่อดูหน่วยงานย่อยและรายการจัดซื้อจัดจ้างของแต่ละแห่ง'}
+            {lang === 'en' ? 'Pick a government site to see the departments (agency tags) present in its ingested works' : 'เลือกหน่วยงานภาครัฐเพื่อดูแท็กหน่วยงานย่อยที่พบในโครงการที่นำเข้าแล้วของแต่ละแห่ง'}
           </p>
         </div>
 
@@ -51,7 +92,6 @@ export function AgencyDirectoryClient() {
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
           {govSites.map(site => {
             const active = selectedSiteId === site.id;
-            const agencyCount = MOCK_AGENCIES.filter(a => a.siteId === site.id).length;
             return (
               <button
                 key={site.id}
@@ -69,17 +109,19 @@ export function AgencyDirectoryClient() {
                   <span className="font-extrabold text-sm text-slate-900">{site.shortCode}</span>
                   {!site.enabled && (
                     <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full">
-                      {lang === 'en' ? 'Coming soon' : 'เร็วๆ นี้'}
+                      {lang === 'en' ? 'Disabled' : 'ปิดใช้งาน'}
                     </span>
                   )}
                 </div>
                 <p className="text-xs text-slate-600 mt-1 leading-snug line-clamp-2">{site.name}</p>
-                <p className="text-[11px] text-slate-400 mt-1.5">
-                  {agencyCount} {lang === 'en' ? 'depts' : 'หน่วยงานย่อย'} · {site.worksCount} {lang === 'en' ? 'works' : 'โครงการ'}
-                </p>
               </button>
             );
           })}
+          {govSites.length === 0 && (
+            <p className="col-span-full text-sm text-slate-400 py-4">
+              {lang === 'en' ? 'No government sites configured yet.' : 'ยังไม่มีการตั้งค่าหน่วยงานภาครัฐ'}
+            </p>
+          )}
         </div>
 
         {selectedSite && (
@@ -99,30 +141,29 @@ export function AgencyDirectoryClient() {
             type="text"
             value={filterQuery}
             onChange={(e) => setFilterQuery(e.target.value)}
-            placeholder={lang === 'en' ? 'Filter departments by name, code, or category...' : 'กรองรายชื่อหน่วยงานย่อย รหัส หรือหมวดหมู่...'}
+            placeholder={lang === 'en' ? 'Filter departments by name...' : 'กรองรายชื่อหน่วยงานย่อยตามชื่อ...'}
             className="w-full bg-transparent outline-hidden text-sm text-slate-900"
           />
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredAgencies.map(agency => (
+        {showLoading && (
+          <p className="col-span-full text-center py-8 text-sm text-slate-400">
+            {lang === 'en' ? 'Loading departments…' : 'กำลังโหลดรายชื่อหน่วยงานย่อย…'}
+          </p>
+        )}
+
+        {!showLoading && filteredAgencies.map(agency => (
           <div key={agency.id} className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs flex flex-col justify-between space-y-4 hover:border-emerald-500 transition-all">
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-lg">
-                  {agency.code}
-                </span>
-                <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-2.5 py-0.5 rounded-full">
-                  {agency.worksCount} {lang === 'en' ? 'active works' : 'โครงการ'}
-                </span>
-              </div>
               <h3 className="font-bold text-lg text-slate-900">{agency.name}</h3>
-              <p className="text-xs text-slate-500 leading-relaxed">{agency.description}</p>
+              {agency.aliases.length > 0 && (
+                <p className="text-xs text-slate-500 leading-relaxed">{agency.aliases.join(' · ')}</p>
+              )}
             </div>
 
-            <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
-              <span className="text-xs font-medium text-slate-400">{agency.category}</span>
+            <div className="pt-3 border-t border-slate-100 flex items-center justify-end">
               <Link
                 href={`/agencies/${agency.id}`}
                 className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 hover:text-emerald-700 hover:underline"
@@ -134,7 +175,7 @@ export function AgencyDirectoryClient() {
           </div>
         ))}
 
-        {filteredAgencies.length === 0 && (
+        {!showLoading && filteredAgencies.length === 0 && (
           <div className="col-span-full text-center py-12 text-sm text-slate-400 flex flex-col items-center gap-2">
             <Building2 className="w-8 h-8 text-slate-300" />
             <span>{lang === 'en' ? 'No departments match this filter.' : 'ไม่พบหน่วยงานย่อยที่ตรงกับตัวกรอง'}</span>

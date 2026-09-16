@@ -1,18 +1,36 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { PublicShell } from '@/components/PublicShell';
 import { SearchBar } from '@/components/SearchBar';
 import { WorkCard } from '@/components/WorkCard';
 import { useApp } from '@/context/AppContext';
+import { fetchWorks, toWorkItem } from '@/lib/backend';
+import { WorkItem } from '@/lib/mock-data';
 import { ArrowRight, ArrowUpRight } from 'lucide-react';
 
 export function HomeClient() {
-  const { lang, works, ingestionRuns, govSites } = useApp();
+  const { lang, ingestionRuns, govSites } = useApp();
   const latestRun = ingestionRuns[0];
 
-  const recentWorks = works.slice(0, 4);
+  const [recentWorks, setRecentWorks] = useState<WorkItem[]>([]);
+
+  // Real recently-ingested works (GET /works, sorted newest-first, page 1)
+  // -- this page shows a different, live slice from Mongo, not a fixed
+  // mock array.
+  useEffect(() => {
+    let cancelled = false;
+    fetchWorks({ sort: 'date', page: 1, pageSize: 4 })
+      .then(res => {
+        if (!cancelled) setRecentWorks(res.items.map(toWorkItem));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const featuredWork = recentWorks[0];
   const restOfWorks = recentWorks.slice(1);
 
@@ -59,16 +77,12 @@ export function HomeClient() {
               {lang === 'en' ? 'Open for bidding' : 'อยู่ระหว่างเสนอราคา'}
             </Link>
             <span className="text-slate-300">·</span>
-            <Link href="/search?agency=agency-yotha" className="text-slate-600 hover:text-emerald-700 underline decoration-slate-300 hover:decoration-emerald-400 underline-offset-4 transition-colors">
-              {lang === 'en' ? 'Public Works Dept' : 'สำนักการโยธา'}
+            <Link href="/search?status=DRAFT_TOR" className="text-slate-600 hover:text-emerald-700 underline decoration-slate-300 hover:decoration-emerald-400 underline-offset-4 transition-colors">
+              {lang === 'en' ? 'Draft TOR' : 'ร่าง TOR'}
             </Link>
             <span className="text-slate-300">·</span>
-            <Link href="/search?category=งานก่อสร้างและโยธา" className="text-slate-600 hover:text-emerald-700 underline decoration-slate-300 hover:decoration-emerald-400 underline-offset-4 transition-colors">
-              {lang === 'en' ? 'Construction' : 'งานก่อสร้าง'}
-            </Link>
-            <span className="text-slate-300">·</span>
-            <Link href="/search?category=ครุภัณฑ์คอมพิวเตอร์และดิจิทัล" className="text-slate-600 hover:text-emerald-700 underline decoration-slate-300 hover:decoration-emerald-400 underline-offset-4 transition-colors">
-              {lang === 'en' ? 'IT & Digital' : 'ไอทีและดิจิทัล'}
+            <Link href="/search?status=AWARDED" className="text-slate-600 hover:text-emerald-700 underline decoration-slate-300 hover:decoration-emerald-400 underline-offset-4 transition-colors">
+              {lang === 'en' ? 'Awarded' : 'ประกาศผู้ชนะ'}
             </Link>
           </div>
         </div>
