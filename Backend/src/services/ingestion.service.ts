@@ -14,6 +14,7 @@ import { extractPdfText } from './pdfText.service';
 import { extractPdfsFromZip, pickPrimaryPdf } from './zipExtraction.service';
 import { logger } from '../utils/logger';
 import { withRetry, sleep } from '../utils/retry';
+import { notifyNewWorkMatches } from './notification.service';
 
 export type TriggeredBy = 'scheduler' | Types.ObjectId;
 
@@ -386,7 +387,7 @@ async function upsertWorkFromRssItem(
     const newTagId = await resolveNewTag(analysis, candidateTags);
     if (newTagId) tagIds.push(newTagId);
 
-    await Work.create({
+    const createdWork = await Work.create({
       siteId: site._id,
       projectId: item.projectId,
       title: item.title,
@@ -405,12 +406,19 @@ async function upsertWorkFromRssItem(
       tags: tagIds,
       ingestionRelevance
     });
+    // Never notify about a work the recipient can't actually view --
+    // work.service.ts's public queries exclude 'not-related' works
+    // entirely, so a notification linking to one would just 404.
+    if (ingestionRelevance !== 'not-related') {
+      await notifyNewWorkMatches(createdWork, tagIds);
+    }
 
     return 'new';
   }
 
   let changed = false;
   let newExtracted: ExtractedTorFile[] | null = null;
+  const newlyAddedTagIds: Types.ObjectId[] = [];
 
   // Log every distinct lifecycle event, not only ones that change the
   // derived status -- e.g. D1 (cancellation) and W1 (winner cancellation)
@@ -480,6 +488,7 @@ async function upsertWorkFromRssItem(
       const tagId = new Types.ObjectId(tagIdStr);
       if (!existing.tags.some(t => t.equals(tagId))) {
         existing.tags.push(tagId);
+        newlyAddedTagIds.push(tagId);
         changed = true;
       }
     }
@@ -492,6 +501,9 @@ async function upsertWorkFromRssItem(
 
   if (changed) {
     await existing.save();
+    if (newlyAddedTagIds.length > 0) {
+      await notifyNewWorkMatches(existing, newlyAddedTagIds);
+    }
     return 'updated';
   }
 

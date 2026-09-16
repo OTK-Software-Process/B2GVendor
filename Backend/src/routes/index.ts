@@ -6,6 +6,8 @@ import { adminRouter } from './admin.routes';
 import { tagRouter } from './tag.routes';
 import { workRouter } from './work.routes';
 import { govSiteRouter } from './govSite.routes';
+import { followRouter } from './follow.routes';
+import { notificationRouter } from './notification.routes';
 
 export const apiRouter = Router();
 
@@ -16,3 +18,5 @@ apiRouter.use('/admin', adminRouter);
 apiRouter.use('/tags', tagRouter);
 apiRouter.use('/works', workRouter);
 apiRouter.use('/gov-sites', govSiteRouter);
+apiRouter.use('/follows', followRouter);
+apiRouter.use('/notifications', notificationRouter);

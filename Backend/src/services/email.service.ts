@@ -94,3 +94,24 @@ export async function sendPasswordSetupEmail(
     )
   });
 }
+
+export async function sendNewWorkMatchEmail(
+  to: string,
+  name: string,
+  work: string,
+  matchedTagNames: string[],
+): Promise<void> {
+  const url = `${env.APP_URL}/works/${encodeURIComponent(work)}`;
+
+  await send({ 
+    to, 
+    subject: "งานใหม่ตรงกับแท็กที่คุณติดตาม | New work matches your followed tags", 
+    text: `สวัสดีคุณ ${name}\n\nมีงานใหม่ที่ตรงกับแท็กที่คุณติดตาม: ${matchedTagNames.join(', ')}\n\nดูรายละเอียดงานได้ที่: ${url}`,
+    html: layout(
+      'งานใหม่ตรงกับแท็กที่คุณติดตาม',
+      `สวัสดีคุณ ${name} — มีงานใหม่ที่ตรงกับแท็กที่คุณติดตาม: ${matchedTagNames.join(', ')}`,
+      'ดูรายละเอียดงาน',
+      url
+    )
+  });
+}
