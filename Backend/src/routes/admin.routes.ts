@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { requireAuth } from '../middlewares/auth.middleware';
 import { requireAdmin } from '../middlewares/requireRole';
-import { govSiteRouter } from './govSite.routes';
+import { adminGovSiteRouter } from './govSite.routes';
 import { adminTagRouter } from './tag.routes';
 import { ingestionRouter } from './ingestion.routes';
 import { dataGoThDiscoveryRouter } from './dataGoThDiscovery.routes';
@@ -12,7 +12,7 @@ export const adminRouter = Router();
 // further to Super Admin where the spec calls for it (see govSite.routes.ts).
 adminRouter.use(requireAuth, requireAdmin);
 
-adminRouter.use('/gov-sites', govSiteRouter);
+adminRouter.use('/gov-sites', adminGovSiteRouter);
 adminRouter.use('/tags', adminTagRouter);
 adminRouter.use('/ingestion', ingestionRouter);
 adminRouter.use('/data-go-th', dataGoThDiscoveryRouter);

@@ -55,7 +55,7 @@ export function WorkCard({ work, layout = 'row' }: WorkCardProps) {
 
         <div className="flex items-center justify-between text-xs pt-1">
           <span className="font-bold text-emerald-700">{formattedBudget}</span>
-          <span className="text-amber-700 font-medium">{work.closingDate}</span>
+          <span className="text-amber-700 font-medium">{work.publishDate}</span>
         </div>
 
         <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
@@ -93,10 +93,17 @@ export function WorkCard({ work, layout = 'row' }: WorkCardProps) {
           </p>
 
           <div className="flex flex-wrap items-center gap-y-2 gap-x-5 text-xs text-slate-500 pt-1">
-            <Link href={`/agencies/${work.agencyId}`} className="flex items-center gap-1.5 hover:text-emerald-700 font-medium transition-colors">
-              <Building2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-              <span className="truncate max-w-[220px]">{work.agencyName}</span>
-            </Link>
+            {work.agencyId ? (
+              <Link href={`/agencies/${work.agencyId}`} className="flex items-center gap-1.5 hover:text-emerald-700 font-medium transition-colors">
+                <Building2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span className="truncate max-w-[220px]">{work.agencyName}</span>
+              </Link>
+            ) : (
+              <span className="flex items-center gap-1.5">
+                <Building2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span className="truncate max-w-[220px]">{work.agencyName}</span>
+              </span>
+            )}
             <span>{work.methodLabel}</span>
           </div>
 
@@ -110,8 +117,8 @@ export function WorkCard({ work, layout = 'row' }: WorkCardProps) {
             <span className="text-base sm:text-lg font-bold text-emerald-700">{formattedBudget}</span>
           </div>
           <div className="text-left lg:text-right">
-            <span className="text-[11px] text-slate-400 block">{lang === 'en' ? 'Closes' : 'ปิดรับซอง'}</span>
-            <span className="text-xs sm:text-sm font-semibold text-amber-700">{work.closingDate}</span>
+            <span className="text-[11px] text-slate-400 block">{lang === 'en' ? 'Published' : 'ประกาศเมื่อ'}</span>
+            <span className="text-xs sm:text-sm font-semibold text-amber-700">{work.publishDate}</span>
           </div>
           <Link
             href={`/works/${work.id}`}

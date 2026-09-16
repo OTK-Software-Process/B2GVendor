@@ -14,6 +14,7 @@ import {
   MOCK_INGESTION_RUNS,
   MOCK_GOV_SITES
 } from '@/lib/mock-data';
+import { fetchGovSites, fetchTags, toGovSiteItem, toTagItem } from '@/lib/backend';
 
 export type UserRole = 'visitor' | 'user' | 'admin' | 'superadmin';
 export type AppLang = 'th' | 'en';
@@ -103,6 +104,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Government sites and the tag taxonomy are read from the real backend
+  // (public GET /gov-sites, GET /tags) -- they drive the site directory and
+  // every facet filter on the search/agencies pages. If the API isn't
+  // reachable (e.g. local dev without the backend running), fall back to
+  // the mock directory rather than leaving the UI empty.
+  useEffect(() => {
+    let cancelled = false;
+
+    fetchGovSites()
+      .then(sites => {
+        if (!cancelled) setGovSites(sites.map(toGovSiteItem));
+      })
+      .catch(() => {});
+
+    fetchTags()
+      .then(list => {
+        if (!cancelled) setTags(list.map(toTagItem));
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const signIn = (nextAccount: AccountView) => {

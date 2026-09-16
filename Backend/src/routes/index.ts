@@ -5,6 +5,7 @@ import { accountRouter } from './account.routes';
 import { adminRouter } from './admin.routes';
 import { tagRouter } from './tag.routes';
 import { workRouter } from './work.routes';
+import { govSiteRouter } from './govSite.routes';
 
 export const apiRouter = Router();
 
@@ -14,3 +15,4 @@ apiRouter.use('/account', accountRouter);
 apiRouter.use('/admin', adminRouter);
 apiRouter.use('/tags', tagRouter);
 apiRouter.use('/works', workRouter);
+apiRouter.use('/gov-sites', govSiteRouter);

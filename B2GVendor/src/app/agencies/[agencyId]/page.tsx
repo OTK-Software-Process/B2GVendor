@@ -1,32 +1,56 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { PublicShell } from '@/components/PublicShell';
 import { WorkCard } from '@/components/WorkCard';
 import { FollowTagButton } from '@/components/FollowTagButton';
+import { LoadingSkeleton } from '@/components/LoadingSkeleton';
 import { useApp } from '@/context/AppContext';
-import { MOCK_AGENCIES } from '@/lib/mock-data';
+import { fetchWorks, toWorkItem } from '@/lib/backend';
+import { WorkItem } from '@/lib/mock-data';
 import { Building2, ArrowLeft, Layers } from 'lucide-react';
 
 export default function AgencyDetailPage() {
   const params = useParams();
   const { agencyId } = params;
-  const { lang, works, tags, govSites } = useApp();
+  const { lang, tags } = useApp();
 
-  const agency = MOCK_AGENCIES.find(a => a.id === agencyId) || MOCK_AGENCIES[0];
-  const site = govSites.find(s => s.id === agency.siteId);
-  const agencyWorks = works.filter(w => w.agencyId === agency.id || w.agencyName.includes(agency.name));
+  // "Agency" here is a real Tag with facet='agency' -- there's no separate
+  // Agency entity on the backend (see AgencyDirectoryClient.tsx).
+  const agencyTag = tags.find(t => t.id === agencyId);
 
-  // Find associated agency tag in taxonomy if exists
-  const agencyTag = tags.find(t => t.name.includes(agency.name) || t.aliases.some(a => a.includes(agency.code)));
+  const [agencyWorks, setAgencyWorks] = useState<WorkItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    if (typeof agencyId !== 'string') return;
+    let cancelled = false;
+
+    async function run() {
+      setIsLoading(true);
+      try {
+        const res = await fetchWorks({ tag: agencyId as string, pageSize: 50 });
+        if (!cancelled) setAgencyWorks(res.items.map(toWorkItem));
+      } catch {
+        if (!cancelled) setAgencyWorks([]);
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    }
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [agencyId]);
 
   return (
     <PublicShell>
       <div className="space-y-8 pb-12">
         <Link
-          href={site ? `/agencies?site=${site.id}` : '/agencies'}
+          href="/agencies"
           className="inline-flex items-center gap-2 text-xs font-bold text-slate-600 hover:text-emerald-600 transition-colors"
         >
           <ArrowLeft className="w-4 h-4" />
@@ -37,29 +61,23 @@ export default function AgencyDetailPage() {
         <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-xs space-y-4">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="space-y-2">
-              {site && (
-                <Link href={`/agencies?site=${site.id}`} className="text-[11px] font-bold text-sky-700 bg-sky-50 px-2 py-0.5 rounded-md inline-block hover:bg-sky-100 transition-colors">
-                  {site.name}
-                </Link>
-              )}
               <div className="flex items-center gap-2">
-                <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg">
-                  {agency.code}
-                </span>
-                <span className="text-xs text-slate-400">{agency.category}</span>
+                <Building2 className="w-5 h-5 text-emerald-600" />
+                <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900">
+                  {agencyTag?.name ?? (lang === 'en' ? 'Unknown agency' : 'ไม่พบหน่วยงานย่อยนี้')}
+                </h1>
               </div>
-              <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900">
-                {agency.name}
-              </h1>
-              <p className="text-xs sm:text-sm text-slate-600 max-w-2xl">
-                {agency.description}
-              </p>
+              {agencyTag && agencyTag.aliases.length > 0 && (
+                <p className="text-xs sm:text-sm text-slate-600 max-w-2xl">
+                  {agencyTag.aliases.join(' · ')}
+                </p>
+              )}
             </div>
 
             {/* Follow Agency Button */}
             {agencyTag && (
               <div className="shrink-0">
-                <FollowTagButton tagId={agencyTag.id} tagName={`หน่วยงาน: ${agency.name}`} variant="button" size="md" />
+                <FollowTagButton tagId={agencyTag.id} tagName={agencyTag.name} variant="button" size="md" />
               </div>
             )}
           </div>
@@ -72,16 +90,27 @@ export default function AgencyDetailPage() {
               <Layers className="w-5 h-5 text-emerald-600" />
               <span>{lang === 'en' ? 'Tenders & Procurement Works' : 'รายการประกาศจัดซื้อจัดจ้างของหน่วยงานนี้'}</span>
             </h2>
-            <span className="text-xs text-slate-500">
-              {agencyWorks.length} {lang === 'en' ? 'works found' : 'รายการ'}
-            </span>
+            {!isLoading && (
+              <span className="text-xs text-slate-500">
+                {agencyWorks.length} {lang === 'en' ? 'works found' : 'รายการ'}
+              </span>
+            )}
           </div>
 
-          <div className="space-y-4">
-            {agencyWorks.map(work => (
-              <WorkCard key={work.id} work={work} />
-            ))}
-          </div>
+          {isLoading ? (
+            <LoadingSkeleton count={3} />
+          ) : (
+            <div className="space-y-4">
+              {agencyWorks.map(work => (
+                <WorkCard key={work.id} work={work} />
+              ))}
+              {agencyWorks.length === 0 && (
+                <p className="text-sm text-slate-400 text-center py-8">
+                  {lang === 'en' ? 'No works tagged with this agency yet.' : 'ยังไม่มีโครงการที่ติดแท็กหน่วยงานนี้'}
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </PublicShell>
