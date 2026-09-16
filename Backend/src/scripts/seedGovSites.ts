@@ -46,21 +46,21 @@ async function main(): Promise<void> {
   const defaultAnnounceTypes: AnnounceType[] = ['B0', 'D0', 'W0'];
 
   const seeds = [
-    {
-      name: '[TEST] Agency 0304',
-      shortCode: 'TEST0304',
-      deptId: '0304',
-      announceTypes: defaultAnnounceTypes
-    },
-    {
-      name: '[TEST] Agency 4520101',
-      shortCode: 'TEST4520101',
-      deptId: '4520101',
-      announceTypes: defaultAnnounceTypes,
-      // Confirmed DataStore-backed CGD contract resource from testAPI's
-      // `cgd`/`winner` commands -- real records, may age out over time.
-      dataGoThResourceId: '2532b3a6-df25-4f4f-90f8-eb308b86229e'
-    },
+    // {
+    //   name: '[TEST] Agency 0304',
+    //   shortCode: 'TEST0304',
+    //   deptId: '0304',
+    //   announceTypes: defaultAnnounceTypes
+    // },
+    // {
+    //   name: '[TEST] Agency 4520101',
+    //   shortCode: 'TEST4520101',
+    //   deptId: '4520101',
+    //   announceTypes: defaultAnnounceTypes,
+    //   // Confirmed DataStore-backed CGD contract resource from testAPI's
+    //   // `cgd`/`winner` commands -- real records, may age out over time.
+    //   dataGoThResourceId: '2532b3a6-df25-4f4f-90f8-eb308b86229e'
+    // },
     {
       name: 'สำนักงานปลัดกระทรวงสาธารณสุข',
       shortCode: 'MOPH',
