@@ -1,17 +1,49 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useApp } from '@/context/AppContext';
-import { ArrowLeft, RefreshCw, FileText } from 'lucide-react';
+import { ArrowLeft, RefreshCw, FileText, Loader2 } from 'lucide-react';
+import { fetchIngestionRunById, toIngestionRun } from '@/lib/backend';
+import { IngestionRun } from '@/lib/mock-data';
 
 export default function IngestionRunDetailPage() {
   const params = useParams();
-  const { runId } = params;
+  const runId = Array.isArray(params.runId) ? params.runId[0] : params.runId;
   const { lang, ingestionRuns } = useApp();
 
-  const run = ingestionRuns.find(r => r.runId === runId) || ingestionRuns[0];
+  // Prefer whatever's already in context (came from the list page, so it's
+  // already fresh) -- only hit the API directly when this page was opened
+  // on its own (a shared link, a bookmark, a refresh) and the run isn't
+  // there yet.
+  const fromContext = ingestionRuns.find(r => r.runId === runId);
+  const [fetched, setFetched] = useState<IngestionRun | null>(null);
+  const [notFound, setNotFound] = useState(false);
+  const run = fromContext ?? fetched;
+
+  useEffect(() => {
+    if (fromContext || !runId) return;
+    fetchIngestionRunById(runId)
+      .then(backendRun => setFetched(toIngestionRun(backendRun)))
+      .catch(() => setNotFound(true));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runId, fromContext]);
+
+  if (!run) {
+    return (
+      <div className="bg-white border border-slate-200 rounded-3xl p-12 text-center text-slate-400">
+        {notFound ? (
+          <span>{lang === 'en' ? 'Run not found.' : 'ไม่พบข้อมูลรอบการดึงข้อมูลนี้'}</span>
+        ) : (
+          <div className="flex items-center justify-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <span>{lang === 'en' ? 'Loading run…' : 'กำลังโหลดข้อมูล…'}</span>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
@@ -32,7 +64,10 @@ export default function IngestionRunDetailPage() {
                 Run Detail #{run.runId}
               </h1>
               <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${
-                run.status === 'SUCCESS' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'
+                run.status === 'SUCCESS' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                run.status === 'WARNING' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                run.status === 'FAILED' ? 'bg-rose-50 text-rose-700 border-rose-200' :
+                'bg-sky-50 text-sky-700 border-sky-200'
               }`}>
                 {run.status}
               </span>
@@ -43,13 +78,14 @@ export default function IngestionRunDetailPage() {
           </div>
 
           {run.failedCount > 0 && (
-            <button
-              onClick={() => alert(lang === 'en' ? 'Retry simulation triggered for failed items!' : 'สั่งรีไทร์เฉพาะรายการที่ล้มเหลวสำเร็จ')}
-              className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold flex items-center gap-1.5 transition-colors duration-150"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span>{lang === 'en' ? 'Retry Failed Items' : 'สั่งรีไทรรายการที่ล้มเหลว'}</span>
-            </button>
+            <div className="flex items-center gap-1.5 text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 max-w-xs">
+              <RefreshCw className="w-3.5 h-3.5 shrink-0 text-slate-400" />
+              <span>
+                {lang === 'en'
+                  ? 'Failed items are retried automatically on the next poll of this site -- no manual action needed.'
+                  : 'รายการที่ล้มเหลวจะถูกลองใหม่อัตโนมัติในรอบดึงข้อมูลถัดไปของหน่วยงานนี้ -- ไม่ต้องสั่งด้วยมือ'}
+              </span>
+            </div>
           )}
         </div>
 

@@ -2,9 +2,10 @@
 // Backend response shapes (Backend/src/models/*.ts, work.service.ts) onto
 // the existing frontend view types in mock-data.ts, so the already-built UI
 // components (WorkCard, StatusBadge, TORDownloadList, FilterBar, ...) can
-// render real data without a full rewrite. Pages that still use MOCK_* data
-// (admin tooling, notifications) are unaffected -- this file only backs the
-// public search / home / agencies / work-detail pages.
+// render real data without a full rewrite. Also backs the admin ingestion
+// pages (poll trigger, run history/detail) -- see fetchIngestionRuns,
+// pollSite/pollAllSites, toIngestionRun below. Pages that still use MOCK_*
+// data (source config, tag management, account/user admin) are unaffected.
 
 import { api } from './api';
 import {
@@ -13,6 +14,8 @@ import {
   GovSiteItem,
   TORFile,
   ProcurementStatus,
+  IngestionRun,
+  LogEntry,
   MOCK_STATUS_CONFIG
 } from './mock-data';
 
@@ -233,5 +236,181 @@ export function toWorkItem(work: BackendWork): WorkItem {
       note: h.note ?? (ANNOUNCE_TYPE_LABEL[h.announceType] ?? h.announceType)
     })),
     updatedAt: work.updatedAt.slice(0, 16).replace('T', ' ')
+  };
+}
+
+// --- Admin: ingestion runs + poll jobs ---
+//
+// Backend/src/models/ingestionRun.model.ts's design and this UI's IngestionRun
+// (mock-data.ts) don't line up 1:1: a real IngestionRun is always exactly ONE
+// (site, source) pair, while the mock type represents a whole multi-site poll
+// EVENT with a siteBreakdown array. Rather than reconstruct that grouping
+// (would need to correlate runs back to the PollJob that produced them), each
+// real run is shown as its own row with a single-entry siteBreakdown -- more
+// granular than the mock demo, but every number on it is real. "logs" has no
+// real equivalent either (the backend keeps counts + errorLog, not a
+// timestamped trace) -- toIngestionRun() below synthesizes log lines FROM the
+// real fields (real counts/errors, reformatted as log lines), not fabricated
+// data.
+
+export type BackendIngestionSource = 'rss' | 'data_go_th';
+export type BackendIngestionRunStatus = 'running' | 'success' | 'partial' | 'failed';
+export type BackendPollJobStatus = 'queued' | 'running' | 'done' | 'failed';
+
+export interface BackendIngestionRun {
+  _id: string;
+  siteId: BackendGovSiteRef;
+  source: BackendIngestionSource;
+  status: BackendIngestionRunStatus;
+  resolvedResourceId?: string;
+  fetchedCount: number;
+  newCount: number;
+  updatedCount: number;
+  failedCount: number;
+  errorLog: string[];
+  startedAt: string;
+  finishedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BackendPollJob {
+  _id: string;
+  scope: 'site' | 'all';
+  siteId?: string;
+  source: 'rss' | 'data_go_th' | 'both';
+  status: BackendPollJobStatus;
+  claimedAt?: string;
+  finishedAt?: string;
+  resultRunIds: string[];
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ListIngestionRunsParams {
+  siteId?: string;
+  source?: BackendIngestionSource;
+  status?: BackendIngestionRunStatus;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface ListIngestionRunsResponse {
+  items: BackendIngestionRun[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export function fetchIngestionRuns(params: ListIngestionRunsParams = {}): Promise<ListIngestionRunsResponse> {
+  return api.get<ListIngestionRunsResponse>(`/admin/ingestion/runs${buildQuery(params)}`);
+}
+
+export function fetchIngestionRunById(id: string): Promise<BackendIngestionRun> {
+  return api.get<BackendIngestionRun>(`/admin/ingestion/runs/${id}`);
+}
+
+export function fetchPollJob(id: string): Promise<BackendPollJob> {
+  return api.get<BackendPollJob>(`/admin/ingestion/jobs/${id}`);
+}
+
+// Enqueues a real PollJob -- the ingestion-worker process (not this request)
+// actually claims and executes it (see Backend/src/worker.ts). Returns
+// immediately with status "queued"; the caller polls fetchPollJob() for
+// completion (see waitForPollJob in AppContext.tsx).
+export function pollSite(siteId: string, source: 'rss' | 'data_go_th' | 'both' = 'both'): Promise<BackendPollJob> {
+  return api.post<BackendPollJob>(`/admin/gov-sites/${siteId}/poll`, { source });
+}
+
+export function pollAllSites(): Promise<BackendPollJob> {
+  return api.post<BackendPollJob>('/admin/gov-sites/poll-all', {});
+}
+
+function formatDateTime(iso: string | undefined): string {
+  if (!iso) return '';
+  return iso.slice(0, 19).replace('T', ' ');
+}
+
+function formatDuration(startedAt: string, finishedAt: string | undefined): string {
+  if (!finishedAt) return '—';
+  const ms = new Date(finishedAt).getTime() - new Date(startedAt).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return '—';
+  const totalSeconds = Math.round(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+}
+
+const RUN_STATUS_MAP: Record<BackendIngestionRunStatus, IngestionRun['status']> = {
+  running: 'RUNNING',
+  success: 'SUCCESS',
+  partial: 'WARNING',
+  failed: 'FAILED'
+};
+
+const SOURCE_LABEL: Record<BackendIngestionSource, string> = {
+  rss: 'e-GP RSS',
+  data_go_th: 'data.go.th'
+};
+
+function buildRunLogs(run: BackendIngestionRun): LogEntry[] {
+  const logs: LogEntry[] = [
+    { time: formatDateTime(run.startedAt), level: 'INFO', message: `Started ${SOURCE_LABEL[run.source]} poll for ${run.siteId.name}` }
+  ];
+
+  if (run.resolvedResourceId) {
+    logs.push({ time: formatDateTime(run.startedAt), level: 'INFO', message: `Resolved data.go.th resource: ${run.resolvedResourceId}` });
+  }
+
+  const finishTime = formatDateTime(run.finishedAt);
+  if (run.status !== 'running') {
+    logs.push({
+      time: finishTime,
+      level: 'INFO',
+      message: `Fetched ${run.fetchedCount} item(s) -- ${run.newCount} new, ${run.updatedCount} updated`
+    });
+  }
+
+  for (const message of run.errorLog) {
+    logs.push({ time: finishTime, level: 'WARN', message });
+  }
+
+  if (run.status !== 'running') {
+    logs.push({
+      time: finishTime,
+      level: run.status === 'failed' ? 'ERROR' : 'INFO',
+      message: `Run finished with status=${run.status}`
+    });
+  }
+
+  return logs;
+}
+
+export function toIngestionRun(run: BackendIngestionRun): IngestionRun {
+  const skippedCount = Math.max(0, run.fetchedCount - run.newCount - run.updatedCount - run.failedCount);
+
+  return {
+    runId: run._id,
+    startTime: formatDateTime(run.startedAt),
+    endTime: formatDateTime(run.finishedAt),
+    duration: formatDuration(run.startedAt, run.finishedAt),
+    status: RUN_STATUS_MAP[run.status],
+    fetchedCount: run.fetchedCount,
+    newCount: run.newCount,
+    updatedCount: run.updatedCount,
+    skippedCount,
+    failedCount: run.failedCount,
+    siteBreakdown: [
+      {
+        siteId: run.siteId._id,
+        siteName: `${run.siteId.name} (${SOURCE_LABEL[run.source]})`,
+        fetchedCount: run.fetchedCount,
+        newCount: run.newCount,
+        updatedCount: run.updatedCount,
+        failedCount: run.failedCount
+      }
+    ],
+    logs: buildRunLogs(run)
   };
 }

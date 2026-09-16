@@ -1,15 +1,24 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useApp } from '@/context/AppContext';
-import { History, ChevronRight, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
+import { History, ChevronRight, CheckCircle2, AlertTriangle, XCircle, Loader2 } from 'lucide-react';
 import { IngestionTabs } from '@/components/IngestionTabs';
 
 export default function IngestionRunHistoryPage() {
-  const { lang, ingestionRuns, govSites } = useApp();
+  const { lang, ingestionRuns, refreshIngestionRuns, govSites } = useApp();
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [filterSite, setFilterSite] = useState<string>('ALL');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    refreshIngestionRuns()
+      .catch(() => {})
+      .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const filteredRuns = ingestionRuns
     .filter(r => filterStatus === 'ALL' || r.status === filterStatus)
@@ -81,6 +90,23 @@ export default function IngestionRunHistoryPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium">
+              {loading && (
+                <tr>
+                  <td colSpan={7} className="p-8 text-center text-slate-400">
+                    <div className="flex items-center justify-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>{lang === 'en' ? 'Loading run history…' : 'กำลังโหลดประวัติการดึงข้อมูล…'}</span>
+                    </div>
+                  </td>
+                </tr>
+              )}
+              {!loading && filteredRuns.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="p-8 text-center text-slate-400">
+                    {lang === 'en' ? 'No runs yet -- trigger a poll from the Ingestion tab.' : 'ยังไม่มีประวัติการดึงข้อมูล -- ลองสั่ง Poll Now จากแท็บการดึงข้อมูล'}
+                  </td>
+                </tr>
+              )}
               {filteredRuns.map(run => (
                 <tr key={run.runId} className="hover:bg-slate-50 transition-colors">
                   <td className="p-4 font-mono font-bold text-slate-900">

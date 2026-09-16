@@ -9,10 +9,20 @@ import {
   IngestionRun,
   GovSiteItem,
   MOCK_WORKS,
-  MOCK_INGESTION_RUNS,
   MOCK_GOV_SITES
 } from '@/lib/mock-data';
-import { fetchGovSites, fetchTags, toGovSiteItem, toTagItem } from '@/lib/backend';
+import {
+  fetchGovSites,
+  fetchTags,
+  toGovSiteItem,
+  toTagItem,
+  fetchIngestionRuns,
+  fetchPollJob,
+  pollSite,
+  pollAllSites,
+  toIngestionRun,
+  BackendPollJobStatus
+} from '@/lib/backend';
 
 export type UserRole = 'visitor' | 'user' | 'admin' | 'superadmin';
 export type AppLang = 'th' | 'en';
@@ -56,8 +66,9 @@ interface AppContextType {
   works: WorkItem[];
   tags: TagItem[];
   ingestionRuns: IngestionRun[];
+  refreshIngestionRuns: (filters?: { siteId?: string }) => Promise<void>;
   isPolling: boolean;
-  triggerPollNow: (siteId?: string) => void;
+  triggerPollNow: (siteId?: string) => Promise<void>;
   retireTag: (tagId: string) => void;
   createTag: (name: string, facet: TagItem['facet']) => void;
   updateWorkTags: (workId: string, tagIds: string[]) => void;
@@ -77,7 +88,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [works, setWorks] = useState<WorkItem[]>(MOCK_WORKS);
   const [tags, setTags] = useState<TagItem[]>([]);
-  const [ingestionRuns, setIngestionRuns] = useState<IngestionRun[]>(MOCK_INGESTION_RUNS);
+  const [ingestionRuns, setIngestionRuns] = useState<IngestionRun[]>([]);
   const [isPolling, setIsPolling] = useState<boolean>(false);
   const [govSites, setGovSites] = useState<GovSiteItem[]>(MOCK_GOV_SITES);
 
@@ -86,6 +97,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const signIn = (nextAccount: AccountView) => {
     setAccount(nextAccount);
     setRole(nextAccount.role);
+
+    // The initial-mount effect below only fetches follows/notifications when
+    // a session cookie ALREADY exists at mount time (e.g. a page refresh
+    // while logged in) -- a fresh login/register call here directly instead,
+    // so notifications are visible immediately rather than only after the
+    // next full page reload.
+    Promise.all([api.get<ApiTag[]>('/follows/tags'), api.get<NotificationItem[]>('/notifications')])
+      .then(([apiTags, apiNotifications]) => {
+        setFollowedTagIds(apiTags.map(tag => tag._id));
+        setNotifications(apiNotifications);
+      })
+      .catch(() => {
+        // Best-effort -- signIn itself already succeeded, don't block on this.
+      });
   };
 
   // On load, check for a real session cookie from the backend. If nobody is
@@ -183,40 +208,45 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
   };
 
-  const triggerPollNow = (siteId?: string) => {
+  const refreshIngestionRuns = async (filters?: { siteId?: string }) => {
+    const result = await fetchIngestionRuns({ siteId: filters?.siteId, pageSize: 50 });
+    setIngestionRuns(result.items.map(toIngestionRun));
+  };
+
+  // The API call only enqueues a PollJob and returns immediately (status
+  // "queued") -- the actual work happens in the separate ingestion-worker
+  // process (Backend/src/worker.ts), which claims it on its own schedule
+  // (POLL_JOB_CLAIM_INTERVAL_MS, default 5s). Poll the job's own status
+  // until it's done/failed so the UI's "Poll Now" lock reflects when the
+  // real ingestion actually finishes, not just when it was queued. Bounded
+  // to 10 minutes -- a real multi-site poll with AI tagging can genuinely
+  // take several minutes; if it's still running past that, stop waiting
+  // (the run itself keeps going server-side either way) rather than lock
+  // the button forever on a slow/stuck job.
+  const waitForPollJob = async (jobId: string): Promise<void> => {
+    const deadline = Date.now() + 10 * 60 * 1000;
+    while (Date.now() < deadline) {
+      const job = await fetchPollJob(jobId);
+      const terminal: BackendPollJobStatus[] = ['done', 'failed'];
+      if (terminal.includes(job.status)) return;
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+  };
+
+  const triggerPollNow = async (siteId?: string) => {
     if (isPolling) return;
     setIsPolling(true);
-    setTimeout(() => {
-      const now = new Date();
-      const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
-      const targetSites = siteId ? govSites.filter(s => s.id === siteId) : govSites.filter(s => s.enabled);
-      const siteBreakdown = targetSites.map(site => {
-        const fetchedCount = 8 + Math.floor(Math.random() * 20);
-        const newCount = Math.floor(Math.random() * 2);
-        const updatedCount = Math.floor(Math.random() * 3);
-        return { siteId: site.id, siteName: site.name, fetchedCount, newCount, updatedCount, failedCount: 0 };
-      });
-      const newRun: IngestionRun = {
-        runId: `RUN-${now.getFullYear()}${(now.getMonth() + 1).toString().padStart(2, '0')}${now.getDate().toString().padStart(2, '0')}-${now.getHours().toString().padStart(2, '0')}${now.getMinutes().toString().padStart(2, '0')}`,
-        startTime: `${now.toISOString().split('T')[0]} ${timeStr}`,
-        endTime: `${now.toISOString().split('T')[0]} ${timeStr}`,
-        duration: '42s',
-        status: 'SUCCESS',
-        fetchedCount: siteBreakdown.reduce((sum, s) => sum + s.fetchedCount, 0),
-        newCount: siteBreakdown.reduce((sum, s) => sum + s.newCount, 0),
-        updatedCount: siteBreakdown.reduce((sum, s) => sum + s.updatedCount, 0),
-        skippedCount: siteBreakdown.reduce((sum, s) => sum + s.fetchedCount - s.newCount - s.updatedCount, 0),
-        failedCount: 0,
-        siteBreakdown,
-        logs: [
-          { time: timeStr, level: 'INFO', message: siteId ? `การทริกเกอร์ Poll Now ด้วยมือเริ่มต้นโดยผู้ดูแลระบบ (เฉพาะ ${targetSites[0]?.name ?? siteId})` : 'การทริกเกอร์ Poll Now ด้วยมือเริ่มต้นโดยผู้ดูแลระบบ (ทุกหน่วยงานที่เปิดใช้งาน)' },
-          { time: timeStr, level: 'INFO', message: `เรียก api.data.go.th สำเร็จสำหรับ ${targetSites.length} หน่วยงาน ดึงรายการทั้งหมด ${siteBreakdown.reduce((sum, s) => sum + s.fetchedCount, 0)} รายการ` },
-          { time: timeStr, level: 'INFO', message: 'อัปเดตดัชนีการค้นหาและแท็กของระบบ B2G Vendor สำเร็จ' }
-        ]
-      };
-      setIngestionRuns(prev => [newRun, ...prev]);
+    try {
+      const job = siteId ? await pollSite(siteId, 'both') : await pollAllSites();
+      await waitForPollJob(job._id);
+    } catch {
+      // Best-effort -- still refresh + unlock below even if enqueueing or
+      // status polling itself failed (e.g. a network blip), so the button
+      // never stays stuck locked.
+    } finally {
+      await refreshIngestionRuns(siteId ? { siteId } : undefined).catch(() => {});
       setIsPolling(false);
-    }, 2000);
+    }
   };
 
   const addGovSite = (site: { name: string; nameEn: string; shortCode: string; datasetId: string; requestsPerMin: number }) => {
@@ -285,6 +315,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         works,
         tags,
         ingestionRuns,
+        refreshIngestionRuns,
         isPolling,
         triggerPollNow,
         retireTag,

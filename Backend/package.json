@@ -14,7 +14,9 @@
     "check:auth": "tsx tests/integration/auth-flow.check.ts",
     "check:ingestion": "tsx tests/integration/ingestion-flow.check.ts",
     "seed:superadmin": "tsx src/scripts/seedSuperAdmin.ts",
-    "seed:gov-sites": "tsx src/scripts/seedGovSites.ts"
+    "seed:gov-sites": "tsx src/scripts/seedGovSites.ts",
+    "seed:tags": "tsx src/scripts/seedTags.ts",
+    "seed:all": "npm run seed:gov-sites && npm run seed:tags"
   },
   "dependencies": {
     "@google-cloud/vertexai": "^1.9.3",
