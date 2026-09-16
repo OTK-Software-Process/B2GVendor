@@ -9,8 +9,6 @@ import {
   IngestionRun,
   GovSiteItem,
   MOCK_WORKS,
-  MOCK_TAGS,
-  MOCK_NOTIFICATIONS,
   MOCK_INGESTION_RUNS,
   MOCK_GOV_SITES
 } from '@/lib/mock-data';
@@ -34,6 +32,19 @@ export interface AccountView {
   role: 'user' | 'admin' | 'superadmin';
 }
 
+interface ApiTag extends Omit<TagItem, 'id' | 'followerCount' | 'worksCount'> {
+  _id: string;
+}
+
+function mapApiTag(tag: ApiTag): TagItem {
+  return {
+    ...tag,
+    id: tag._id,
+    followerCount: 0,
+    worksCount: 0
+  };
+}
+
 interface AppContextType {
   role: UserRole;
   setRole: (role: UserRole) => void;
@@ -44,12 +55,12 @@ interface AppContextType {
   lang: AppLang;
   setLang: (lang: AppLang) => void;
   followedTagIds: string[];
-  toggleFollowTag: (tagId: string) => void;
+  toggleFollowTag: (tagId: string) => Promise<void>;
   isTagFollowed: (tagId: string) => boolean;
   notifications: NotificationItem[];
   unreadCount: number;
-  markNotificationAsRead: (id: string) => void;
-  markAllNotificationsAsRead: () => void;
+  markNotificationAsRead: (id: string) => Promise<void>;
+  markAllNotificationsAsRead: () => Promise<void>;
   works: WorkItem[];
   tags: TagItem[];
   ingestionRuns: IngestionRun[];
@@ -70,15 +81,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [account, setAccount] = useState<AccountView | null>(null);
   const [authChecked, setAuthChecked] = useState<boolean>(false);
   const [lang, setLang] = useState<AppLang>('th');
-  const [followedTagIds, setFollowedTagIds] = useState<string[]>(['tag-1', 'tag-4', 'tag-8']);
-  const [notifications, setNotifications] = useState<NotificationItem[]>(MOCK_NOTIFICATIONS);
+  const [followedTagIds, setFollowedTagIds] = useState<string[]>([]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [works, setWorks] = useState<WorkItem[]>(MOCK_WORKS);
-  const [tags, setTags] = useState<TagItem[]>(MOCK_TAGS);
+  const [tags, setTags] = useState<TagItem[]>([]);
   const [ingestionRuns, setIngestionRuns] = useState<IngestionRun[]>(MOCK_INGESTION_RUNS);
   const [isPolling, setIsPolling] = useState<boolean>(false);
   const [govSites, setGovSites] = useState<GovSiteItem[]>(MOCK_GOV_SITES);
 
   const unreadCount = notifications.filter(n => !n.read).length;
+
+  const signIn = (nextAccount: AccountView) => {
+    setAccount(nextAccount);
+    setRole(nextAccount.role);
+  };
 
   // On load, check for a real session cookie from the backend. If nobody is
   // logged in, /auth/me 401s and the default 'visitor' role stands. If a
@@ -88,9 +104,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
 
     api
+      .get<ApiTag[]>('/tags')
+      .then(apiTags => {
+        if (cancelled) return;
+        setTags(apiTags.map(mapApiTag));
+      })
+      .catch(() => {
+        if (!cancelled) setTags([]);
+      });
+
+    api
       .get<AccountView>('/auth/me')
       .then(me => {
-        if (!cancelled) signIn(me);
+        if (cancelled) return [[], []] as [ApiTag[], NotificationItem[]];
+        signIn(me);
+        return Promise.all([
+          api.get<ApiTag[]>('/follows/tags'),
+          api.get<NotificationItem[]>('/notifications')
+        ]);
+      })
+      .then(([apiTags, apiNotifications]) => {
+        if (!cancelled) {
+          setFollowedTagIds(apiTags.map(tag => tag._id));
+          setNotifications(apiNotifications);
+        }
       })
       .catch(() => {
         // Not logged in. Stay in the default 'visitor' state.
@@ -102,13 +139,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const signIn = (nextAccount: AccountView) => {
-    setAccount(nextAccount);
-    setRole(nextAccount.role);
-  };
 
   const signOut = async () => {
     try {
@@ -121,21 +152,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setRole('visitor');
   };
 
-  const toggleFollowTag = (tagId: string) => {
-    setFollowedTagIds(prev =>
-      prev.includes(tagId) ? prev.filter(id => id !== tagId) : [...prev, tagId]
-    );
+  const toggleFollowTag = async (tagId: string) => {
+    const isFollowed = followedTagIds.includes(tagId);
+    if (isFollowed) {
+      await api.del(`/follows/tags/${tagId}`);
+      setFollowedTagIds(prev => prev.filter(id => id !== tagId));
+      return;
+    }
+
+    await api.post(`/follows/tags/${tagId}`);
+    setFollowedTagIds(prev => (prev.includes(tagId) ? prev : [...prev, tagId]));
   };
 
   const isTagFollowed = (tagId: string) => followedTagIds.includes(tagId);
 
-  const markNotificationAsRead = (id: string) => {
-    setNotifications(prev =>
-      prev.map(n => (n.id === id ? { ...n, read: true } : n))
-    );
+  const markNotificationAsRead = async (id: string) => {
+    await api.patch(`/notifications/${id}/read`);
+    setNotifications(prev => prev.map(n => (n.id === id ? { ...n, read: true } : n)));
   };
 
-  const markAllNotificationsAsRead = () => {
+  const markAllNotificationsAsRead = async () => {
+    await api.post('/notifications/read-all');
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
   };
 

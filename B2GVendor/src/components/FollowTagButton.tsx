@@ -15,14 +15,18 @@ export function FollowTagButton({ tagId, tagName, variant = 'badge', size = 'sm'
   const { role, isTagFollowed, toggleFollowTag, lang } = useApp();
   const followed = isTagFollowed(tagId);
 
-  const handleClick = (e: React.MouseEvent) => {
+  const handleClick = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     if (role === 'visitor') {
       alert(lang === 'en' ? 'Please log in or switch to Registered User mode to follow tags!' : 'กรุณาเข้าสู่ระบบหรือเปลี่ยนเป็นโหมดผู้ใช้งานเพื่อติดตามแท็ก');
       return;
     }
-    toggleFollowTag(tagId);
+    try {
+      await toggleFollowTag(tagId);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : (lang === 'en' ? 'Unable to update followed tags.' : 'ไม่สามารถอัปเดตแท็กที่ติดตามได้'));
+    }
   };
 
   if (variant === 'icon') {
