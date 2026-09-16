@@ -6,7 +6,7 @@ import { Tag } from '../models/tag.model';
 import { GovSite } from '../models/govSite.model';
 import { Notification, INotification } from '../models/notification.model';
 import { AppError } from '../utils/AppError';
-import { sendNewWorkMatchEmail } from './email.service';
+import { sendNewWorkMatchEmail, sendDailyDigestEmail } from './email.service';
 import { logger } from '../utils/logger';
 
 export interface NotificationView {
@@ -73,7 +73,9 @@ export async function notifyNewWorkMatches(work: IWork, tagIds: Types.ObjectId[]
   if (uniqueTagIds.length === 0) return;
 
   try {
-    const follows = await Follow.find({ tagId: { $in: uniqueTagIds } }).select('accountId tagId');
+    // A paused follow (account/notifications/settings' per-tag mute) is
+    // excluded from matching entirely -- no in-app notification, no email.
+    const follows = await Follow.find({ tagId: { $in: uniqueTagIds }, paused: { $ne: true } }).select('accountId tagId');
     if (follows.length === 0) return;
 
     const accountIds = [...new Set(follows.map(follow => follow.accountId.toString()))];
@@ -113,6 +115,16 @@ export async function notifyNewWorkMatches(work: IWork, tagIds: Types.ObjectId[]
         { upsert: true, new: true, setDefaultsOnInsert: true }
       );
 
+      // In-app notification (above) always happens regardless of
+      // preferences -- only the EMAIL is gated by account/notifications/
+      // settings: off entirely if emailNotificationsEnabled is false, or
+      // deferred to the daily digest (sendDailyDigests below) rather than
+      // sent here if the account is on 'daily' frequency. The Notification
+      // doc's includedInDigest stays false either way it's later picked up
+      // for 'daily', and is simply never looked at for 'instant'.
+      if (!account.emailNotificationsEnabled) continue;
+      if (account.notificationFrequency === 'daily') continue;
+
       try {
         await sendNewWorkMatchEmail(account.email, account.name, work._id.toString(), matchedTagNames);
       } catch (err) {
@@ -122,4 +134,38 @@ export async function notifyNewWorkMatches(work: IWork, tagIds: Types.ObjectId[]
   } catch (err) {
     logger.warn('notification', `Failed to find followers for work ${work.projectId}`, err);
   }
+}
+
+// Runs once daily (see worker.ts's cron) -- sends ONE summary email per
+// account that's on 'daily' frequency and has emailNotificationsEnabled,
+// covering every match since the last digest (Notification.includedInDigest
+// == false). Accounts with nothing new are skipped entirely -- no empty
+// "you have 0 new matches" email. Best-effort per account, matching
+// notifyNewWorkMatches's pattern -- one account's email failure must not
+// stop the rest, and a failure never blocks re-trying tomorrow (the
+// underlying Notification docs are only marked included after a successful
+// send).
+export async function sendDailyDigests(): Promise<number> {
+  const accounts = await Account.find({ notificationFrequency: 'daily', emailNotificationsEnabled: true, status: 'active' });
+  let sent = 0;
+
+  for (const account of accounts) {
+    try {
+      const pending = await Notification.find({ accountId: account._id, includedInDigest: false }).sort({ createdAt: 1 });
+      if (pending.length === 0) continue;
+
+      await sendDailyDigestEmail(
+        account.email,
+        account.name,
+        pending.map(n => ({ workId: n.workId.toString(), workTitle: n.workTitle, agencyName: n.agencyName, matchedTags: n.matchedTags }))
+      );
+
+      await Notification.updateMany({ _id: { $in: pending.map(n => n._id) } }, { $set: { includedInDigest: true } });
+      sent += 1;
+    } catch (err) {
+      logger.warn('notification', `Failed to send daily digest to ${account.email}`, err);
+    }
+  }
+
+  return sent;
 }

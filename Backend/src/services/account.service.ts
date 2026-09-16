@@ -1,4 +1,4 @@
-import { Account, IAccount } from "../models/account.model";
+import { Account, IAccount, NotificationFrequency } from "../models/account.model";
 import { AppError } from "../utils/AppError";
 import { Session } from "../models/session.model";
 import { toSessionView } from "./session.service";
@@ -81,6 +81,24 @@ export async function resetPassword(
 
   account.passwordHash = newPassword;
   await account.save();
+}
+
+export interface NotificationSettingsUpdate {
+  emailNotificationsEnabled?: boolean;
+  notificationFrequency?: NotificationFrequency;
+}
+
+export async function updateNotificationSettings(
+  accountId: string,
+  update: NotificationSettingsUpdate,
+): Promise<IAccount> {
+  const account = await Account.findByIdAndUpdate(accountId, update, { new: true });
+
+  if (!account) {
+    throw AppError.notFound("Account not found.");
+  }
+
+  return account;
 }
 
 export async function getSession(

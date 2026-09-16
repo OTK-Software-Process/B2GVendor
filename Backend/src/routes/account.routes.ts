@@ -33,14 +33,25 @@ const changePasswordSchema = z.object({
 	confirmNewPassword: z.string().min(8),
 }).strict();
 
+const updateNotificationSettingsSchema = z.object({
+	emailNotificationsEnabled: z.boolean().optional(),
+	notificationFrequency: z.enum(['instant', 'daily']).optional(),
+}).strict();
+
 export const accountRouter = Router();
 
 accountRouter.use(requireAuth);
 
 accountRouter.get('/profile', accountController.getProfile);
 accountRouter.get('/session', accountController.getSession);
+accountRouter.get('/notification-settings', accountController.getNotificationSettings);
 
 accountRouter.patch('/profile', validate(updateProfileSchema), accountController.updateProfile);
+accountRouter.patch(
+	'/notification-settings',
+	validate(updateNotificationSettingsSchema),
+	accountController.updateNotificationSettings,
+);
 
 accountRouter.post(
 	'/change-password',

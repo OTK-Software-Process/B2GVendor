@@ -13,6 +13,12 @@ export interface INotification extends Document {
   matchedTags: string[];
   ingestedDate: Date;
   read: boolean;
+  // Whether this notification has already gone out in a daily digest email
+  // (see notification.service.ts's sendDailyDigests) -- prevents the same
+  // match being re-sent in tomorrow's digest. Irrelevant for accounts on
+  // 'instant' frequency, whose email (if any) already went out immediately
+  // at creation time -- this only tracks the deferred 'daily' path.
+  includedInDigest: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -29,7 +35,8 @@ const NotificationSchema = new Schema<INotification>(
     statusLabel: { type: String, required: true },
     matchedTags: { type: [String], default: [] },
     ingestedDate: { type: Date, required: true },
-    read: { type: Boolean, default: false, index: true }
+    read: { type: Boolean, default: false, index: true },
+    includedInDigest: { type: Boolean, default: false, index: true }
   },
   { timestamps: true }
 );

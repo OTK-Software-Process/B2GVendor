@@ -103,9 +103,9 @@ export async function sendNewWorkMatchEmail(
 ): Promise<void> {
   const url = `${env.APP_URL}/works/${encodeURIComponent(work)}`;
 
-  await send({ 
-    to, 
-    subject: "งานใหม่ตรงกับแท็กที่คุณติดตาม | New work matches your followed tags", 
+  await send({
+    to,
+    subject: "งานใหม่ตรงกับแท็กที่คุณติดตาม | New work matches your followed tags",
     text: `สวัสดีคุณ ${name}\n\nมีงานใหม่ที่ตรงกับแท็กที่คุณติดตาม: ${matchedTagNames.join(', ')}\n\nดูรายละเอียดงานได้ที่: ${url}`,
     html: layout(
       'งานใหม่ตรงกับแท็กที่คุณติดตาม',
@@ -113,5 +113,47 @@ export async function sendNewWorkMatchEmail(
       'ดูรายละเอียดงาน',
       url
     )
+  });
+}
+
+export interface DailyDigestItem {
+  workId: string;
+  workTitle: string;
+  agencyName: string;
+  matchedTags: string[];
+}
+
+// account/notifications/settings' 'daily' frequency option -- one summary
+// email covering every match since the last digest, instead of an email per
+// match. Unlike sendNewWorkMatchEmail, this has multiple links (one per
+// work), so it builds its own HTML rather than reusing layout()'s
+// single-button shape.
+export async function sendDailyDigestEmail(to: string, name: string, items: DailyDigestItem[]): Promise<void> {
+  const rows = items
+    .map(item => {
+      const url = `${env.APP_URL}/works/${encodeURIComponent(item.workId)}`;
+      return `<li style="margin:0 0 16px;">
+        <a href="${url}" style="color:#0284c7;text-decoration:none;font-weight:600;font-size:14px;">${item.workTitle}</a>
+        <div style="font-size:12px;color:#64748b;margin-top:2px;">${item.agencyName} — ${item.matchedTags.join(', ')}</div>
+      </li>`;
+    })
+    .join('');
+
+  const textLines = items.map(item => `- ${item.workTitle} (${item.agencyName}) -- ${env.APP_URL}/works/${item.workId}`).join('\n');
+
+  await send({
+    to,
+    subject: `สรุปงานใหม่ประจำวัน (${items.length} รายการ) | Your daily digest (${items.length} new)`,
+    text: `สวัสดีคุณ ${name}\n\nมีงานใหม่ที่ตรงกับแท็กที่คุณติดตาม ${items.length} รายการในวันนี้:\n\n${textLines}`,
+    html: `<!doctype html>
+<html lang="th">
+  <body style="margin:0;padding:24px;background:#f1f5f9;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;color:#0f172a;">
+    <div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:12px;padding:32px;">
+      <h1 style="margin:0 0 16px;font-size:20px;">สรุปงานใหม่ประจำวัน</h1>
+      <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#334155;">สวัสดีคุณ ${name} — มีงานใหม่ที่ตรงกับแท็กที่คุณติดตาม ${items.length} รายการในวันนี้:</p>
+      <ul style="margin:0;padding:0;list-style:none;">${rows}</ul>
+    </div>
+  </body>
+</html>`
   });
 }

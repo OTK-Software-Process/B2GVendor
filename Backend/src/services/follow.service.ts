@@ -29,6 +29,24 @@ export async function listFollowedTags(accountId: string): Promise<ITag[]> {
   return Tag.find({ _id: { $in: tagIds } }).sort({ facet: 1, name: 1 });
 }
 
+// account/notifications/settings' "Per-Tag Pause" toggle -- see
+// Follow.paused and notification.service.ts's notifyNewWorkMatches, which
+// excludes a paused follow from matching entirely.
+export async function setTagPaused(accountId: string, tagId: string, paused: boolean): Promise<IFollow> {
+  const follow = await Follow.findOneAndUpdate(
+    { accountId: toObjectId(accountId), tagId: toObjectId(tagId) },
+    { $set: { paused } },
+    { new: true }
+  );
+  if (!follow) throw AppError.notFound('You are not following this tag.');
+  return follow;
+}
+
+export async function listPausedTagIds(accountId: string): Promise<string[]> {
+  const follows = await Follow.find({ accountId: toObjectId(accountId), paused: true }).select('tagId');
+  return follows.map(follow => follow.tagId.toString());
+}
+
 export async function listFollowersOfTag(tagId: string): Promise<IAccount[]> {
   const tag = await Tag.findById(tagId);
   if (!tag) throw AppError.notFound('Tag not found.');

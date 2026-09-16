@@ -3,6 +3,7 @@ import { connectDb } from './config/db';
 import { env } from './config/env';
 import { claimNextPollJob, executePollJob } from './services/pollJob.service';
 import { enqueueDueSitePolls } from './services/scheduler.service';
+import { sendDailyDigests } from './services/notification.service';
 import { logger } from './utils/logger';
 
 /**
@@ -10,11 +11,15 @@ import { logger } from './utils/logger';
  * the API server (server.ts), per the project's requirement that polling
  * run in its own container while still being reachable via "Poll Now".
  *
- * Two independent loops:
+ * Three independent loops:
  *   1. Job-claim loop -- picks up PollJob rows (both scheduler-created and
  *      admin-triggered "Poll Now" requests) and executes them.
  *   2. Scheduler tick -- every minute, checks which GovSites are due for
  *      their next scheduled poll (FR-N1.2) and enqueues a job for them.
+ *   3. Daily digest tick -- once a day, sends the batched summary email to
+ *      every account on 'daily' notification frequency (see
+ *      account/notifications/settings and notification.service.ts's
+ *      sendDailyDigests).
  *
  * The API container (server.ts) never imports this file and never calls
  * ingestion.service.ts directly -- it only ever writes a PollJob row.
@@ -49,6 +54,17 @@ async function main(): Promise<void> {
 
   cron.schedule('* * * * *', () => {
     enqueueDueSitePolls().catch(err => logger.error('worker', 'Scheduler tick failed', err));
+  });
+
+  // 08:00 daily, matching what the settings page tells the user to expect
+  // ("Receive one summary email every morning at 08:00 AM") -- server-local
+  // time, same as every other schedule in this file.
+  cron.schedule('0 8 * * *', () => {
+    sendDailyDigests()
+      .then(sent => {
+        if (sent > 0) logger.info('worker', `Sent ${sent} daily digest email(s)`);
+      })
+      .catch(err => logger.error('worker', 'Daily digest tick failed', err));
   });
 }
 

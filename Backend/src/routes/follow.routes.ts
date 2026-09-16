@@ -5,7 +5,7 @@ import { validate } from '../middlewares/validate.middleware';
 import { asyncHandler } from '../utils/asyncHandler';
 import { ok } from '../utils/apiResponse';
 import * as followService from '../services/follow.service';
-import { followTagParamsSchema } from '../validators/follow.validator';
+import { followTagParamsSchema, setTagPausedSchema } from '../validators/follow.validator';
 import { AppError } from '../utils/AppError';
 
 export const followRouter = Router();
@@ -33,6 +33,17 @@ followRouter.delete(
     if (!req.account) throw AppError.notAuthenticated();
     await followService.unfollowTag(req.account._id.toString(), req.params.tagId);
     ok(res, { unfollowed: true });
+  })
+);
+
+followRouter.patch(
+  '/tags/:tagId/pause',
+  validate(followTagParamsSchema, 'params'),
+  validate(setTagPausedSchema),
+  asyncHandler(async (req, res) => {
+    if (!req.account) throw AppError.notAuthenticated();
+    const follow = await followService.setTagPaused(req.account._id.toString(), req.params.tagId, req.body.paused);
+    ok(res, follow);
   })
 );
 

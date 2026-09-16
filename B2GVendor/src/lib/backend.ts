@@ -414,3 +414,32 @@ export function toIngestionRun(run: BackendIngestionRun): IngestionRun {
     logs: buildRunLogs(run)
   };
 }
+
+// --- Account: notification settings ---
+// Backend/src/models/account.model.ts's emailNotificationsEnabled /
+// notificationFrequency + Follow.paused (per-tag mute) -- see
+// Backend/src/services/notification.service.ts for how these actually gate
+// email delivery (in-app notifications are always created regardless).
+
+export type BackendNotificationFrequency = 'instant' | 'daily';
+
+export interface BackendNotificationSettings {
+  emailNotificationsEnabled: boolean;
+  notificationFrequency: BackendNotificationFrequency;
+  pausedTagIds: string[];
+}
+
+export function fetchNotificationSettings(): Promise<BackendNotificationSettings> {
+  return api.get<BackendNotificationSettings>('/account/notification-settings');
+}
+
+export function updateNotificationSettings(update: {
+  emailNotificationsEnabled?: boolean;
+  notificationFrequency?: BackendNotificationFrequency;
+}): Promise<{ emailNotificationsEnabled: boolean; notificationFrequency: BackendNotificationFrequency }> {
+  return api.patch('/account/notification-settings', update);
+}
+
+export function setTagPaused(tagId: string, paused: boolean): Promise<void> {
+  return api.patch(`/follows/tags/${tagId}/pause`, { paused });
+}

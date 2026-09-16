@@ -1,4 +1,5 @@
 import * as services from "../services/account.service";
+import { listPausedTagIds } from "../services/follow.service";
 import { AppError } from "../utils/AppError";
 import { NextFunction, Request, Response } from "express";
 
@@ -36,6 +37,50 @@ export async function updateProfile(
     }
     const updatedAccount = await services.updateProfile(accountId, updateData);
     res.status(200).send({ success: true, data: updatedAccount });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getNotificationSettings(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  try {
+    const accountId = getAuthenticatedAccountId(req);
+    const [account, pausedTagIds] = await Promise.all([
+      services.getProfile(accountId),
+      listPausedTagIds(accountId),
+    ]);
+    res.status(200).send({
+      success: true,
+      data: {
+        emailNotificationsEnabled: account.emailNotificationsEnabled,
+        notificationFrequency: account.notificationFrequency,
+        pausedTagIds,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateNotificationSettings(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  try {
+    const accountId = getAuthenticatedAccountId(req);
+    const account = await services.updateNotificationSettings(accountId, req.body);
+    res.status(200).send({
+      success: true,
+      data: {
+        emailNotificationsEnabled: account.emailNotificationsEnabled,
+        notificationFrequency: account.notificationFrequency,
+      },
+    });
   } catch (error) {
     next(error);
   }

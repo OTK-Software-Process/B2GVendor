@@ -5,6 +5,7 @@ import { env } from '../config/env';
 export type AccountType = 'individual' | 'business';
 export type AccountStatus = 'active' | 'suspended';
 export type AccountRole = 'user' | 'admin' | 'superadmin';
+export type NotificationFrequency = 'instant' | 'daily';
 
 export interface IBusinessProfile {
   companyName: string;
@@ -23,6 +24,13 @@ export interface IAccount extends Document {
 
   status: AccountStatus;
   role: AccountRole;
+
+  // Notification preferences (account/notifications/settings in the
+  // frontend). In-app notifications are always created regardless of these
+  // -- they only affect whether/when an email is sent. See
+  // notification.service.ts's notifyNewWorkMatches and sendDailyDigests.
+  emailNotificationsEnabled: boolean;
+  notificationFrequency: NotificationFrequency;
 
   lockedUntil?: Date;
   passwordChangedAt?: Date;
@@ -104,6 +112,9 @@ const AccountSchema = new Schema<IAccount>(
       required: true,
       index: true,
     },
+
+    emailNotificationsEnabled: { type: Boolean, default: true },
+    notificationFrequency: { type: String, enum: ['instant', 'daily'], default: 'instant' },
 
     lockedUntil: { type: Date, select: false },
     passwordChangedAt: { type: Date, select: false },
