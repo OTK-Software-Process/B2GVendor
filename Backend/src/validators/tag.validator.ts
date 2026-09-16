@@ -4,11 +4,14 @@ export const createTagSchema = z
   .object({
     name: z.string().trim().min(1, 'Name is required').max(200),
     facet: z.enum(['agency', 'method', 'category', 'keyword']),
-    aliases: z.array(z.string().trim().min(1)).optional()
+    aliases: z.array(z.string().trim().min(1)).optional(),
+    includeInIngestionFilter: z.boolean().optional()
   })
   .strict();
 
 export type CreateTagInput = z.infer<typeof createTagSchema>;
+
+export const setIngestionFilterSchema = z.object({ value: z.boolean() }).strict();
 
 export const listTagsQuerySchema = z
   .object({

@@ -15,6 +15,11 @@ export interface DocumentAnalysisInput {
   documentText?: string | null;
 }
 
+export interface NewTagProposal {
+  name: string;
+  facet: 'category' | 'keyword';
+}
+
 export interface DocumentAnalysisResult {
   description: string | null;
   tagIds: string[];
@@ -23,6 +28,13 @@ export interface DocumentAnalysisResult {
   // only exists post-award, via data.go.th enrichment). null when the
   // document doesn't state one, or no document text was available at all.
   budget: number | null;
+  // A brand-new tag the model proposes ONLY when none of the candidates
+  // genuinely applied -- see prompt.ts. The caller (ingestion.service.ts)
+  // is responsible for actually persisting this via
+  // tag.service.ts's findOrCreateAiTag() and merging it into tagIds; this
+  // module never touches the database itself. null on every ordinary call
+  // where an existing tag was a good enough fit.
+  newTag: NewTagProposal | null;
 }
 
 // One text-in/text-out call, shared by every backend (Vertex AI, OpenRouter,

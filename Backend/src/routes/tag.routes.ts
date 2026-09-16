@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as tagController from '../controllers/tag.controller';
 import { validate } from '../middlewares/validate.middleware';
-import { createTagSchema, listTagsQuerySchema } from '../validators/tag.validator';
+import { createTagSchema, listTagsQuerySchema, setIngestionFilterSchema } from '../validators/tag.validator';
 import { asyncHandler } from '../utils/asyncHandler';
 
 // Public read -- mounted at /tags (Visitors browse/search the taxonomy
@@ -16,3 +16,10 @@ tagRouter.get('/', validate(listTagsQuerySchema, 'query'), asyncHandler(tagContr
 export const adminTagRouter = Router();
 adminTagRouter.post('/', validate(createTagSchema), asyncHandler(tagController.create));
 adminTagRouter.patch('/:id/retire', asyncHandler(tagController.retire));
+// Flags/unflags this tag as an ingestion topic filter -- see
+// Tag.includeInIngestionFilter and ingestion.service.ts's inScopeTagIds.
+adminTagRouter.patch(
+  '/:id/ingestion-filter',
+  validate(setIngestionFilterSchema),
+  asyncHandler(tagController.setIngestionFilter)
+);

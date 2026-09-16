@@ -16,12 +16,32 @@ export const SYSTEM_PROMPT = [
   '',
   'You MUST respond with ONLY one JSON object -- no markdown code fences, no ' +
     'explanation before or after it -- matching EXACTLY this shape:',
-  '{"description": string or null, "tagIds": string[], "budget": number or null}',
+  '{"description": string or null, "tagIds": string[], "budget": number or ' +
+    'null, "newTag": {"name": string, "facet": "category" or "keyword"} or null}',
   '',
   'Rules (apply to every document, no exceptions):',
   '- "tagIds": choose ONLY from the candidate tag list given in the next ' +
-    'message. Never invent a tag id or name that is not in that list. ' +
-    'Return at most 5, and only ones that genuinely apply.',
+    'message. Never invent a tag id that is not in that list. Return at ' +
+    'most 5, and only ones that genuinely apply.',
+  '- "newTag": the candidate list will not cover every possible topic. If, ' +
+    'and ONLY if, none of the candidates genuinely apply to this document, ' +
+    'you may propose exactly ONE new tag to add to the shared vocabulary ' +
+    'for future documents. Requirements for a valid proposal:',
+  '    - It must be a SHORT, GENERIC, REUSABLE classification term -- the ' +
+    'kind of term that would also fit OTHER similar procurements in the ' +
+    'future (e.g. "ระบบสารสนเทศ", "งานโสตทัศนูปกรณ์"), never a one-off ' +
+    'phrase describing only this specific document.',
+  '    - It must be genuinely distinct from every candidate already listed ' +
+    '-- not a synonym, translation, plural, or minor rewording of one ' +
+    '(e.g. do not propose "รถบัส" if "รถโดยสาร" is already a candidate).',
+  '    - "facet" must be "category" for a broad top-level grouping (the ' +
+    'kind of thing candidates marked "(category)" are), or "keyword" for a ' +
+    'more specific term (matching candidates marked "(keyword)").',
+  '    - If the document fits an existing candidate reasonably well, or you ' +
+    'are not confident a new tag is truly needed, set "newTag" to null and ' +
+    'rely on "tagIds" (even an empty array) instead -- proposing a new tag ' +
+    'is the exception, not the default.',
+  '    - Never propose more than one new tag per document.',
   '- "description": a short 1-2 sentence PLAIN-THAI summary of what the ' +
     'procurement is actually for. Never repeat the title verbatim. Never ' +
     'state a fact that is not present in the supplied document text.',
@@ -35,7 +55,9 @@ export const SYSTEM_PROMPT = [
     'estimate, infer, or calculate one yourself from unrelated numbers ' +
     '(e.g. quantities, page counts, project codes).',
   '- If no document text is supplied (title only), "description" AND ' +
-    '"budget" MUST both be null -- do not guess either from the title alone.',
+    '"budget" MUST both be null -- do not guess either from the title ' +
+    'alone. "newTag" may still be proposed from the title alone if it ' +
+    'clearly indicates a genuinely uncovered topic.',
   '- When unsure about a field, prefer null / an empty array over a guess.',
   '- Output raw JSON only. It must parse directly with JSON.parse -- no ' +
     'trailing commentary, no ```json fences.'

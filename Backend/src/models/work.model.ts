@@ -81,6 +81,20 @@ export interface IWork extends Document {
 
   tags: Types.ObjectId[];
 
+  // Customer requirement: restrict the public site to one topic (e.g.
+  // "software") -- see Tag.includeInIngestionFilter, computed once when the
+  // work is first classified (ingestion.service.ts). 'shown' = at least one
+  // of its tags is flagged in-scope; 'not-related' = none are. Undefined
+  // means it was never evaluated (the filter was off, or this work predates
+  // the feature) -- treated the SAME as 'shown' everywhere (work.service.ts
+  // only ever excludes an EXPLICIT 'not-related', so existing/unfiltered
+  // deployments are unaffected). Once set to 'not-related', later polls for
+  // this same project skip re-downloading/re-analyzing its TOR documents
+  // entirely (see retryMissingTorDownloads and the update branch of
+  // upsertWorkFromRssItem) -- that's the whole point of persisting this
+  // rather than re-deciding it on every poll.
+  ingestionRelevance?: 'shown' | 'not-related';
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -130,7 +144,9 @@ const WorkSchema = new Schema<IWork>(
     winnerTin: { type: String, trim: true, index: true },
     enrichedAt: { type: Date },
 
-    tags: { type: [{ type: Schema.Types.ObjectId, ref: 'Tag' }], default: [] }
+    tags: { type: [{ type: Schema.Types.ObjectId, ref: 'Tag' }], default: [] },
+
+    ingestionRelevance: { type: String, enum: ['shown', 'not-related'], index: true }
   },
   { timestamps: true }
 );

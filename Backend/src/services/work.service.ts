@@ -26,7 +26,12 @@ export async function listWorks(filter: ListWorksFilter = {}): Promise<ListWorks
   const page = Math.max(1, filter.page ?? 1);
   const pageSize = Math.min(50, Math.max(1, filter.pageSize ?? 20));
 
-  const query: Record<string, unknown> = {};
+  // Customer requirement: a work explicitly marked 'not-related' by the
+  // ingestion topic filter never appears on the public site. Anything else
+  // (an explicit 'shown', or unset -- the filter was off, or this work
+  // predates the feature) shows normally, so this never affects a
+  // deployment that doesn't use the filter (see Work.ingestionRelevance).
+  const query: Record<string, unknown> = { ingestionRelevance: { $ne: 'not-related' } };
   if (filter.siteId) query.siteId = filter.siteId;
   if (filter.status) query.status = filter.status;
   if (filter.tag) query.tags = filter.tag;
@@ -46,7 +51,9 @@ export async function listWorks(filter: ListWorksFilter = {}): Promise<ListWorks
 }
 
 export async function getWorkById(id: string): Promise<IWork> {
-  const work = await Work.findById(id).populate('siteId', 'name shortCode').populate('tags', 'name facet');
+  const work = await Work.findOne({ _id: id, ingestionRelevance: { $ne: 'not-related' } })
+    .populate('siteId', 'name shortCode')
+    .populate('tags', 'name facet');
   if (!work) throw AppError.notFound('Work not found.');
   return work;
 }

@@ -52,6 +52,18 @@ const envSchema = z.object({
   // call shape -- see services/fileStorage.service.ts.
   TOR_STORAGE_DIR: z.string().default('storage/tor'),
 
+  // Customer requirement: only ingest works related to a specific topic
+  // (e.g. "software") -- see Tag.includeInIngestionFilter and
+  // ingestion.service.ts's inScopeTagIds. Off by default so existing
+  // dev/test setups (and this repo's own seeded test data) keep working
+  // unchanged until an admin both flips this AND flags at least one tag.
+  // Requires AI_TAGGING_ENABLED=true below -- with AI off, no work can ever
+  // be classified as in-scope, so literally nothing would be ingested.
+  INGESTION_TOPIC_FILTER_ENABLED: z
+    .string()
+    .default('false')
+    .transform(v => v === 'true'),
+
   // --- AI-assisted tagging (N3) ---
   // Soft on/off switch -- ingestion must keep working with this off (e.g. no
   // credentials in local dev); see NFR-N3.7, AI tagging is best-effort.

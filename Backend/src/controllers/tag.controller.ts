@@ -11,12 +11,18 @@ export async function list(req: Request, res: Response): Promise<void> {
 }
 
 export async function create(req: Request, res: Response): Promise<void> {
-  const { name, facet, aliases } = req.body as CreateTagInput;
-  const tag = await tagService.createTag(name, facet, aliases);
+  const { name, facet, aliases, includeInIngestionFilter } = req.body as CreateTagInput;
+  const tag = await tagService.createTag(name, facet, aliases, includeInIngestionFilter);
   created(res, tag);
 }
 
 export async function retire(req: Request, res: Response): Promise<void> {
   const tag = await tagService.retireTag(req.params.id);
+  ok(res, tag);
+}
+
+export async function setIngestionFilter(req: Request, res: Response): Promise<void> {
+  const { value } = req.body as { value: boolean };
+  const tag = await tagService.setIngestionFilter(req.params.id, value);
   ok(res, tag);
 }

@@ -6,7 +6,9 @@ import { IngestionRun, IIngestionRun } from '../models/ingestionRun.model';
 import { fetchEgpRssFeed, downloadTorFile, EgpRssItem } from '../integrations/egpRss.client';
 import { datastoreSearch } from '../integrations/dataGoTh.client';
 import { resolveDataGoThResourceId, hasDataGoThConfig } from './dataGoThResource.service';
-import { analyzeTorDocument, TagCandidate } from '../integrations/ai';
+import { analyzeTorDocument, TagCandidate, DocumentAnalysisResult } from '../integrations/ai';
+import { findOrCreateAiTag } from './tag.service';
+import { env } from '../config/env';
 import { saveTorFile } from './fileStorage.service';
 import { extractPdfText } from './pdfText.service';
 import { extractPdfsFromZip, pickPrimaryPdf } from './zipExtraction.service';
@@ -28,9 +30,73 @@ async function getCandidateTags(): Promise<TagCandidate[]> {
   return tags.map(t => ({ id: t._id.toString(), name: t.name, facet: t.facet as 'category' | 'keyword' }));
 }
 
+// Customer requirement: restrict the public site to one topic (e.g.
+// "software"), uniformly across every GovSite -- see
+// Tag.includeInIngestionFilter. Data-driven (which tag(s) count is admin-
+// configured, not hardcoded here). Returns null when the feature is off, so
+// callers leave ingestionRelevance unset entirely rather than computing an
+// always-"not-related" result. NOTE: unlike an early version of this
+// feature, this no longer discards a work outright -- every work is still
+// created/tracked either way; see computeRelevance and its callers.
+async function getInScopeTagIds(): Promise<Set<string> | null> {
+  if (!env.INGESTION_TOPIC_FILTER_ENABLED) return null;
+
+  const tags = await Tag.find({ includeInIngestionFilter: true, retired: false }, '_id');
+  if (tags.length === 0) {
+    logger.warn(
+      'ingestion',
+      'INGESTION_TOPIC_FILTER_ENABLED is true but no tag is flagged includeInIngestionFilter -- ' +
+        'every new work will be filtered out until an admin flags at least one tag via ' +
+        'PATCH /admin/tags/:id/ingestion-filter'
+    );
+  }
+  if (!env.AI_TAGGING_ENABLED) {
+    logger.warn(
+      'ingestion',
+      'INGESTION_TOPIC_FILTER_ENABLED is true but AI_TAGGING_ENABLED is false -- no work can ever ' +
+        'be classified as in-scope without AI, so every new work will be filtered out'
+    );
+  }
+  return new Set(tags.map(t => t._id.toString()));
+}
+
 async function isAlreadyRunning(siteId: Types.ObjectId, source: 'rss' | 'data_go_th'): Promise<boolean> {
   const running = await IngestionRun.findOne({ siteId, source, status: 'running' });
   return !!running;
+}
+
+// Persists an AI-proposed new tag (see integrations/ai's newTag field) and
+// folds it into `candidateTags` IN PLACE -- candidateTags is the same array
+// instance threaded through the rest of the current poll run (including
+// retryMissingTorDownloads below), so a second document about the same
+// novel topic later in this run sees it as a real candidate instead of
+// proposing a near-duplicate. findOrCreateAiTag itself is the actual
+// dedupe authority (a fresh DB lookup, not just this in-memory list) --
+// this is purely an optimization to reduce redundant proposals, not a
+// correctness requirement.
+async function resolveNewTag(analysis: DocumentAnalysisResult, candidateTags: TagCandidate[]): Promise<Types.ObjectId | null> {
+  if (!analysis.newTag) return null;
+
+  try {
+    const tag = await findOrCreateAiTag(analysis.newTag.name, analysis.newTag.facet);
+    const idStr = tag._id.toString();
+    if (!candidateTags.some(c => c.id === idStr)) {
+      candidateTags.push({ id: idStr, name: tag.name, facet: tag.facet as 'category' | 'keyword' });
+    }
+    return tag._id;
+  } catch (err) {
+    logger.warn('ingestion', `Failed to persist AI-proposed tag "${analysis.newTag.name}"`, err);
+    return null;
+  }
+}
+
+// Customer requirement: mark (not discard) a work's topic relevance --
+// checked against analysis.tagIds (established candidates) only, never a
+// brand-new AI-proposed tag: a newTag proposal isn't yet admin-reviewed, so
+// it can never itself earn 'shown' on the same poll it was proposed in.
+function computeRelevance(analysis: DocumentAnalysisResult, inScopeTagIds: Set<string> | null): 'shown' | 'not-related' | undefined {
+  if (!inScopeTagIds) return undefined; // feature off -- leave the field unset entirely
+  return analysis.tagIds.some(id => inScopeTagIds.has(id)) ? 'shown' : 'not-related';
 }
 
 export async function runRssPoll(site: IGovSite, triggeredBy: TriggeredBy): Promise<IIngestionRun> {
@@ -53,6 +119,7 @@ export async function runRssPoll(site: IGovSite, triggeredBy: TriggeredBy): Prom
   let failedCount = 0;
   const errorLog: string[] = [];
   const candidateTags = await getCandidateTags();
+  const inScopeTagIds = await getInScopeTagIds();
 
   // A site-level tag always exists (created alongside the GovSite) -- every
   // work carries it, per N3's "government site" facet.
@@ -82,7 +149,7 @@ export async function runRssPoll(site: IGovSite, triggeredBy: TriggeredBy): Prom
 
     for (const item of items) {
       try {
-        const result = await upsertWorkFromRssItem(site, announceType, item, candidateTags, siteTag?._id);
+        const result = await upsertWorkFromRssItem(site, announceType, item, candidateTags, siteTag?._id, inScopeTagIds);
         if (result === 'new') newCount += 1;
         if (result === 'updated') updatedCount += 1;
       } catch (err) {
@@ -122,6 +189,13 @@ export async function runRssPoll(site: IGovSite, triggeredBy: TriggeredBy): Prom
 async function retryMissingTorDownloads(site: IGovSite, candidateTags: TagCandidate[]): Promise<number> {
   const works = await Work.find({
     siteId: site._id,
+    // A work already marked 'not-related' never has its TOR reprocessed --
+    // that's the whole point of persisting ingestionRelevance (customer
+    // requirement). Its torFiles entries deliberately have no storageKey
+    // (see the update branch of upsertWorkFromRssItem below), so without
+    // this exclusion they'd otherwise look exactly like a transient
+    // download failure and get retried here forever.
+    ingestionRelevance: { $ne: 'not-related' },
     torFiles: { $elemMatch: { linkType: { $in: ['pdf', 'zip'] }, storageKey: { $exists: false }, supersededAt: { $exists: false } } }
   });
 
@@ -163,6 +237,8 @@ async function retryMissingTorDownloads(site: IGovSite, candidateTags: TagCandid
               const tagId = new Types.ObjectId(tagIdStr);
               if (!work.tags.some(t => t.equals(tagId))) work.tags.push(tagId);
             }
+            const newTagId = await resolveNewTag(analysis, candidateTags);
+            if (newTagId && !work.tags.some(t => t.equals(newTagId))) work.tags.push(newTagId);
           }
         }
       } catch (err) {
@@ -244,6 +320,16 @@ async function downloadAndExtractTorFiles(item: EgpRssItem): Promise<ExtractedTo
 }
 
 function buildTorFiles(announceType: AnnounceType, item: EgpRssItem, extracted: ExtractedTorFile[] | null): ITorFile[] {
+  if (!item.link) {
+    // Confirmed live (2026-09-16, projectId 69099235352): a real RSS item
+    // can have a genuinely empty <link>. sourceUrl is required on ITorFile,
+    // so pushing a placeholder with '' used to throw a Mongoose validation
+    // error and fail the whole item -- there's nothing to record here, so
+    // just don't add an entry. The Work itself still gets created/updated
+    // for its status/lifecycle by the caller.
+    return [];
+  }
+
   if (!extracted || extracted.length === 0) {
     // Nothing downloaded yet (transient failure, or a link type that's
     // never fetched at all) -- still record the link itself so a later
@@ -267,7 +353,8 @@ async function upsertWorkFromRssItem(
   announceType: AnnounceType,
   item: EgpRssItem,
   candidateTags: TagCandidate[],
-  siteTagId: Types.ObjectId | undefined
+  siteTagId: Types.ObjectId | undefined,
+  inScopeTagIds: Set<string> | null
 ): Promise<'new' | 'updated' | 'skipped'> {
   if (!item.projectId) {
     // No stable key to upsert on -- can't safely store this item.
@@ -285,8 +372,19 @@ async function upsertWorkFromRssItem(
     const primary = extracted?.find(f => f.role !== 'attachment') ?? null;
     const analysis = await analyzeTorDocument({ title: item.title, documentText: primary?.pdfText }, candidateTags);
 
+    // Customer requirement (e.g. "software-only"): every work is still
+    // created and fully populated below regardless of topic -- this only
+    // decides whether it's PUBLICLY VISIBLE (see work.service.ts's query
+    // filter) and is evaluated exactly once, right here. It deliberately
+    // does NOT gate resolveNewTag/budget/description/tags below -- a
+    // 'not-related' work still gets the richest record we can give it, in
+    // case an admin ever reviews it.
+    const ingestionRelevance = computeRelevance(analysis, inScopeTagIds);
+
     const tagIds: Types.ObjectId[] = siteTagId ? [siteTagId] : [];
     tagIds.push(...analysis.tagIds.map(id => new Types.ObjectId(id)));
+    const newTagId = await resolveNewTag(analysis, candidateTags);
+    if (newTagId) tagIds.push(newTagId);
 
     await Work.create({
       siteId: site._id,
@@ -304,7 +402,8 @@ async function upsertWorkFromRssItem(
       pubDate: item.pubDate ?? undefined,
       torFiles: buildTorFiles(announceType, item, extracted),
       statusHistory: [{ status, announceType, changedAt: item.pubDate ?? new Date() }],
-      tags: tagIds
+      tags: tagIds,
+      ingestionRelevance
     });
 
     return 'new';
@@ -333,14 +432,27 @@ async function upsertWorkFromRssItem(
   // into several files that all share it.
   const currentGroup = existing.torFiles.filter(f => f.announceType === announceType && !f.supersededAt);
   const currentUrl = currentGroup[0]?.sourceUrl;
-  if (currentGroup.length === 0) {
-    newExtracted = await downloadAndExtractTorFiles(item);
-    existing.torFiles.push(...buildTorFiles(announceType, item, newExtracted));
-    changed = true;
-  } else if (currentUrl !== item.link) {
+  // A genuinely empty item.link (confirmed live, see buildTorFiles) is
+  // never treated as "the government replaced the document" -- that would
+  // supersede a real, already-tracked document based on what's more likely
+  // a feed glitch than a deliberate removal. Leave existing torFiles alone.
+  const hasNewDocument = !!item.link && (currentGroup.length === 0 || currentUrl !== item.link);
+
+  if (hasNewDocument) {
     for (const f of currentGroup) f.supersededAt = new Date();
-    newExtracted = await downloadAndExtractTorFiles(item);
-    existing.torFiles.push(...buildTorFiles(announceType, item, newExtracted));
+
+    // Customer requirement: a work already marked 'not-related' never gets
+    // its TOR reprocessed again -- relevance is decided ONCE, at creation
+    // (see computeRelevance in the branch above), and never re-evaluated on
+    // later lifecycle updates. Still record the link itself so status
+    // history/lifecycle stays complete and visible to an admin -- just
+    // deliberately skip the download/extract/AI-analyze cost.
+    if (existing.ingestionRelevance === 'not-related') {
+      existing.torFiles.push({ announceType, linkType: item.linkType, sourceUrl: item.link });
+    } else {
+      newExtracted = await downloadAndExtractTorFiles(item);
+      existing.torFiles.push(...buildTorFiles(announceType, item, newExtracted));
+    }
     changed = true;
   }
 
@@ -370,6 +482,11 @@ async function upsertWorkFromRssItem(
         existing.tags.push(tagId);
         changed = true;
       }
+    }
+    const newTagId = await resolveNewTag(analysis, candidateTags);
+    if (newTagId && !existing.tags.some(t => t.equals(newTagId))) {
+      existing.tags.push(newTagId);
+      changed = true;
     }
   }
 

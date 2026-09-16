@@ -14,12 +14,18 @@ export { TagCandidate, DocumentAnalysisInput, DocumentAnalysisResult } from './t
  * Given a work's title and, when available, its TOR document already
  * converted to plain text (see pdfText.service.ts -- never a raw PDF/HTML
  * file, to keep token usage down and keep this module provider-agnostic),
- * asks the configured AI_PROVIDER for two things in one call:
- *   1. tagIds -- classification against a FIXED candidate tag list (never
- *      free-form generation, so it can't introduce an orphan/duplicate tag,
- *      NFR-N3.3).
+ * asks the configured AI_PROVIDER for:
+ *   1. tagIds -- classification against a candidate tag list.
  *   2. description -- a short plain-language summary of the document's
  *      actual content.
+ *   3. budget -- a pre-award estimate read from the document text, if any.
+ *   4. newTag -- optionally, ONE brand-new tag proposal when NONE of the
+ *      candidates genuinely fit (relaxes the old "never invent a tag"
+ *      NFR-N3.3 rule on purpose, by explicit request, so the vocabulary can
+ *      grow to cover topics an admin never anticipated). This module only
+ *      returns the proposal -- ingestion.service.ts is what actually
+ *      persists it via tag.service.ts's findOrCreateAiTag() and folds it
+ *      into the candidate list for later documents in the same poll run.
  *
  * The provider (Vertex AI vs OpenRouter) is a pure strategy swap driven by
  * env.AI_PROVIDER -- prompt-building and response-parsing are identical
@@ -30,7 +36,7 @@ export { TagCandidate, DocumentAnalysisInput, DocumentAnalysisResult } from './t
  * ingestion.
  */
 
-const EMPTY_RESULT: DocumentAnalysisResult = { description: null, tagIds: [], budget: null };
+const EMPTY_RESULT: DocumentAnalysisResult = { description: null, tagIds: [], budget: null, newTag: null };
 
 const providers: Record<string, AiProvider> = {
   vertexai: vertexProvider,
@@ -56,12 +62,13 @@ function stripReasoning(text: string): string {
   return closeTag === -1 ? text : text.slice(closeTag + '</think>'.length);
 }
 
-function parseResult(text: string, validIds: Set<string>): DocumentAnalysisResult {
+function parseResult(text: string, candidates: TagCandidate[]): DocumentAnalysisResult {
   try {
     const match = stripReasoning(text).match(/\{[\s\S]*\}/);
     if (!match) return EMPTY_RESULT;
 
     const parsed = JSON.parse(match[0]);
+    const validIds = new Set(candidates.map(c => c.id));
     const tagIds = Array.isArray(parsed.tagIds)
       ? parsed.tagIds.filter((id: unknown): id is string => typeof id === 'string' && validIds.has(id))
       : [];
@@ -74,11 +81,34 @@ function parseResult(text: string, validIds: Set<string>): DocumentAnalysisResul
     // anything non-finite or <= 0 rather than trusting it as a real price.
     const budgetNumber = Number(parsed.budget);
     const budget = typeof parsed.budget !== 'object' && Number.isFinite(budgetNumber) && budgetNumber > 0 ? budgetNumber : null;
+    const newTag = parseNewTag(parsed.newTag, candidates);
 
-    return { description, tagIds, budget };
+    return { description, tagIds, budget, newTag };
   } catch {
     return EMPTY_RESULT;
   }
+}
+
+// Defensive validation on top of the prompt's own instructions -- a model
+// can still ignore "don't duplicate a candidate" or "name/facet only", so
+// re-check here rather than trusting the response shape blindly. Anything
+// that fails these checks is dropped (returns null) rather than surfaced as
+// an error -- proposing a new tag is always optional, never required.
+function parseNewTag(raw: unknown, candidates: TagCandidate[]): DocumentAnalysisResult['newTag'] {
+  if (!raw || typeof raw !== 'object') return null;
+  const name = (raw as { name?: unknown }).name;
+  const facet = (raw as { facet?: unknown }).facet;
+  if (typeof name !== 'string' || (facet !== 'category' && facet !== 'keyword')) return null;
+
+  const trimmed = name.trim();
+  if (!trimmed || trimmed.length > 200) return null;
+  // Reject an exact (case-insensitive) rewording of an existing candidate --
+  // the point is to cover a genuinely new topic, not relabel one we already
+  // have. This can't catch every synonym, but it catches the model simply
+  // echoing a candidate's name back under "newTag" instead of "tagIds".
+  if (candidates.some(c => c.name.trim().toLowerCase() === trimmed.toLowerCase())) return null;
+
+  return { name: trimmed, facet };
 }
 
 /**
@@ -98,8 +128,7 @@ export async function analyzeTorDocument(
     const text = await provider.generate(SYSTEM_PROMPT, userPrompt);
     if (!text) return EMPTY_RESULT;
 
-    const validIds = new Set(candidates.map(c => c.id));
-    return parseResult(text, validIds);
+    return parseResult(text, candidates);
   } catch (err) {
     logger.warn(
       'aiTagging',
