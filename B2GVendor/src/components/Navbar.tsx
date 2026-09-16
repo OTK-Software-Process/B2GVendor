@@ -92,14 +92,14 @@ export function Navbar() {
             >
               {lang === 'en' ? 'Search Works' : 'ค้นหาโครงการ'}
             </Link>
-            <Link
+            {/* <Link
               href="/agencies"
               className={`px-3 py-2 rounded-xl transition-colors duration-150 ${
                 pathname.startsWith('/agencies') ? 'text-emerald-700 bg-emerald-50' : 'text-slate-600 hover:text-emerald-700 hover:bg-slate-50'
               }`}
             >
               {lang === 'en' ? 'Gov. Sites' : 'หน่วยงานภาครัฐ'}
-            </Link>
+            </Link> */}
 
             {/* Quick Link to Admin Shell */}
             {isAdminRole && (
