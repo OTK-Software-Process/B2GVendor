@@ -5,6 +5,7 @@ import { adminGovSiteRouter } from './govSite.routes';
 import { adminTagRouter } from './tag.routes';
 import { ingestionRouter } from './ingestion.routes';
 import { dataGoThDiscoveryRouter } from './dataGoThDiscovery.routes';
+import { adminDashboardRouter } from './adminDashboard.routes';
 
 export const adminRouter = Router();
 
@@ -12,6 +13,7 @@ export const adminRouter = Router();
 // further to Super Admin where the spec calls for it (see govSite.routes.ts).
 adminRouter.use(requireAuth, requireAdmin);
 
+adminRouter.use('/dashboard', adminDashboardRouter);
 adminRouter.use('/gov-sites', adminGovSiteRouter);
 adminRouter.use('/tags', adminTagRouter);
 adminRouter.use('/ingestion', ingestionRouter);

@@ -443,3 +443,51 @@ export function updateNotificationSettings(update: {
 export function setTagPaused(tagId: string, paused: boolean): Promise<void> {
   return api.patch(`/follows/tags/${tagId}/pause`, { paused });
 }
+
+// ---------------------------------------------------------------------------
+// Admin dashboard -- GET /admin/dashboard (Backend/src/services/adminDashboard.service.ts).
+// One read-only snapshot of live counts; nothing on it is editable.
+// ---------------------------------------------------------------------------
+
+export interface BackendDashboardRun {
+  id: string;
+  source: BackendIngestionSource;
+  status: BackendIngestionRunStatus;
+  startedAt: string;
+  finishedAt?: string;
+  fetchedCount: number;
+  newCount: number;
+  updatedCount: number;
+  failedCount: number;
+}
+
+export interface BackendDashboardSiteRow {
+  siteId: string;
+  name: string;
+  shortCode: string;
+  enabled: boolean;
+  lastRun: BackendDashboardRun | null;
+}
+
+export interface BackendAdminDashboard {
+  generatedAt: string;
+  accounts: {
+    vendors: { total: number; active: number; suspended: number };
+    admins: { total: number; admin: number; superadmin: number; suspended: number };
+  };
+  tags: { active: number; retired: number; byFacet: Record<BackendTagFacet, number> };
+  sites: { total: number; enabled: number };
+  works: { total: number };
+  ingestion: {
+    lastRun: (BackendDashboardRun & { site: { id: string; name: string; shortCode: string } }) | null;
+    failedRuns24h: number;
+    runningNow: number;
+    queuedJobs: number;
+    nextScheduledAt: string | null;
+    sites: BackendDashboardSiteRow[];
+  };
+}
+
+export function fetchAdminDashboard(): Promise<BackendAdminDashboard> {
+  return api.get<BackendAdminDashboard>('/admin/dashboard');
+}
