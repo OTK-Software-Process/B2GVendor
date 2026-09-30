@@ -1,11 +1,12 @@
-import mongoose, { Schema, Document, Model } from 'mongoose';
-import bcrypt from 'bcryptjs';
-import { env } from '../config/env';
+import mongoose, { Schema, Document, Model } from "mongoose";
+import bcrypt from "bcryptjs";
+import { env } from "../config/env";
 
-export type AccountType = 'individual' | 'business';
-export type AccountStatus = 'active' | 'suspended';
-export type AccountRole = 'user' | 'admin' | 'superadmin';
-export type NotificationFrequency = 'instant' | 'daily';
+export type AccountType = "individual" | "business";
+export type AccountStatus = "active" | "suspended";
+export type AccountRole = "user" | "admin" | "superadmin";
+export type NotificationFrequency = "instant" | "daily";
+export type Permission = (typeof PERMISSIONS)[number];
 
 export interface IBusinessProfile {
   companyName: string;
@@ -24,6 +25,7 @@ export interface IAccount extends Document {
 
   status: AccountStatus;
   role: AccountRole;
+  permissions: Permission[];
 
   // Notification preferences (account/notifications/settings in the
   // frontend). In-app notifications are always created regardless of these
@@ -41,20 +43,45 @@ export interface IAccount extends Document {
   comparePassword(plain: string): Promise<boolean>;
 }
 
-export const STAFF_ROLES: readonly AccountRole[] = ['admin', 'superadmin'] as const;
+export const STAFF_ROLES: readonly AccountRole[] = [
+  "admin",
+  "superadmin",
+] as const;
+
+export const PERMISSIONS = [
+  "poll:manage",
+  "tag:manage",
+  "poll&tag:manage",
+] as const;
 
 export function isStaffRole(role: AccountRole): boolean {
   return STAFF_ROLES.includes(role);
 }
 
-export function canManageAccount(actorRole: AccountRole, targetRole: AccountRole): boolean {
-  if (actorRole === 'superadmin') return true;
-  if (actorRole === 'admin') return targetRole === 'user';
+export function canManageAccount(
+  actorRole: AccountRole,
+  targetRole: AccountRole,
+): boolean {
+  if (actorRole === "superadmin") return true;
+  if (actorRole === "admin") return targetRole === "user";
   return false;
 }
 
 export function canAssignRole(actorRole: AccountRole): boolean {
-  return actorRole === 'superadmin';
+  return actorRole === "superadmin";
+}
+
+export function hasPermission(
+  account: Pick<IAccount, "role" | "permissions">,
+  permission: Permission,
+): boolean {
+  if (account.role === "superadmin") return true;
+  if (account.role === "admin") return account.permissions.includes(permission);
+  return false;
+}
+
+export function canAssignPermissions(actorRole: AccountRole): boolean {
+  return actorRole === "superadmin";
 }
 
 const BusinessProfileSchema = new Schema<IBusinessProfile>(
@@ -64,10 +91,10 @@ const BusinessProfileSchema = new Schema<IBusinessProfile>(
       type: String,
       required: true,
       trim: true,
-      match: [/^\d{13}$/, 'Tax ID must be exactly 13 digits'],
+      match: [/^\d{13}$/, "Tax ID must be exactly 13 digits"],
     },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const AccountSchema = new Schema<IAccount>(
@@ -78,7 +105,7 @@ const AccountSchema = new Schema<IAccount>(
       unique: true,
       lowercase: true,
       trim: true,
-      match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'Invalid email address'],
+      match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, "Invalid email address"],
     },
     passwordHash: { type: String, required: true, select: false },
 
@@ -86,13 +113,13 @@ const AccountSchema = new Schema<IAccount>(
     phone: {
       type: String,
       trim: true,
-      match: [/^(\+66|0)[\d\-\s]{8,12}$/, 'Invalid Thai phone number'],
+      match: [/^(\+66|0)[\d\-\s]{8,12}$/, "Invalid Thai phone number"],
     },
 
     type: {
       type: String,
-      enum: ['individual', 'business'],
-      default: 'individual',
+      enum: ["individual", "business"],
+      default: "individual",
       required: true,
       index: true,
     },
@@ -100,21 +127,25 @@ const AccountSchema = new Schema<IAccount>(
 
     status: {
       type: String,
-      enum: ['active', 'suspended'],
-      default: 'active',
+      enum: ["active", "suspended"],
+      default: "active",
       required: true,
       index: true,
     },
     role: {
       type: String,
-      enum: ['user', 'admin', 'superadmin'],
-      default: 'user',
+      enum: ["user", "admin", "superadmin"],
+      default: "user",
       required: true,
       index: true,
     },
-
+    permissions: { type: [String], default: [] },
     emailNotificationsEnabled: { type: Boolean, default: true },
-    notificationFrequency: { type: String, enum: ['instant', 'daily'], default: 'instant' },
+    notificationFrequency: {
+      type: String,
+      enum: ["instant", "daily"],
+      default: "instant",
+    },
 
     lockedUntil: { type: Date, select: false },
     passwordChangedAt: { type: Date, select: false },
@@ -131,34 +162,45 @@ const AccountSchema = new Schema<IAccount>(
         return ret;
       },
     },
-  }
+  },
 );
 
 AccountSchema.index({ createdAt: -1 });
 
-AccountSchema.pre('validate', function (next) {
-  if (this.type === 'business' && !this.businessProfile) {
-    this.invalidate('businessProfile', 'A business account requires companyName and taxId');
+AccountSchema.pre("validate", function (next) {
+  if (this.type === "business" && !this.businessProfile) {
+    this.invalidate(
+      "businessProfile",
+      "A business account requires companyName and taxId",
+    );
   }
-  if (this.type === 'individual' && this.businessProfile) {
+  if (this.type === "individual" && this.businessProfile) {
     this.businessProfile = undefined;
   }
-  if (!this.isNew && this.isModified('type')) {
-    this.invalidate('type', 'Account type cannot be changed after registration');
+  if (!this.isNew && this.isModified("type")) {
+    this.invalidate(
+      "type",
+      "Account type cannot be changed after registration",
+    );
+  }
+  if (this.role !== "admin" && this.permissions?.length) {
+    this.permissions = [];
   }
   next();
 });
 
-AccountSchema.pre('save', async function (next) {
-  if (!this.isModified('passwordHash')) return next();
+AccountSchema.pre("save", async function (next) {
+  if (!this.isModified("passwordHash")) return next();
   this.passwordHash = await bcrypt.hash(this.passwordHash, env.BCRYPT_ROUNDS);
   this.passwordChangedAt = new Date();
   next();
 });
 
-AccountSchema.methods.comparePassword = function (plain: string): Promise<boolean> {
+AccountSchema.methods.comparePassword = function (
+  plain: string,
+): Promise<boolean> {
   return bcrypt.compare(plain, this.passwordHash);
 };
 
 export const Account: Model<IAccount> =
-  mongoose.models.Account || mongoose.model<IAccount>('Account', AccountSchema);
+  mongoose.models.Account || mongoose.model<IAccount>("Account", AccountSchema);

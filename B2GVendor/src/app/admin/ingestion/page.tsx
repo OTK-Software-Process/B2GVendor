@@ -146,7 +146,7 @@ export default function IngestionControlPage() {
           <button
             type="button"
             onClick={() => setScheduleActive(!scheduleActive)}
-            className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all duration-150 ${
+            className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all duration-150 cursor-pointer ${
               scheduleActive
                 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                 : 'bg-rose-50 text-rose-700 border border-rose-200'
@@ -164,7 +164,7 @@ export default function IngestionControlPage() {
           <select
             value={preset}
             onChange={(e) => handlePresetChange(e.target.value)}
-            className="w-full max-w-sm bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-900 outline-hidden focus:border-sky-400"
+            className="w-full max-w-sm bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-900 outline-hidden focus:border-sky-400 cursor-pointer"
           >
             <option value="5m">{lang === 'en' ? 'Every 5 minutes' : 'ทุก 5 นาที'}</option>
             <option value="15m">{lang === 'en' ? 'Every 15 minutes (recommended)' : 'ทุก 15 นาที (แนะนำ)'}</option>

@@ -63,6 +63,8 @@ npm run seed:superadmin -- admin@example.com "Password123" "Admin"
 # Government sites + the tag vocabulary (including the "software" filter tag).
 npm run seed:all
 ```
+> [!NOTE]
+> If seed command not working try change the URI in .env in `\Backend` to mongodb://localhost:27017/b2gvendor and rerun it.
 
 `seed:all` is idempotent — safe to re-run any time; it skips anything that already exists. See [Seed scripts reference](#seed-scripts-reference) below for what each one does and how to add more real agencies later.
 
