@@ -13,6 +13,7 @@
     "check:shared": "tsx tests/integration/shared-layer.check.ts",
     "check:auth": "tsx tests/integration/auth-flow.check.ts",
     "check:ingestion": "tsx tests/integration/ingestion-flow.check.ts",
+    "seed:admins": "tsx src/scripts/seedAdmin.ts",
     "seed:superadmin": "tsx src/scripts/seedSuperAdmin.ts",
     "seed:gov-sites": "tsx src/scripts/seedGovSites.ts",
     "seed:tags": "tsx src/scripts/seedTags.ts",
