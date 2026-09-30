@@ -21,9 +21,13 @@ import {
 
 export function AdminSidebar() {
   const pathname = usePathname();
-  const { lang, role, isPolling, triggerPollNow } = useApp();
+  const { lang, role, account, isPolling, triggerPollNow } = useApp();
   const [mobileOpen, setMobileOpen] = useState(false);
   const isSuperAdmin = role === 'superadmin';
+  const canManagePoll = isSuperAdmin || (role === 'admin' && (
+    account?.permissions?.includes('poll:manage') === true ||
+    account?.permissions?.includes('poll&tag:manage') === true
+  ));
 
   const navGroups = [
     {
@@ -32,12 +36,12 @@ export function AdminSidebar() {
         { href: '/admin', label: lang === 'en' ? 'Dashboard' : 'แดชบอร์ดหลัก', icon: LayoutDashboard },
       ]
     },
-    {
+    ...(canManagePoll ? [{
       title: lang === 'en' ? 'Ingestion' : 'ระบบดึงข้อมูล',
       items: [
         { href: '/admin/ingestion', label: lang === 'en' ? 'Polling System' : 'ระบบดึงข้อมูล', icon: RefreshCw },
       ]
-    },
+    }] : []),
     {
       title: lang === 'en' ? 'Taxonomy & Works' : 'คำศัพท์แท็ก & รายการ',
       items: [
@@ -82,7 +86,7 @@ export function AdminSidebar() {
       </div>
 
       {/* Quick Poll Trigger */}
-      <div className="p-4 border-b border-slate-100">
+      {canManagePoll && <div className="p-4 border-b border-slate-100">
         <button
           onClick={() => triggerPollNow()}
           disabled={isPolling}
@@ -95,7 +99,7 @@ export function AdminSidebar() {
           <RefreshCw className={`w-3.5 h-3.5 ${isPolling ? 'animate-spin' : ''}`} />
           <span>{isPolling ? (lang === 'en' ? 'Polling sites...' : 'กำลังดึงข้อมูล...') : (lang === 'en' ? 'Poll Now' : 'สั่ง Poll Now ทันที')}</span>
         </button>
-      </div>
+      </div>}
 
       {/* Navigation Groups */}
       <div className="flex-1 overflow-y-auto p-4 space-y-6 text-xs">

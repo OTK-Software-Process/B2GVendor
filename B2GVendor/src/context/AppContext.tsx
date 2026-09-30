@@ -41,6 +41,7 @@ export interface AccountView {
   businessProfile?: AccountBusinessProfile;
   status: 'active' | 'suspended';
   role: 'user' | 'admin' | 'superadmin';
+  permissions?: string[];
 }
 
 interface ApiTag extends Omit<TagItem, 'id' | 'followerCount' | 'worksCount'> {
