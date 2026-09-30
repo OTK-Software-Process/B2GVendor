@@ -10,6 +10,7 @@ export type ErrorCode =
   | 'BAD_REQUEST'
   | 'RATE_LIMITED'
   | 'NOT_FOUND'
+  | 'CONFLICT'
   | 'INTERNAL_ERROR';
 
 export type FieldErrors = Record<string, string>;
@@ -68,6 +69,10 @@ export class AppError extends Error {
 
   static badRequest(message = 'Bad request.'): AppError {
     return new AppError(400, 'BAD_REQUEST', message);
+  }
+
+  static conflict(message = 'This action conflicts with the current state.'): AppError {
+    return new AppError(409, 'CONFLICT', message);
   }
 
   static internalError(message = 'An unexpected error occurred.'): AppError {

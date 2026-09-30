@@ -82,7 +82,7 @@ cd Backend
 npm run dev:worker
 ```
 
-**This is the process that actually polls.** The API container only ever writes a queue row (a `PollJob`) — this separate process claims it and does the real work: fetch the e-GP RSS feed, download TOR PDFs/ZIPs, extract text, AI-tag/summarize/extract price, save to Mongo, and notify followers. It also runs on its own schedule automatically (`POLL_DEFAULT_INTERVAL_MINUTES`, default 30) for every enabled government site — no manual trigger needed once it's running, though you can also trigger a poll on demand (see step 8).
+**This is the process that actually polls.** The API container only ever writes a queue row (a `PollJob`) — this separate process claims it and does the real work: fetch the e-GP RSS feed, download TOR PDFs/ZIPs, extract text, AI-tag/summarize/extract price, save to Mongo, and notify followers. It also runs on its own schedule automatically for every enabled government site (every 24 hours by default; an admin changes the interval — minimum 2 hours — or pauses it under Admin → Data Ingestion → Automatic Schedule) — no manual trigger needed once it's running, though you can also trigger a poll on demand (see step 8).
 
 ### 7. Start the frontend
 
@@ -148,6 +148,8 @@ Run from `Backend/`:
 | `npm run seed:gov-sites` | Seeds government sites: 2 test sites + 4 real, live-verified agencies (MOPH, Dept. of Highways, Dept. of Health, depa). See the script's header comment for how each `deptId` was verified, and for what's needed to add PEA/EGAT/DGA/BMA (they don't have one simple central code). |
 | `npm run seed:tags` | Seeds the real category/method/keyword tag vocabulary (mirrors the frontend's original mock taxonomy), including the software-only filter tag. |
 | `npm run seed:all` | Both of the above, in order. Idempotent. |
+| `npm run backfill:budgets [-- --dry-run]` | One-off repair for works ingested with no price: re-scans their already-stored TOR PDFs for a labelled ราคากลาง / วงเงินงบประมาณ amount (anchored on "บาท") and fills it in, or records why there's none. Local only — no AI calls — and never overwrites an existing price. Use `--dry-run` to preview. |
+| `npm run backfill:html-prices [-- --dry-run] [--retry-failed] [--limit=N]` | One-off catch-up for winner announcements ingested before HTML pages were read: reads each unread announcement page (one request per site's rate; only the exact feed link, e-GP hosts only) and fills in the winning bid, labelled as such. A normal poll does this 40 pages per site at a time; this does all of them in one run. `--dry-run` only counts. In Docker: `docker compose exec backend node dist/scripts/backfillHtmlPrices.js --dry-run`. Run it while no poll is running. Switched off by `EGP_HTML_TOR_ENABLED=false`. |
 
 ## Quick start (Docker — runs everything together)
 

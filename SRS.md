@@ -108,7 +108,7 @@ The primary objective of the software is to remove the need to separately monito
 - **Personalization:** Users follow interest tags (site, agency, method, category, keyword) and are notified only about relevant new work.
 - **Transparency:** Status is always derived from ingested source data — never manually edited — so search results, work detail, and notifications never disagree with one another.
 
-The system is constrained to **7 government sites at launch** (BMA, Department of Highways, PEA, EGAT, Office of the Permanent Secretary of the Ministry of Public Health, depa, and DGA), extensible only by a Super Admin, and it never scrapes HTML — ingestion is strictly via polling the e-GP RSS feed and `data.go.th`.
+The system is constrained to **7 government sites at launch** (BMA, Department of Highways, PEA, EGAT, Office of the Permanent Secretary of the Ministry of Public Health, depa, and DGA), extensible only by a Super Admin, and it does not scrape or crawl HTML — ingestion is via polling the e-GP RSS feed and `data.go.th`; the single exception is that the one announcement page an RSS item itself links to (in practice, a winner announcement) is read for its price (FR-2.3a).
 
 ### 1.5 Stakeholders
 
@@ -211,7 +211,7 @@ The design and development of B2G Vendor must adhere to the following strict con
   - Data Source Credentials: Any dataset/API access details are stored in server-side configuration, never exposed to the client.
 
 - **Data Source:**
-  - No Scraping: Ingestion is strictly via the e-GP RSS feed (live) and the `data.go.th` open-data catalog (historical enrichment) for every connected government site — never by parsing an HTML page.
+  - No Scraping: Ingestion is via the e-GP RSS feed (live) and the `data.go.th` open-data catalog (historical enrichment) for every connected government site. The only HTML ever read is the single announcement page an RSS item itself links to (FR-2.3a) — no crawling, no listing or search pages, no links followed — and reading it can be disabled by configuration.
   - Correct Encoding: The e-GP RSS feed is Windows-874 (Thai codepage) encoded, not UTF-8, despite looking like standard XML; it must be decoded explicitly as Windows-874.
   - Adapter Isolation: Each government site's response mapping lives in its own adapter, per source, since dataset schemas differ by organization and the two sources are structurally different (XML/RSS vs. JSON/CKAN).
 
@@ -259,7 +259,7 @@ The requirements in this SRS rely on the following assumptions:
 
 **US-2.1:** As an Admin, I want to trigger a manual poll for one government site or all enabled sites, so that I can refresh data immediately when needed.
 
-**US-2.2:** As an Admin, I want to set a recurring poll interval, so that data stays current without manual work.
+**US-2.2:** As an Admin, I want to set a recurring poll interval (default every 24 hours; never more often than every 2 hours), so that data stays current without manual work.
 
 **US-2.3:** As an Admin, I want to see each poll run's results broken down by government site, so that I can trust the data and catch failures at any one source.
 
@@ -329,15 +329,15 @@ This section organizes the specific functional requirements into logical feature
 
 - **Functional Requirements:**
   - **FR-2.1:** The system shall allow an Admin to immediately run an ingestion job against one site or all enabled sites and report results.
-  - **FR-2.2:** The system shall allow an Admin to configure a recurring poll interval per site, which the scheduler runs automatically and can pause/resume.
+  - **FR-2.2:** The system shall allow an Admin to configure a recurring poll interval, in hours — default 24 hours, minimum 2 hours (enforced server-side) — which the scheduler applies to every enabled site (with an optional per-site override obeying the same minimum), runs automatically, and can pause/resume. A disabled site is skipped by every scheduled poll and by "Poll Now → all sites".
   - **FR-2.3:** The system shall, for each configured site's e-GP department code (`deptId`), poll the e-GP RSS feed across its enabled announcement types (draft TOR, invitation, cancellation, amendment, winner, reference price, procurement plan) and extract each item's title, project identifier, announcement-type label, publish date, and link. **This is the primary and only source capable of discovering a new or updated TOR.**
-  - **FR-2.3a:** The system shall classify each RSS item's link as either a direct document (e.g. PDF) or an HTML detail-page reference before storage; a direct document shall be downloaded and stored, while an HTML reference shall be recorded as a URL only, without being fetched or parsed.
+  - **FR-2.3a:** The system shall classify each RSS item's link as either a direct document (e.g. PDF) or an HTML detail-page reference before storage; a direct document shall be downloaded and stored, an HTML reference shall be recorded as a URL to the source page and additionally read: the system shall request only the exact URL the feed provides for that item, only on e-GP hosts and at a throttled rate, extract its text, and use it to determine the price (for a winner announcement, the winning bid, presented as such rather than as a budget). The page itself is not stored and nothing on it is followed. This reading can be disabled by configuration.
   - **FR-2.4:** The system shall upsert ingested records by a stable key (the project identifier) scoped per site, so re-polling updates rather than duplicates, and so records from either source correlate to the same work.
   - **FR-2.5:** The system shall flag brand-new works and changed fields (especially status) and emit events consumed by the notification and search features.
   - **FR-2.6:** The system shall record, per government site and per source, a run's start/end time, counts (fetched / new / updated / skipped / failed), and errors, viewable and filterable in the admin panel.
   - **FR-2.7:** The system shall retry a failed poll with backoff and alert the Admin; a failure at one government site or one source shall not corrupt already-ingested data or block polling of the others.
   - **FR-2.8:** The system shall restrict adding, removing, enabling, disabling, or repointing a government site to Super Admin only; Admins may view but not edit the site list.
-  - **FR-2.9:** The system shall prevent a manual poll and a scheduled poll for the same site and source from running destructively at the same time.
+  - **FR-2.9:** The system shall prevent a manual poll and a scheduled poll for the same site and source from running destructively at the same time. While any poll is queued or running, "Poll Now" shall be locked for every admin account, including after a page refresh, and a poll abandoned by a crashed worker shall not hold that lock indefinitely.
   - **FR-2.10:** The system shall periodically fetch each configured site's `data.go.th` contract-level dataset, where one exists, and attach budget, contract number/dates, and winner information to the matching already-ingested work by its project identifier. This source shall never create a new work on its own.
 
 - **Traceability:**

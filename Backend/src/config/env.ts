@@ -42,10 +42,21 @@ const envSchema = z.object({
   // GovSite's nor this default package id resolves.
   DATA_GO_TH_DEFAULT_SEARCH_QUERY: z.string().optional(),
 
+  // Read the ONE HTML announcement page an RSS item links to (in practice every
+  // winner announcement, W0) so its price -- the winning bid -- can be shown.
+  // This deliberately overrides the earlier "never fetch an HTML page" rule
+  // (and that host's robots.txt); set to false to go back to treating such a
+  // link as a reference URL only. See integrations/egpRss.client.ts.
+  EGP_HTML_TOR_ENABLED: z
+    .string()
+    .default('true')
+    .transform(v => v === 'true'),
+
   // How often (ms) the worker checks for queued PollJob rows.
   POLL_JOB_CLAIM_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
-  // Fallback poll interval for a GovSite that doesn't specify its own.
-  POLL_DEFAULT_INTERVAL_MINUTES: z.coerce.number().int().positive().default(30),
+  // (The scheduled-poll interval is NOT an env var: an admin sets it from the
+  // UI -- default 24h, minimum 2h -- see config/polling.ts and
+  // models/ingestionSettings.model.ts.)
 
   // Local disk path for downloaded TOR PDFs (FR-N1.6). Swap for a real
   // object-storage bucket later without changing the ingestion pipeline's

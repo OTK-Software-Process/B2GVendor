@@ -17,3 +17,9 @@ export async function getPollJob(req: Request, res: Response): Promise<void> {
   const job = await pollJobService.getPollJob(req.params.id);
   ok(res, job);
 }
+
+// Is a poll queued/running right now? Server-side truth, so every admin's
+// "Poll Now" button (and a page refresh) agrees.
+export async function getStatus(_req: Request, res: Response): Promise<void> {
+  ok(res, await pollJobService.getPollStatus());
+}

@@ -9,11 +9,12 @@ import { ViewToggle } from '@/components/ViewToggle';
 import { EmptyState } from '@/components/EmptyState';
 import { LoadingSkeleton } from '@/components/LoadingSkeleton';
 import { ErrorRetry } from '@/components/ErrorRetry';
+import { Pagination } from '@/components/Pagination';
 import { FollowTagButton } from '@/components/FollowTagButton';
 import { useApp } from '@/context/AppContext';
 import { fetchWorks, toWorkItem, ListWorksParams } from '@/lib/backend';
 import { WorkItem } from '@/lib/mock-data';
-import { X, ArrowUpDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { X, ArrowUpDown } from 'lucide-react';
 
 const PAGE_SIZE = 10;
 
@@ -250,44 +251,7 @@ export function SearchClient() {
       )}
 
       {!error && !isLoading && totalPages > 1 && (
-        <div className="flex items-center justify-between pt-2">
-          <span className="text-xs text-slate-500 font-medium">
-            {lang === 'en'
-              ? `Page ${currentPage} of ${totalPages}`
-              : `หน้า ${currentPage} จาก ${totalPages}`}
-          </span>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => goToPage(currentPage - 1)}
-              disabled={currentPage <= 1}
-              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-xl border border-slate-200 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:border-emerald-400 hover:text-emerald-700 transition-all duration-150"
-            >
-              <ChevronLeft className="w-3.5 h-3.5" />
-              <span>{lang === 'en' ? 'Previous' : 'ก่อนหน้า'}</span>
-            </button>
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map(pageNum => (
-              <button
-                key={pageNum}
-                onClick={() => goToPage(pageNum)}
-                className={`w-8 h-8 text-xs font-bold rounded-xl transition-all duration-150 ${
-                  pageNum === currentPage
-                    ? 'bg-emerald-600 text-white'
-                    : 'border border-slate-200 text-slate-600 hover:border-emerald-400 hover:text-emerald-700'
-                }`}
-              >
-                {pageNum}
-              </button>
-            ))}
-            <button
-              onClick={() => goToPage(currentPage + 1)}
-              disabled={currentPage >= totalPages}
-              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-xl border border-slate-200 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:border-emerald-400 hover:text-emerald-700 transition-all duration-150"
-            >
-              <span>{lang === 'en' ? 'Next' : 'ถัดไป'}</span>
-              <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
+        <Pagination page={currentPage} totalPages={totalPages} onPageChange={goToPage} lang={lang} />
       )}
     </div>
   );

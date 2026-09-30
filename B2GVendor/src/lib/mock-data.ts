@@ -13,6 +13,15 @@ export type ProcurementStatus =
   | 'CANCELLED';
 export type ProcurementMethod = 'e-bidding' | 'e-market' | 'specific' | 'selection';
 
+// Why a work has no price (Backend/src/models/work.model.ts BudgetMissingReason)
+// -- lets the UI say something truthful instead of showing "0".
+export type BudgetMissingReason = 'not-stated' | 'unreadable' | 'no-document';
+
+// What kind of price `budget` holds (Backend/src/models/work.model.ts
+// BudgetBasis): unset = a budget / reference price (ราคากลาง, วงเงิน);
+// 'awarded' = the winning bid read from a winner announcement.
+export type BudgetBasis = 'awarded';
+
 export interface TagItem {
   id: string;
   name: string;
@@ -23,15 +32,36 @@ export interface TagItem {
   retired?: boolean;
 }
 
+// A site's most recent ingestion run (either source) -- real run results.
+export interface SiteLastRun {
+  runId: string;
+  source: 'rss' | 'data_go_th';
+  status: 'running' | 'success' | 'partial' | 'failed';
+  startedAt: string;
+  finishedAt?: string;
+  fetchedCount: number;
+  newCount: number;
+  updatedCount: number;
+  failedCount: number;
+}
+
 export interface GovSiteItem {
   id: string;
   name: string;
   nameEn: string;
   shortCode: string;
-  datasetId: string;
   enabled: boolean;
   requestsPerMin: number;
   worksCount: number;
+  // Only present when the list was loaded through the admin endpoint
+  // (GET /admin/gov-sites) -- the public directory doesn't carry them.
+  deptId?: string;
+  announceTypes?: string[];
+  dataGoThOrgSlug?: string;
+  pollIntervalMinutes?: number | null; // this site's OWN override of the global schedule
+  effectiveIntervalMinutes?: number; // what the schedule actually uses for it
+  nextRunAt?: string | null; // null when it won't run (disabled, or schedule paused)
+  lastRun?: SiteLastRun | null;
 }
 
 export interface TORFile {
@@ -64,7 +94,10 @@ export interface WorkItem {
   category: string;
   method: ProcurementMethod;
   methodLabel: string;
-  budget: number;
+  // null = no known price; budgetMissingReason then says why (when known).
+  budget: number | null;
+  budgetMissingReason?: BudgetMissingReason;
+  budgetBasis?: BudgetBasis;
   publishDate: string;
   closingDate: string;
   status: ProcurementStatus;
@@ -91,7 +124,9 @@ export interface NotificationItem {
   workId: string;
   workTitle: string;
   agencyName: string;
-  budget: number;
+  budget: number | null;
+  budgetMissingReason?: BudgetMissingReason;
+  budgetBasis?: BudgetBasis;
   method: string;
   status: ProcurementStatus;
   statusLabel: string;
@@ -128,18 +163,6 @@ export interface IngestionRun {
   failedCount: number;
   siteBreakdown: SiteRunBreakdown[];
   logs: LogEntry[];
-}
-
-export interface SitePollConfig {
-  id: string;
-  siteId: string;
-  siteName: string;
-  datasetId: string;
-  scopeCategories: string[];
-  dateRangeDays: number;
-  requestsPerMin: number;
-  retryAttempts: number;
-  enabled: boolean;
 }
 
 export interface AuditLogEntry {
@@ -202,16 +225,6 @@ export const MOCK_STATUS_CONFIG: Record<ProcurementStatus, { label: string; labe
     dotClass: 'bg-rose-500'
   }
 };
-
-export const MOCK_GOV_SITES: GovSiteItem[] = [
-  { id: 'site-bma', name: 'กรุงเทพมหานคร', nameEn: 'BMA', shortCode: 'BMA', datasetId: 'bma-procurement-disclosure', enabled: true, requestsPerMin: 120, worksCount: 5 },
-  { id: 'site-doh', name: 'กรมทางหลวง', nameEn: 'Department of Highways', shortCode: 'DOH', datasetId: 'doh-procurement-disclosure', enabled: true, requestsPerMin: 90, worksCount: 1 },
-  { id: 'site-pea', name: 'การไฟฟ้าส่วนภูมิภาค', nameEn: 'PEA', shortCode: 'PEA', datasetId: 'pea-procurement-disclosure', enabled: true, requestsPerMin: 90, worksCount: 1 },
-  { id: 'site-egat', name: 'การไฟฟ้าฝ่ายผลิตแห่งประเทศไทย', nameEn: 'EGAT', shortCode: 'EGAT', datasetId: 'egat-procurement-disclosure', enabled: true, requestsPerMin: 90, worksCount: 1 },
-  { id: 'site-moph', name: 'สำนักงานปลัดกระทรวงสาธารณสุข', nameEn: 'Office of the Permanent Secretary, MOPH', shortCode: 'MOPH', datasetId: 'moph-ops-procurement-disclosure', enabled: true, requestsPerMin: 90, worksCount: 1 },
-  { id: 'site-depa', name: 'สำนักงานส่งเสริมเศรษฐกิจดิจิทัล', nameEn: 'depa', shortCode: 'depa', datasetId: 'depa-procurement-disclosure', enabled: true, requestsPerMin: 60, worksCount: 1 },
-  { id: 'site-dga', name: 'สำนักงานพัฒนารัฐบาลดิจิทัล', nameEn: 'DGA', shortCode: 'DGA', datasetId: 'dga-procurement-disclosure', enabled: false, requestsPerMin: 60, worksCount: 0 },
-];
 
 export const MOCK_TAGS: TagItem[] = [
   { id: 'tag-site-bma', name: 'กรุงเทพมหานคร (BMA)', facet: 'site', aliases: ['BMA', 'กทม.'], followerCount: 2640, worksCount: 5 },
@@ -604,16 +617,6 @@ export const MOCK_INGESTION_RUNS: IngestionRun[] = [
       { time: '08:04:12', level: 'WARN', message: 'จบการทำงานพร้อมข้อผิดพลาดไม่รุนแรง 2 รายการ จากแหล่งข้อมูล กรมทางหลวง' }
     ]
   }
-];
-
-export const MOCK_SITE_POLL_CONFIGS: SitePollConfig[] = [
-  { id: 'cfg-bma', siteId: 'site-bma', siteName: 'กรุงเทพมหานคร (BMA)', datasetId: 'bma-procurement-disclosure', scopeCategories: ['โยธา', 'คอมพิวเตอร์', 'การแพทย์', 'ซอฟต์แวร์', 'การจราจร'], dateRangeDays: 30, requestsPerMin: 120, retryAttempts: 3, enabled: true },
-  { id: 'cfg-doh', siteId: 'site-doh', siteName: 'กรมทางหลวง (Department of Highways)', datasetId: 'doh-procurement-disclosure', scopeCategories: ['โยธา'], dateRangeDays: 30, requestsPerMin: 90, retryAttempts: 3, enabled: true },
-  { id: 'cfg-pea', siteId: 'site-pea', siteName: 'การไฟฟ้าส่วนภูมิภาค (PEA)', datasetId: 'pea-procurement-disclosure', scopeCategories: ['โยธา', 'พลังงาน'], dateRangeDays: 30, requestsPerMin: 90, retryAttempts: 3, enabled: true },
-  { id: 'cfg-egat', siteId: 'site-egat', siteName: 'การไฟฟ้าฝ่ายผลิตแห่งประเทศไทย (EGAT)', datasetId: 'egat-procurement-disclosure', scopeCategories: ['โยธา', 'พลังงาน'], dateRangeDays: 30, requestsPerMin: 90, retryAttempts: 3, enabled: true },
-  { id: 'cfg-moph', siteId: 'site-moph', siteName: 'สำนักงานปลัดกระทรวงสาธารณสุข (MOPH)', datasetId: 'moph-ops-procurement-disclosure', scopeCategories: ['การแพทย์'], dateRangeDays: 30, requestsPerMin: 90, retryAttempts: 3, enabled: true },
-  { id: 'cfg-depa', siteId: 'site-depa', siteName: 'สำนักงานส่งเสริมเศรษฐกิจดิจิทัล (depa)', datasetId: 'depa-procurement-disclosure', scopeCategories: ['ซอฟต์แวร์'], dateRangeDays: 30, requestsPerMin: 60, retryAttempts: 3, enabled: true },
-  { id: 'cfg-dga', siteId: 'site-dga', siteName: 'สำนักงานพัฒนารัฐบาลดิจิทัล (DGA)', datasetId: 'dga-procurement-disclosure', scopeCategories: ['ซอฟต์แวร์'], dateRangeDays: 30, requestsPerMin: 60, retryAttempts: 3, enabled: false }
 ];
 
 export const MOCK_AUDIT_LOGS: AuditLogEntry[] = [

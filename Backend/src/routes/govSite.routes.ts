@@ -16,6 +16,7 @@ govSiteRouter.get('/:id', asyncHandler(govSiteController.getById));
 // FR-N1.9: regular Admins can view the site list and trigger polls; only
 // Super Admin may add/edit a site (source configuration).
 export const adminGovSiteRouter = Router();
+adminGovSiteRouter.get('/', asyncHandler(govSiteController.listAdmin));
 adminGovSiteRouter.post('/', requireSuperAdmin, validate(createGovSiteSchema), asyncHandler(govSiteController.create));
 adminGovSiteRouter.patch('/:id', requireSuperAdmin, validate(updateGovSiteSchema), asyncHandler(govSiteController.update));
 

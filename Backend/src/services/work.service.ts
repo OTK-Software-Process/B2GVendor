@@ -40,6 +40,55 @@ const SORTS: Record<NonNullable<ListWorksFilter['sort']>, Record<string, 1 | -1>
   'budget-asc': { budget: 1 }
 };
 
+const POPULATE_SITE = { path: 'siteId', select: 'name shortCode' };
+const POPULATE_TAGS = { path: 'tags', select: 'name facet' };
+
+// "Budget: low to high" must not start with the works that have NO price --
+// Mongo sorts a missing/null field lowest, so they'd float to the top looking
+// like the cheapest. Page through the priced works first (ascending), then the
+// unpriced ones (newest first). A single find() can't sort nulls last, so the
+// page window is split across the two groups.
+async function listWorksPricedFirst(
+  query: Record<string, unknown>,
+  page: number,
+  pageSize: number
+): Promise<ListWorksResult> {
+  const priced = { ...query, budget: { $gt: 0 } };
+  const unpriced = { ...query, budget: { $not: { $gt: 0 } } };
+  const [pricedTotal, unpricedTotal] = await Promise.all([
+    Work.countDocuments(priced),
+    Work.countDocuments(unpriced)
+  ]);
+
+  const skip = (page - 1) * pageSize;
+  const items: IWork[] = [];
+
+  if (skip < pricedTotal) {
+    items.push(
+      ...(await Work.find(priced)
+        .sort({ budget: 1, _id: 1 })
+        .skip(skip)
+        .limit(pageSize)
+        .populate(POPULATE_SITE)
+        .populate(POPULATE_TAGS))
+    );
+  }
+
+  const remaining = pageSize - items.length;
+  if (remaining > 0) {
+    items.push(
+      ...(await Work.find(unpriced)
+        .sort(SORTS.date)
+        .skip(Math.max(0, skip - pricedTotal))
+        .limit(remaining)
+        .populate(POPULATE_SITE)
+        .populate(POPULATE_TAGS))
+    );
+  }
+
+  return { items, total: pricedTotal + unpricedTotal, page, pageSize };
+}
+
 export async function listWorks(filter: ListWorksFilter = {}): Promise<ListWorksResult> {
   const page = Math.max(1, filter.page ?? 1);
   const pageSize = Math.min(50, Math.max(1, filter.pageSize ?? 20));
@@ -74,13 +123,19 @@ export async function listWorks(filter: ListWorksFilter = {}): Promise<ListWorks
     query.$or = [{ title: pattern }, { description: pattern }];
   }
 
+  // With a budgetMax filter every match already has a price, so the plain
+  // sort below is correct; without one, unpriced works must be pushed last.
+  if (filter.sort === 'budget-asc' && filter.budgetMax === undefined) {
+    return listWorksPricedFirst(query, page, pageSize);
+  }
+
   const [items, total] = await Promise.all([
     Work.find(query)
       .sort(SORTS[filter.sort ?? 'date'])
       .skip((page - 1) * pageSize)
       .limit(pageSize)
-      .populate('siteId', 'name shortCode')
-      .populate('tags', 'name facet'),
+      .populate(POPULATE_SITE)
+      .populate(POPULATE_TAGS),
     Work.countDocuments(query)
   ]);
 

@@ -1,14 +1,31 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import Link from 'next/link';
 import { useApp } from '@/context/AppContext';
-import { RefreshCw, Activity, Users, Tags, ArrowRight, CheckCircle2, Clock, Landmark } from 'lucide-react';
+import { RefreshCw, Activity, Users, Tags, ArrowRight, CheckCircle2, AlertTriangle, XCircle, Loader2, Clock, Landmark } from 'lucide-react';
 import { MOCK_VENDOR_ACCOUNTS } from '@/lib/mock-data';
+import { describeInterval, formatCountdown } from '@/lib/datetime';
+
+const RUN_STATUS_STYLE = {
+  SUCCESS: { box: 'bg-emerald-50 text-emerald-700 border-emerald-200', Icon: CheckCircle2 },
+  WARNING: { box: 'bg-amber-50 text-amber-700 border-amber-200', Icon: AlertTriangle },
+  FAILED: { box: 'bg-rose-50 text-rose-700 border-rose-200', Icon: XCircle },
+  RUNNING: { box: 'bg-sky-50 text-sky-700 border-sky-200', Icon: Loader2 }
+} as const;
 
 export default function AdminDashboardPage() {
-  const { lang, ingestionRuns, isPolling, triggerPollNow, tags, govSites } = useApp();
+  const { lang, ingestionRuns, refreshIngestionRuns, isPolling, triggerPollNow, tags, govSites, schedule } = useApp();
   const latestRun = ingestionRuns[0];
+  const latestRunStyle = latestRun ? RUN_STATUS_STYLE[latestRun.status] : null;
+  const LatestRunIcon = latestRunStyle?.Icon;
+
+  // The run history is only loaded on demand, so fetch it here -- otherwise
+  // the "Last Poll Status" card below has nothing real to show.
+  useEffect(() => {
+    refreshIngestionRuns().catch(() => {});
+  }, [refreshIngestionRuns]);
+
   const activeVendorCount = MOCK_VENDOR_ACCOUNTS.filter(a => a.status === 'active').length;
   const enabledSiteCount = govSites.filter(s => s.enabled).length;
 
@@ -48,12 +65,18 @@ export default function AdminDashboardPage() {
             <Activity className="w-4 h-4 text-emerald-600" />
           </div>
           <div>
-            <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>{latestRun?.status || 'SUCCESS'}</span>
-            </span>
-            <p className="text-xs font-mono text-slate-900 font-bold mt-2">{latestRun?.runId}</p>
-            <p className="text-[11px] text-slate-400 mt-0.5">{latestRun?.startTime}</p>
+            {latestRun && latestRunStyle && LatestRunIcon ? (
+              <>
+                <span className={`inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-0.5 rounded-full border ${latestRunStyle.box}`}>
+                  <LatestRunIcon className={`w-3.5 h-3.5${latestRun.status === 'RUNNING' ? ' animate-spin' : ''}`} />
+                  <span>{latestRun.status}</span>
+                </span>
+                <p className="text-xs font-mono text-slate-900 font-bold mt-2">{latestRun.runId}</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">{latestRun.startTime}</p>
+              </>
+            ) : (
+              <p className="text-sm font-semibold text-slate-400">{lang === 'en' ? 'No polls have run yet' : 'ยังไม่เคยดึงข้อมูล'}</p>
+            )}
           </div>
         </div>
 
@@ -64,8 +87,22 @@ export default function AdminDashboardPage() {
             <Clock className="w-4 h-4 text-sky-600" />
           </div>
           <div>
-            <p className="text-lg font-bold text-slate-900">{lang === 'en' ? 'Every 15 minutes' : 'ทุก 15 นาที'}</p>
-            <p className="text-xs text-sky-700 font-semibold mt-1">{lang === 'en' ? 'Runs automatically in the background' : 'ทำงานอัตโนมัติในเบื้องหลัง'}</p>
+            {schedule ? (
+              <>
+                <p className="text-lg font-bold text-slate-900">
+                  {schedule.scheduleEnabled ? describeInterval(schedule.pollIntervalMinutes, lang) : (lang === 'en' ? 'Paused' : 'หยุดอยู่')}
+                </p>
+                <p className="text-xs text-sky-700 font-semibold mt-1">
+                  {schedule.scheduleEnabled
+                    ? schedule.nextRunAt
+                      ? `${lang === 'en' ? 'Next poll' : 'รอบถัดไป'} ${formatCountdown(schedule.nextRunAt, lang)}`
+                      : (lang === 'en' ? 'No department enabled' : 'ยังไม่มีหน่วยงานที่เปิดใช้งาน')
+                    : (lang === 'en' ? 'Automatic polling is paused' : 'การดึงข้อมูลอัตโนมัติถูกหยุดไว้')}
+                </p>
+              </>
+            ) : (
+              <p className="text-sm font-semibold text-slate-400">…</p>
+            )}
           </div>
         </div>
 

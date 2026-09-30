@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document, Model } from 'mongoose';
+import { MIN_POLL_INTERVAL_MINUTES, MAX_POLL_INTERVAL_MINUTES } from '../config/polling';
 
 // e-GP announce-type codes -- see testAPI/explore-egp-rss.ts for how these
 // were confirmed live. B0/D0 are the spec's "essential minimum".
@@ -35,9 +36,14 @@ export interface IGovSite extends Document {
   // rollover by itself.
   dataGoThSearchQuery?: string;
 
+  // Whether this site takes part in polls: the scheduler and "Poll Now → all
+  // sites" skip a disabled site, and a manual poll of just this site is
+  // refused. Toggled from admin > Data Ingestion (Super Admin only).
   enabled: boolean;
   requestsPerMinute: number;
-  pollIntervalMinutes?: number; // falls back to POLL_DEFAULT_INTERVAL_MINUTES
+  // Optional per-site override of the global schedule (IngestionSettings).
+  // Same 2-hour floor as the global value.
+  pollIntervalMinutes?: number;
   nextPollAt?: Date; // maintained by the worker's scheduler loop
 
   createdAt: Date;
@@ -63,7 +69,11 @@ const GovSiteSchema = new Schema<IGovSite>(
 
     enabled: { type: Boolean, default: true, required: true, index: true },
     requestsPerMinute: { type: Number, default: 60, min: 1, max: 600 },
-    pollIntervalMinutes: { type: Number, min: 1 },
+    pollIntervalMinutes: {
+      type: Number,
+      min: [MIN_POLL_INTERVAL_MINUTES, 'Polling interval cannot be lower than 2 hours.'],
+      max: [MAX_POLL_INTERVAL_MINUTES, 'Polling interval cannot be longer than 30 days.']
+    },
     nextPollAt: { type: Date, index: true }
   },
   { timestamps: true }

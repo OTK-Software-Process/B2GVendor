@@ -6,7 +6,13 @@ import { CreateGovSiteInput, UpdateGovSiteInput } from '../validators/govSite.va
 import { IAccount } from '../models/account.model';
 
 export async function list(_req: Request, res: Response): Promise<void> {
-  const sites = await govSiteService.listGovSites();
+  const sites = await govSiteService.listGovSitesWithWorksCount();
+  ok(res, sites);
+}
+
+// Admin view of the same list: adds last-run results and the next scheduled run.
+export async function listAdmin(_req: Request, res: Response): Promise<void> {
+  const sites = await govSiteService.listGovSitesForAdmin();
   ok(res, sites);
 }
 

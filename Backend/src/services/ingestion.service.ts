@@ -1,17 +1,19 @@
 import { Types } from 'mongoose';
 import { GovSite, IGovSite, AnnounceType } from '../models/govSite.model';
-import { Work, IWork, ITorFile, STATUS_BY_ANNOUNCE_TYPE } from '../models/work.model';
+import { Work, IWork, ITorFile, BudgetMissingReason, STATUS_BY_ANNOUNCE_TYPE } from '../models/work.model';
 import { Tag } from '../models/tag.model';
 import { IngestionRun, IIngestionRun } from '../models/ingestionRun.model';
-import { fetchEgpRssFeed, downloadTorFile, EgpRssItem } from '../integrations/egpRss.client';
+import { fetchEgpRssFeed, downloadTorFile, fetchHtmlDocument, EgpRssItem } from '../integrations/egpRss.client';
 import { datastoreSearch } from '../integrations/dataGoTh.client';
 import { resolveDataGoThResourceId, hasDataGoThConfig } from './dataGoThResource.service';
-import { analyzeTorDocument, TagCandidate, DocumentAnalysisResult } from '../integrations/ai';
+import { analyzeTorDocument, TagCandidate, DocumentAnalysisInput, DocumentAnalysisResult } from '../integrations/ai';
 import { findOrCreateAiTag } from './tag.service';
 import { env } from '../config/env';
 import { saveTorFile } from './fileStorage.service';
-import { extractPdfText } from './pdfText.service';
+import { extractPdfContent } from './pdfText.service';
+import { extractHtmlContent } from './htmlText.service';
 import { extractPdfsFromZip, pickPrimaryPdf } from './zipExtraction.service';
+import { PriceCandidate, mergePriceCandidates } from '../utils/priceExtraction';
 import { logger } from '../utils/logger';
 import { withRetry, sleep } from '../utils/retry';
 import { notifyNewWorkMatches } from './notification.service';
@@ -181,13 +183,92 @@ export async function runRssPoll(site: IGovSite, triggeredBy: TriggeredBy): Prom
   return run;
 }
 
+// HTML announcement pages (winner announcements, in practice) are read to get
+// their price -- see downloadAndExtractTorFiles. One that keeps failing (removed,
+// or e-GP's "file not found") is retried by at most this many sweeps...
+const MAX_HTML_FETCH_ATTEMPTS = 3;
+// ...and never sooner than this after the previous attempt: not by the sweep at
+// the end of the very poll that just failed to read it, and not by every "Poll
+// Now" click -- the site is asked again only after a real gap.
+const HTML_RETRY_AFTER_MS = 6 * 60 * 60 * 1000;
+// ...and one sweep reads at most this many pages, so the first poll after this
+// was introduced (which catches up EVERY existing work that has an unread page)
+// can't run for ages while holding the "Poll Now" lock. The rest follow on the
+// next polls.
+const MAX_HTML_FETCHES_PER_SWEEP = 40;
+
+export interface SweepOptions {
+  // Most HTML pages this sweep may read (default MAX_HTML_FETCHES_PER_SWEEP). The
+  // backfill command lifts it: it is a deliberate one-off run, not a poll that
+  // holds the "Poll Now" lock.
+  htmlLimit?: number;
+  // Also try pages that were given up on (MAX_HTML_FETCH_ATTEMPTS misses) or
+  // that were tried within the last HTML_RETRY_AFTER_MS.
+  retryFailedHtml?: boolean;
+  // Leave failed pdf/zip downloads alone.
+  htmlOnly?: boolean;
+  // Called after each work the sweep changed and saved -- progress for a long run.
+  onWorkSaved?: (work: IWork) => void;
+}
+
+// A work with no price and an HTML page nobody has read yet (skipped altogether
+// while reading pages is switched off). $not/$gt also matches a missing or zero budget.
+function unreadHtmlPriceFilter(retryFailed: boolean) {
+  const retryCutoff = new Date(Date.now() - HTML_RETRY_AFTER_MS);
+  return {
+    budget: { $not: { $gt: 0 } },
+    torFiles: {
+      $elemMatch: {
+        linkType: 'html',
+        downloadedAt: { $exists: false },
+        supersededAt: { $exists: false },
+        ...(retryFailed
+          ? {}
+          : {
+              fetchAttempts: { $not: { $gte: MAX_HTML_FETCH_ATTEMPTS } },
+              $or: [{ fetchAttemptedAt: { $exists: false } }, { fetchAttemptedAt: { $lt: retryCutoff } }]
+            })
+      }
+    }
+  };
+}
+
+// One request per (60000 / requestsPerMinute) ms -- the site's own configured rate.
+function requestGapMs(site: Pick<IGovSite, 'requestsPerMinute'>): number {
+  return Math.ceil(60000 / site.requestsPerMinute);
+}
+
+// Announce types whose document IS a winner announcement (W0, and W2 = its
+// modification); W1 cancels one, so its figure is not accepted as a price.
+function isWinnerAnnouncement(announceType: AnnounceType): boolean {
+  return announceType === 'W0' || announceType === 'W2';
+}
+
 // Safety net for a download (or text extraction) that failed transiently on
 // its first attempt -- the inline download in upsertWorkFromRssItem doesn't
 // retry itself; this sweep does, once per poll. If a work still has no
-// description (meaning its original AI analysis had no PDF text to work
-// with), a successful recovery here also re-runs the analysis so it isn't
-// stuck title-only forever.
-async function retryMissingTorDownloads(site: IGovSite, candidateTags: TagCandidate[]): Promise<number> {
+// description or no price (meaning its original analysis had no document text
+// to work with), a successful recovery here also re-runs the analysis so it
+// isn't stuck title-only forever.
+//
+// It also catches up HTML announcement pages that were never read (works
+// ingested before pages were read at all): only while the work still has no
+// price, at most MAX_HTML_FETCHES_PER_SWEEP a poll, paced by the site's rate.
+async function retryMissingTorDownloads(site: IGovSite, candidateTags: TagCandidate[], options: SweepOptions = {}): Promise<number> {
+  const htmlRetryCutoff = new Date(Date.now() - HTML_RETRY_AFTER_MS);
+  const retryFailedHtml = options.retryFailedHtml === true;
+  const htmlLimit = options.htmlLimit ?? MAX_HTML_FETCHES_PER_SWEEP;
+
+  const awaiting: Record<string, unknown>[] = [
+    // A pdf/zip whose download failed.
+    ...(options.htmlOnly
+      ? []
+      : [{ torFiles: { $elemMatch: { linkType: { $in: ['pdf', 'zip'] }, storageKey: { $exists: false }, supersededAt: { $exists: false } } } }]),
+    // An HTML page nobody has read yet -- worth a request only while the work has no price.
+    ...(env.EGP_HTML_TOR_ENABLED ? [unreadHtmlPriceFilter(retryFailedHtml)] : [])
+  ];
+  if (awaiting.length === 0) return 0;
+
   const works = await Work.find({
     siteId: site._id,
     // A work already marked 'not-related' never has its TOR reprocessed --
@@ -197,12 +278,16 @@ async function retryMissingTorDownloads(site: IGovSite, candidateTags: TagCandid
     // this exclusion they'd otherwise look exactly like a transient
     // download failure and get retried here forever.
     ingestionRelevance: { $ne: 'not-related' },
-    torFiles: { $elemMatch: { linkType: { $in: ['pdf', 'zip'] }, storageKey: { $exists: false }, supersededAt: { $exists: false } } }
+    $or: awaiting
   });
 
+  const gapMs = requestGapMs(site);
+  let htmlFetches = 0;
   let recovered = 0;
+
   for (const work of works) {
-    let mutated = false;
+    let mutated = false; // the work needs saving
+    let recoveredHere = false; // a document really came back
 
     // Group by sourceUrl, not by individual file -- a 'zip' link's
     // placeholder is a single entry (the file count inside isn't known
@@ -210,16 +295,49 @@ async function retryMissingTorDownloads(site: IGovSite, candidateTags: TagCandid
     // group rather than patch one entry's fields in place.
     const missingBySourceUrl = new Map<string, { announceType: AnnounceType; linkType: EgpRssItem['linkType'] }>();
     for (const file of work.torFiles) {
-      if (file.storageKey || file.supersededAt) continue;
-      if (file.linkType !== 'pdf' && file.linkType !== 'zip') continue;
+      if (file.supersededAt) continue;
+      if (file.linkType === 'pdf' || file.linkType === 'zip') {
+        if (options.htmlOnly || file.storageKey) continue;
+      } else if (file.linkType === 'html') {
+        if (!env.EGP_HTML_TOR_ENABLED) continue;
+        // Already read, or not worth a request (has a price).
+        if (file.downloadedAt || work.budget) continue;
+        // Given up on, or attempted so recently it would only be asking the
+        // site again -- unless this run was told to try those too.
+        if (!retryFailedHtml) {
+          if ((file.fetchAttempts ?? 0) >= MAX_HTML_FETCH_ATTEMPTS) continue;
+          if (file.fetchAttemptedAt && file.fetchAttemptedAt > htmlRetryCutoff) continue;
+        }
+      } else {
+        continue;
+      }
       missingBySourceUrl.set(file.sourceUrl, { announceType: file.announceType, linkType: file.linkType });
     }
 
     for (const [sourceUrl, { announceType, linkType }] of missingBySourceUrl) {
+      const isHtml = linkType === 'html';
+      if (isHtml && htmlFetches >= htmlLimit) continue;
+
       try {
         const item: EgpRssItem = { title: work.title, link: sourceUrl, linkType, description: '', pubDate: null, projectId: work.projectId };
-        const extracted = await downloadAndExtractTorFiles(item);
-        if (!extracted || extracted.length === 0) continue;
+        if (isHtml) htmlFetches += 1;
+        const extracted = await downloadAndExtractTorFiles(item, gapMs);
+
+        if (!extracted || extracted.length === 0) {
+          if (isHtml) {
+            // Remember the miss, so a page that keeps failing is given up on
+            // instead of being retried -- and using up this sweep's quota --
+            // forever.
+            for (const f of work.torFiles) {
+              if (f.sourceUrl === sourceUrl && !f.supersededAt && !f.downloadedAt) {
+                f.fetchAttempts = (f.fetchAttempts ?? 0) + 1;
+                f.fetchAttemptedAt = new Date();
+              }
+            }
+            mutated = true;
+          }
+          continue;
+        }
 
         for (let i = work.torFiles.length - 1; i >= 0; i--) {
           const f = work.torFiles[i];
@@ -227,20 +345,25 @@ async function retryMissingTorDownloads(site: IGovSite, candidateTags: TagCandid
         }
         work.torFiles.push(...buildTorFiles(announceType, item, extracted));
         mutated = true;
+        recoveredHere = true;
 
-        if (!work.description) {
-          const primary = extracted.find(f => f.role !== 'attachment');
-          if (primary) {
-            const analysis = await analyzeTorDocument({ title: work.title, documentText: primary.pdfText }, candidateTags);
-            if (analysis.description) work.description = analysis.description;
-            if (analysis.budget && !work.budget) work.budget = analysis.budget;
-            for (const tagIdStr of analysis.tagIds) {
-              const tagId = new Types.ObjectId(tagIdStr);
-              if (!work.tags.some(t => t.equals(tagId))) work.tags.push(tagId);
-            }
-            const newTagId = await resolveNewTag(analysis, candidateTags);
-            if (newTagId && !work.tags.some(t => t.equals(newTagId))) work.tags.push(newTagId);
+        // Also re-analyze when only the price is missing: the document that
+        // just came back may be the one that states it.
+        if (!work.description || !work.budget) {
+          // An HTML page goes to the AI only if the work has never been
+          // described; otherwise it is read for its price alone, so this can't
+          // re-word the description or re-tag a work.
+          const analysis = await analyzeTorDocument(analysisInputFor(work.title, extracted, announceType), candidateTags, {
+            priceOnly: isHtml && !!work.description
+          });
+          if (analysis.description && !work.description) work.description = analysis.description;
+          applyDocumentBudget(work, analysis, extracted);
+          for (const tagIdStr of analysis.tagIds) {
+            const tagId = new Types.ObjectId(tagIdStr);
+            if (!work.tags.some(t => t.equals(tagId))) work.tags.push(tagId);
           }
+          const newTagId = await resolveNewTag(analysis, candidateTags);
+          if (newTagId && !work.tags.some(t => t.equals(newTagId))) work.tags.push(newTagId);
         }
       } catch (err) {
         logger.warn('ingestion', `Retry download still failing for work ${work.projectId}`, err);
@@ -248,37 +371,109 @@ async function retryMissingTorDownloads(site: IGovSite, candidateTags: TagCandid
     }
 
     if (mutated) {
-      await work.save();
-      recovered += 1;
+      // One work failing to save (e.g. a poll changed it meanwhile) must not
+      // abandon the rest of the sweep; the next run picks it up again.
+      try {
+        await work.save();
+        if (recoveredHere) recovered += 1;
+        options.onWorkSaved?.(work);
+      } catch (err) {
+        logger.warn('ingestion', `Could not save work ${work.projectId} after its retry sweep`, err);
+      }
     }
   }
 
   return recovered;
 }
 
-interface ExtractedTorFile {
-  storageKey: string;
-  filename: string;
-  role?: 'primary' | 'attachment';
-  pdfText: string | null;
+// --- one-off backfill (npm run backfill:html-prices) ---------------------------
+// Works ingested BEFORE HTML pages were read have no price and an unread page.
+// Polls catch them up MAX_HTML_FETCHES_PER_SWEEP at a time; this reads them all
+// in one go, at the site's request rate, through the very same code path.
+
+// How many works of the site still have an unread HTML page and no price:
+// `awaiting` can be read right now, `givenUp` only with retryFailedHtml.
+export async function countHtmlPriceBackfill(site: IGovSite): Promise<{ awaiting: number; givenUp: number }> {
+  const scope = { siteId: site._id, ingestionRelevance: { $ne: 'not-related' } };
+  const [awaiting, all] = await Promise.all([
+    Work.countDocuments({ ...scope, ...unreadHtmlPriceFilter(false) }),
+    Work.countDocuments({ ...scope, ...unreadHtmlPriceFilter(true) })
+  ]);
+  return { awaiting, givenUp: all - awaiting };
 }
 
-// Only ever called for linkType 'pdf' | 'zip' -- an 'html'/'other' link is
-// never fetched (that would be scraping). Downloads, stores (deduplicated by
-// content hash), and extracts text so the AI analysis call right after can
-// read the real document, not just the title.
+export async function backfillHtmlPrices(site: IGovSite, options: Pick<SweepOptions, 'htmlLimit' | 'retryFailedHtml' | 'onWorkSaved'> = {}): Promise<number> {
+  return retryMissingTorDownloads(site, await getCandidateTags(), { htmlLimit: Infinity, ...options, htmlOnly: true });
+}
+
+export interface ExtractedTorFile {
+  // Set for a stored PDF. An HTML page is read but not stored, so it has neither.
+  storageKey?: string;
+  filename?: string;
+  role?: 'primary' | 'attachment';
+  // What the AI reads -- only ever set for the primary PDF (see below).
+  pdfText: string | null;
+  // Whether ANY text could be extracted from this file, primary or not (false
+  // = scanned / image-only PDF). Distinct from pdfText, which is deliberately
+  // null for attachments even when they're perfectly readable.
+  hasText: boolean;
+  // "บาท" amounts found in this file's FULL text -- collected from every PDF,
+  // because the ราคากลาง table is often a separate attachment.
+  priceCandidates: PriceCandidate[];
+}
+
+// Reading a huge attachment (site drawings, scanned annexes) just to look for
+// a price isn't worth the memory/CPU -- the price table is a small document.
+const MAX_ATTACHMENT_SCAN_BYTES = 25 * 1024 * 1024;
+
+// A 'pdf'/'zip' link is downloaded, stored (deduplicated by content hash), and
+// its text extracted so the AI analysis call right after can read the real
+// document, not just the title.
 //
 // A 'zip' (seen on B0/draft-TOR items, delivered via egp-upload-service)
 // can bundle several PDFs -- all are stored so a vendor can download any of
-// them, but only the primary one (pickPrimaryPdf) is text-extracted and
-// sent to Vertex AI; the rest are attachments.
-async function downloadAndExtractTorFiles(item: EgpRssItem): Promise<ExtractedTorFile[] | null> {
+// them, and all are scanned for a price, but only the primary one
+// (pickPrimaryPdf) has its text sent to the AI; the rest are attachments.
+//
+// An 'html' link (every winner announcement, on the live feed) is fetched and
+// read too, but NOT stored -- the entry stays a reference to the source page.
+// This is a deliberate override of the old "never fetch an HTML page" rule --
+// see integrations/egpRss.client.ts. An 'other' link is still never fetched.
+//
+// null = nothing could be read (failed download, blocked/unreachable page, or
+// e-GP's "file not found" page) -- a later poll's retry sweep tries again.
+async function downloadAndExtractTorFiles(item: EgpRssItem, htmlGapMs: number): Promise<ExtractedTorFile[] | null> {
+  if (item.linkType === 'html') {
+    if (!env.EGP_HTML_TOR_ENABLED) return null;
+
+    try {
+      const html = await fetchHtmlDocument(item.link, { minGapMs: htmlGapMs });
+      const content = extractHtmlContent(html, 'announcement page');
+      if (content.text === null) {
+        logger.warn('ingestion', `HTML announcement ${item.link} had no readable document (e-GP "file not found" page, or empty)`);
+        return null;
+      }
+      return [{ pdfText: content.text, hasText: true, priceCandidates: content.priceCandidates }];
+    } catch (err) {
+      logger.warn('ingestion', `Failed to read HTML announcement ${item.link}`, err);
+      return null;
+    }
+  }
+
   if (item.linkType === 'pdf') {
     try {
       const downloaded = await downloadTorFile(item.link, 'pdf');
       const saved = await saveTorFile(downloaded.buffer, downloaded.filename);
-      const pdfText = await extractPdfText(downloaded.buffer);
-      return [{ storageKey: saved.storageKey, filename: saved.filename, pdfText }];
+      const content = await extractPdfContent(downloaded.buffer, saved.filename);
+      return [
+        {
+          storageKey: saved.storageKey,
+          filename: saved.filename,
+          pdfText: content.text,
+          hasText: content.text !== null,
+          priceCandidates: content.priceCandidates
+        }
+      ];
     } catch (err) {
       logger.warn('ingestion', `Failed to download/extract TOR PDF from ${item.link}`, err);
       return null; // a later poll's retryMissingTorDownloads() sweep will try again
@@ -299,12 +494,19 @@ async function downloadAndExtractTorFiles(item: EgpRssItem): Promise<ExtractedTo
       for (const entry of pdfEntries) {
         const saved = await saveTorFile(entry.buffer, entry.filename);
         const isPrimary = entry === primaryEntry;
-        const pdfText = isPrimary ? await extractPdfText(entry.buffer) : null;
+        const skipScan = !isPrimary && entry.buffer.length > MAX_ATTACHMENT_SCAN_BYTES;
+        const content = skipScan
+          ? { text: null, priceCandidates: [] as PriceCandidate[] }
+          : await extractPdfContent(entry.buffer, saved.filename);
         results.push({
           storageKey: saved.storageKey,
           filename: saved.filename,
           role: isPrimary ? 'primary' : 'attachment',
-          pdfText
+          pdfText: isPrimary ? content.text : null,
+          // An attachment we chose not to scan is unknown, not unreadable --
+          // count it as readable so it can't wrongly blame a scanned file.
+          hasText: skipScan || content.text !== null,
+          priceCandidates: content.priceCandidates
         });
       }
       // Primary first, so callers that just want "the" analyzable document
@@ -320,6 +522,58 @@ async function downloadAndExtractTorFiles(item: EgpRssItem): Promise<ExtractedTo
   return null;
 }
 
+// What the AI call gets for a set of downloaded files: the primary PDF's
+// (capped) text to read, plus price candidates scanned from the FULL text of
+// EVERY file -- so a price sitting past the text cap, or in an attachment, is
+// still handed over (see utils/priceExtraction.ts).
+function analysisInputFor(title: string, extracted: ExtractedTorFile[] | null, announceType?: AnnounceType): DocumentAnalysisInput {
+  const primary = extracted?.find(f => f.role !== 'attachment') ?? null;
+  return {
+    title,
+    documentText: primary?.pdfText,
+    priceHints: mergePriceCandidates(...(extracted ?? []).map(f => f.priceCandidates)),
+    acceptAwardedPrice: announceType !== undefined && isWinnerAnnouncement(announceType)
+  };
+}
+
+// Why no price could be found, from what we were actually able to read --
+// shown on the website instead of a bare "0" (see Work.budgetMissingReason).
+export function explainMissingBudget(extracted: ExtractedTorFile[] | null): BudgetMissingReason {
+  if (!extracted || extracted.length === 0) return 'no-document';
+  // Every file was readable and none states a price -> the document really
+  // doesn't say. If any file had no text layer (scanned) the price might be in
+  // it, so don't claim the document lacks one.
+  return extracted.every(f => f.hasText) ? 'not-stated' : 'unreadable';
+}
+
+function logScanRecovery(analysis: DocumentAnalysisResult, projectId: string): void {
+  if (analysis.budget && analysis.budgetSource === 'text-match') {
+    const how = analysis.budgetBasis === 'awarded' ? 'read as the winning bid' : 'recovered by the "บาท" scan (the AI returned none)';
+    logger.info('ingestion', `Price ${analysis.budget} THB for project ${projectId} ${how}`);
+  }
+}
+
+// Applies a document analysis's price to a work without ever overwriting one
+// that's already there (e.g. the real contract price from data.go.th beats an
+// estimate read from a later document). When there's still no price, records
+// WHY. Returns whether the work changed.
+function applyDocumentBudget(work: IWork, analysis: DocumentAnalysisResult, extracted: ExtractedTorFile[] | null): boolean {
+  if (work.budget) return false;
+
+  if (analysis.budget) {
+    work.budget = analysis.budget;
+    work.budgetBasis = analysis.budgetBasis ?? undefined;
+    work.budgetMissingReason = undefined;
+    logScanRecovery(analysis, work.projectId);
+    return true;
+  }
+
+  const reason = explainMissingBudget(extracted);
+  if (work.budgetMissingReason === reason) return false;
+  work.budgetMissingReason = reason;
+  return true;
+}
+
 function buildTorFiles(announceType: AnnounceType, item: EgpRssItem, extracted: ExtractedTorFile[] | null): ITorFile[] {
   if (!item.link) {
     // Confirmed live (2026-09-16, projectId 69099235352): a real RSS item
@@ -332,10 +586,20 @@ function buildTorFiles(announceType: AnnounceType, item: EgpRssItem, extracted: 
   }
 
   if (!extracted || extracted.length === 0) {
-    // Nothing downloaded yet (transient failure, or a link type that's
-    // never fetched at all) -- still record the link itself so a later
-    // poll's retry sweep (pdf/zip) or a human (html/other) can act on it.
-    return [{ announceType, linkType: item.linkType, sourceUrl: item.link }];
+    // Nothing read yet (transient failure, or a link type that's never
+    // fetched at all) -- still record the link itself so a later poll's retry
+    // sweep (pdf/zip/html) or a human ('other') can act on it. An HTML page
+    // that was JUST attempted is stamped, so the sweep at the end of this same
+    // poll leaves it alone (see HTML_RETRY_AFTER_MS).
+    const attemptedHtml = item.linkType === 'html' && env.EGP_HTML_TOR_ENABLED;
+    return [
+      {
+        announceType,
+        linkType: item.linkType,
+        sourceUrl: item.link,
+        ...(attemptedHtml ? { fetchAttempts: 1, fetchAttemptedAt: new Date() } : {})
+      }
+    ];
   }
 
   return extracted.map(f => ({
@@ -369,9 +633,8 @@ async function upsertWorkFromRssItem(
     // Download+extract BEFORE analysis, so a real PDF (when one exists --
     // possibly one of several bundled in a zip) informs both the tags and
     // the description -- FR-3.2.
-    const extracted = await downloadAndExtractTorFiles(item);
-    const primary = extracted?.find(f => f.role !== 'attachment') ?? null;
-    const analysis = await analyzeTorDocument({ title: item.title, documentText: primary?.pdfText }, candidateTags);
+    const extracted = await downloadAndExtractTorFiles(item, requestGapMs(site));
+    const analysis = await analyzeTorDocument(analysisInputFor(item.title, extracted, announceType), candidateTags);
 
     // Customer requirement (e.g. "software-only"): every work is still
     // created and fully populated below regardless of topic -- this only
@@ -387,17 +650,23 @@ async function upsertWorkFromRssItem(
     const newTagId = await resolveNewTag(analysis, candidateTags);
     if (newTagId) tagIds.push(newTagId);
 
+    logScanRecovery(analysis, item.projectId);
+
     const createdWork = await Work.create({
       siteId: site._id,
       projectId: item.projectId,
       title: item.title,
       description: analysis.description ?? undefined,
-      // AI-extracted pre-award estimate (from the doc's ราคากลาง/วงเงิน
-      // figure) -- gives the website a price to show immediately instead of
-      // waiting for data.go.th enrichment, which only has a figure AFTER
-      // award (enrichWorkFromContractRecord below always wins over this
-      // once it has a real value -- see its `?? work.budget` fallback).
+      // Pre-award estimate read from the doc's ราคากลาง/วงเงิน figure (by the
+      // AI, or by the "บาท" scan when the AI returns none) -- gives the
+      // website a price to show immediately instead of waiting for
+      // data.go.th enrichment, which only has a figure AFTER award
+      // (enrichWorkFromContractRecord below always wins over this once it
+      // has a real value). With no price, say WHY so the site can show a
+      // meaningful message rather than "0".
       budget: analysis.budget ?? undefined,
+      budgetBasis: analysis.budget ? analysis.budgetBasis ?? undefined : undefined,
+      budgetMissingReason: analysis.budget ? undefined : explainMissingBudget(extracted),
       status,
       announceType,
       pubDate: item.pubDate ?? undefined,
@@ -458,7 +727,7 @@ async function upsertWorkFromRssItem(
     if (existing.ingestionRelevance === 'not-related') {
       existing.torFiles.push({ announceType, linkType: item.linkType, sourceUrl: item.link });
     } else {
-      newExtracted = await downloadAndExtractTorFiles(item);
+      newExtracted = await downloadAndExtractTorFiles(item, requestGapMs(site));
       existing.torFiles.push(...buildTorFiles(announceType, item, newExtracted));
     }
     changed = true;
@@ -470,20 +739,21 @@ async function upsertWorkFromRssItem(
   // only overwritten when the new analysis actually produced one, so an
   // html-only re-poll never blanks out a description an earlier PDF gave us.
   if (newExtracted) {
-    const primary = newExtracted.find(f => f.role !== 'attachment') ?? null;
-    const analysis = await analyzeTorDocument({ title: item.title, documentText: primary?.pdfText }, candidateTags);
+    const analysis = await analyzeTorDocument(analysisInputFor(item.title, newExtracted, announceType), candidateTags, {
+      // A winner-announcement page is read for its price alone once the work
+      // has been described: a lifecycle event must not re-word the description,
+      // re-tag the work or re-notify its followers -- nor cost an AI call.
+      priceOnly: item.linkType === 'html' && !!existing.description
+    });
 
     if (analysis.description) {
       existing.description = analysis.description;
       changed = true;
     }
-    // Never overwrite a budget that's already set -- if data.go.th already
+    // Never overwrites a budget that's already set -- if data.go.th already
     // enriched this work with the real post-award contract price, an
-    // AI-read pre-award estimate from a later document must not clobber it.
-    if (analysis.budget && !existing.budget) {
-      existing.budget = analysis.budget;
-      changed = true;
-    }
+    // estimate read from a later document must not clobber it.
+    if (applyDocumentBudget(existing, analysis, newExtracted)) changed = true;
     for (const tagIdStr of analysis.tagIds) {
       const tagId = new Types.ObjectId(tagIdStr);
       if (!existing.tags.some(t => t.equals(tagId))) {
@@ -577,7 +847,15 @@ async function enrichWorkFromContractRecord(site: IGovSite, record: Record<strin
   const work = await Work.findOne({ siteId: site._id, projectId });
   if (!work) return false; // data.go.th enrichment never creates a new work
 
-  work.budget = toNumber(record.proj_mny) ?? toNumber(record.contrct_price) ?? work.budget;
+  // Only a real (positive) figure replaces what we have -- an empty CSV cell
+  // arrives as null/'' and Number(null) === Number('') === 0, which used to
+  // wipe out a good price read from the TOR.
+  const contractBudget = toPositiveNumber(record.proj_mny) ?? toPositiveNumber(record.contrct_price);
+  if (contractBudget !== undefined) {
+    work.budget = contractBudget;
+    work.budgetBasis = undefined; // a real project budget, not a winning bid
+    work.budgetMissingReason = undefined;
+  }
   work.contractNumber = toStringOrUndefined(record.contrct_num) ?? work.contractNumber;
   work.contractDate = toDate(record.contrct_date) ?? work.contractDate;
   work.winnerName = toStringOrUndefined(record.corp_name) ?? work.winnerName;
@@ -588,9 +866,10 @@ async function enrichWorkFromContractRecord(site: IGovSite, record: Record<strin
   return true;
 }
 
-function toNumber(value: unknown): number | undefined {
+function toPositiveNumber(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === '') return undefined;
   const n = Number(value);
-  return Number.isFinite(n) ? n : undefined;
+  return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
 function toStringOrUndefined(value: unknown): string | undefined {

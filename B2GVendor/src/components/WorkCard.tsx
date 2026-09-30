@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { WorkItem } from '@/lib/mock-data';
 import { StatusBadge } from './StatusBadge';
 import { FollowTagButton } from './FollowTagButton';
+import { BudgetText, budgetLabel } from './BudgetText';
 import { useApp } from '@/context/AppContext';
 import { Building2, ChevronRight } from 'lucide-react';
 
@@ -15,12 +16,6 @@ interface WorkCardProps {
 
 export function WorkCard({ work, layout = 'row' }: WorkCardProps) {
   const { lang } = useApp();
-
-  const formattedBudget = new Intl.NumberFormat('th-TH', {
-    style: 'currency',
-    currency: 'THB',
-    maximumFractionDigits: 0
-  }).format(work.budget);
 
   const tagChips = (
     <div className="flex flex-wrap items-center gap-1.5">
@@ -54,7 +49,7 @@ export function WorkCard({ work, layout = 'row' }: WorkCardProps) {
         </div>
 
         <div className="flex items-center justify-between text-xs pt-1">
-          <span className="font-bold text-emerald-700">{formattedBudget}</span>
+          <BudgetText budget={work.budget} reason={work.budgetMissingReason} basis={work.budgetBasis} className="font-bold text-emerald-700" showBasisTag />
           <span className="text-amber-700 font-medium">{work.publishDate}</span>
         </div>
 
@@ -113,8 +108,8 @@ export function WorkCard({ work, layout = 'row' }: WorkCardProps) {
         {/* Side metrics */}
         <div className="flex lg:flex-col items-center lg:items-end justify-between gap-2 lg:gap-3 lg:w-48 shrink-0 lg:border-l lg:border-slate-100 lg:pl-4">
           <div className="text-left lg:text-right">
-            <span className="text-[11px] text-slate-400 block">{lang === 'en' ? 'Budget' : 'งบประมาณกลาง'}</span>
-            <span className="text-base sm:text-lg font-bold text-emerald-700">{formattedBudget}</span>
+            <span className="text-[11px] text-slate-400 block">{budgetLabel(work.budgetBasis, lang)}</span>
+            <BudgetText budget={work.budget} reason={work.budgetMissingReason} basis={work.budgetBasis} className="text-base sm:text-lg font-bold text-emerald-700" />
           </div>
           <div className="text-left lg:text-right">
             <span className="text-[11px] text-slate-400 block">{lang === 'en' ? 'Published' : 'ประกาศเมื่อ'}</span>

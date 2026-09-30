@@ -1,5 +1,6 @@
 import { env } from '../../config/env';
 import { logger } from '../../utils/logger';
+import { pickBestPrice } from '../../utils/priceExtraction';
 import { SYSTEM_PROMPT, buildUserPrompt } from './prompt';
 import { vertexProvider } from './vertexProvider';
 import { openRouterProvider } from './openRouterProvider';
@@ -19,6 +20,11 @@ export { TagCandidate, DocumentAnalysisInput, DocumentAnalysisResult } from './t
  *   2. description -- a short plain-language summary of the document's
  *      actual content.
  *   3. budget -- a pre-award estimate read from the document text, if any.
+ *      The model is helped (a scan of every "บาท" amount in the FULL document
+ *      is listed in the prompt) and backed up: when it still returns no
+ *      budget -- or AI is off / errored -- the best explicitly-labelled amount
+ *      from that same scan is used instead, so a price that IS in the
+ *      document is never silently dropped (see utils/priceExtraction.ts).
  *   4. newTag -- optionally, ONE brand-new tag proposal when NONE of the
  *      candidates genuinely fit (relaxes the old "never invent a tag"
  *      NFR-N3.3 rule on purpose, by explicit request, so the vocabulary can
@@ -30,13 +36,13 @@ export { TagCandidate, DocumentAnalysisInput, DocumentAnalysisResult } from './t
  * The provider (Vertex AI vs OpenRouter) is a pure strategy swap driven by
  * env.AI_PROVIDER -- prompt-building and response-parsing are identical
  * either way, so the two backends can never drift into different output
- * shapes. When no document text is available (html-linked item, extraction
- * failed, or AI disabled/unconfigured), this degrades to title-only
+ * shapes. When no document text is available (the document couldn't be
+ * fetched or extracted, or AI is disabled/unconfigured), this degrades to title-only
  * classification with no description -- never throws, never blocks
  * ingestion.
  */
 
-const EMPTY_RESULT: DocumentAnalysisResult = { description: null, tagIds: [], budget: null, newTag: null };
+const EMPTY_RESULT: DocumentAnalysisResult = { description: null, tagIds: [], budget: null, budgetBasis: null, budgetSource: null, newTag: null };
 
 const providers: Record<string, AiProvider> = {
   vertexai: vertexProvider,
@@ -83,7 +89,7 @@ function parseResult(text: string, candidates: TagCandidate[]): DocumentAnalysis
     const budget = typeof parsed.budget !== 'object' && Number.isFinite(budgetNumber) && budgetNumber > 0 ? budgetNumber : null;
     const newTag = parseNewTag(parsed.newTag, candidates);
 
-    return { description, tagIds, budget, newTag };
+    return { description, tagIds, budget, budgetBasis: null, budgetSource: budget ? 'ai' : null, newTag };
   } catch {
     return EMPTY_RESULT;
   }
@@ -111,30 +117,66 @@ function parseNewTag(raw: unknown, candidates: TagCandidate[]): DocumentAnalysis
   return { name: trimmed, facet };
 }
 
+export interface AnalyzeOptions {
+  // Skip the AI call and run only the deterministic price scan -- for a
+  // document that is read for its price alone (an HTML announcement page of a
+  // work that has already been described and tagged), so it neither costs an
+  // AI call nor re-tags the work.
+  priceOnly?: boolean;
+}
+
 /**
  * Never throws -- any failure (disabled, misconfigured provider, API error,
  * timeout, unparseable response) resolves to { description: null, tagIds: [] }
  * so ingestion always proceeds with at least the structured (site) tags.
+ *
+ * The budget is the one field that survives such a failure: it comes from the
+ * deterministic price scan (input.priceHints), which needs no AI at all.
  */
 export async function analyzeTorDocument(
   input: DocumentAnalysisInput,
-  candidates: TagCandidate[]
+  candidates: TagCandidate[],
+  options: AnalyzeOptions = {}
 ): Promise<DocumentAnalysisResult> {
-  const provider = getProvider();
-  if (!provider) return EMPTY_RESULT;
+  // Safe to use without the model's judgement: only an explicitly labelled
+  // ราคากลาง / วงเงิน figure (or, for a winner announcement, the winning bid)
+  // that isn't a fine, deposit, fee or unit rate.
+  const scanned = pickBestPrice(input.priceHints ?? [], { acceptAwarded: input.acceptAwardedPrice });
+
+  const fromScan = (result: DocumentAnalysisResult): DocumentAnalysisResult =>
+    scanned
+      ? {
+          ...result,
+          budget: scanned.amount,
+          budgetSource: 'text-match',
+          budgetBasis: scanned.label === 'awarded-price' ? 'awarded' : null
+        }
+      : result;
+
+  const withScanFallback = (result: DocumentAnalysisResult): DocumentAnalysisResult => {
+    // A winner announcement is a rigid template whose figure the labels
+    // identify exactly, so the scan wins over the model there; everywhere else
+    // the model wins and the scan only fills a gap.
+    if (input.acceptAwardedPrice && scanned) return fromScan(result);
+    if (result.budget || !scanned) return result;
+    return fromScan(result);
+  };
+
+  const provider = options.priceOnly ? null : getProvider();
+  if (!provider) return withScanFallback(EMPTY_RESULT);
 
   try {
     const userPrompt = buildUserPrompt(input, candidates);
     const text = await provider.generate(SYSTEM_PROMPT, userPrompt);
-    if (!text) return EMPTY_RESULT;
+    if (!text) return withScanFallback(EMPTY_RESULT);
 
-    return parseResult(text, candidates);
+    return withScanFallback(parseResult(text, candidates));
   } catch (err) {
     logger.warn(
       'aiTagging',
       `analyzeTorDocument (${provider.name}) failed for title "${input.title.slice(0, 60)}..." -- continuing without AI results`,
       err
     );
-    return EMPTY_RESULT;
+    return withScanFallback(EMPTY_RESULT);
   }
 }

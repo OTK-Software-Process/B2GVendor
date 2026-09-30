@@ -1,5 +1,5 @@
 import mongoose, { Model, Schema, Types, Document } from 'mongoose';
-import { WorkStatus } from './work.model';
+import { WorkStatus, BudgetMissingReason, BUDGET_MISSING_REASONS } from './work.model';
 
 export interface INotification extends Document {
   accountId: Types.ObjectId;
@@ -7,6 +7,7 @@ export interface INotification extends Document {
   workTitle: string;
   agencyName: string;
   budget?: number;
+  budgetMissingReason?: BudgetMissingReason;
   method: string;
   status: WorkStatus;
   statusLabel: string;
@@ -30,6 +31,7 @@ const NotificationSchema = new Schema<INotification>(
     workTitle: { type: String, required: true },
     agencyName: { type: String, required: true },
     budget: { type: Number, min: 0 },
+    budgetMissingReason: { type: String, enum: BUDGET_MISSING_REASONS },
     method: { type: String, required: true },
     status: { type: String, required: true },
     statusLabel: { type: String, required: true },

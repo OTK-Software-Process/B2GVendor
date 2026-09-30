@@ -7,6 +7,7 @@ import { PublicShell } from '@/components/PublicShell';
 import { StatusBadge } from '@/components/StatusBadge';
 import { FollowTagButton } from '@/components/FollowTagButton';
 import { TORDownloadList } from '@/components/TORDownloadList';
+import { BudgetText, budgetLabel } from '@/components/BudgetText';
 import { LoadingSkeleton } from '@/components/LoadingSkeleton';
 import { ErrorRetry } from '@/components/ErrorRetry';
 import { useApp } from '@/context/AppContext';
@@ -73,12 +74,6 @@ export default function WorkDetailPage() {
     );
   }
 
-  const formattedBudget = new Intl.NumberFormat('th-TH', {
-    style: 'currency',
-    currency: 'THB',
-    maximumFractionDigits: 0
-  }).format(work.budget);
-
   return (
     <PublicShell>
       <div className="max-w-4xl mx-auto space-y-8 pb-12">
@@ -143,8 +138,8 @@ export default function WorkDetailPage() {
               <span className="text-sm font-bold text-sky-700">{work.siteName}</span>
             </div>
             <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/60">
-              <span className="text-xs text-slate-400 font-medium block">{lang === 'en' ? 'Budget' : 'งบประมาณกลาง'}</span>
-              <span className="text-lg font-bold text-emerald-700">{formattedBudget}</span>
+              <span className="text-xs text-slate-400 font-medium block">{budgetLabel(work.budgetBasis, lang)}</span>
+              <BudgetText budget={work.budget} reason={work.budgetMissingReason} basis={work.budgetBasis} className="text-lg font-bold text-emerald-700" showExplanation />
             </div>
             <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/60">
               {work.agencyId ? (

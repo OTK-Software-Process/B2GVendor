@@ -1,3 +1,4 @@
+import { formatPriceHints } from '../../utils/priceExtraction';
 import { DocumentAnalysisInput, TagCandidate } from './types';
 
 /**
@@ -48,12 +49,24 @@ export const SYSTEM_PROMPT = [
   '- "budget": the estimated/reference price stated IN THE DOCUMENT TEXT ' +
     'itself -- usually labeled "ราคากลาง" (reference price) or ' +
     '"วงเงินงบประมาณ" / "วงเงินในการจัดหา" (budget/procurement amount). ' +
+    'Thai documents write an amount with the unit "บาท" -- treat ' +
+    '"<number> บาท" as the anchor when looking for it. ' +
     'Return it as a plain number in Thai Baht -- no currency symbols, no ' +
     'commas, no words (e.g. 1250000, not "1,250,000 บาท"). This is a ' +
     'PRE-AWARD estimate the agency itself published, not a final contract ' +
     'value. Return null if no such figure is clearly stated -- never ' +
     'estimate, infer, or calculate one yourself from unrelated numbers ' +
     '(e.g. quantities, page counts, project codes).',
+  '- Price scan: the document text below is CUT OFF after a few thousand ' +
+    'characters, but the real price is usually further on. So the message ' +
+    'may also contain a list titled "Baht amounts found by an automatic ' +
+    'scan of the FULL document". If an amount in that list is labeled ราคากลาง, or a ' +
+    'วงเงิน / งบประมาณ wording, that IS the price the document states -- ' +
+    'return it as "budget" (prefer ราคากลาง over วงเงินงบประมาณ) and do NOT ' +
+    'return null. Never return an amount the list marks EXCLUDED (fine, ' +
+    'deposit, fee, unit or period rate). If no listed amount carries such a ' +
+    'label, judge from the context shown next to each one, and when unsure ' +
+    'return null.',
   '- If no document text is supplied (title only), "description" AND ' +
     '"budget" MUST both be null -- do not guess either from the title ' +
     'alone. "newTag" may still be proposed from the title alone if it ' +
@@ -66,6 +79,9 @@ export const SYSTEM_PROMPT = [
 export function buildUserPrompt(input: DocumentAnalysisInput, candidates: TagCandidate[]): string {
   const options = candidates.map(c => `- ${c.id}: ${c.name} (${c.facet})`).join('\n');
   const hasText = !!input.documentText;
+  // Price hints only make sense alongside document text -- with title only,
+  // "budget" must stay null (see the system prompt).
+  const priceHints = hasText && input.priceHints && input.priceHints.length > 0 ? formatPriceHints(input.priceHints) : '';
 
   return [
     `Title: ${input.title}`,
@@ -73,6 +89,14 @@ export function buildUserPrompt(input: DocumentAnalysisInput, candidates: TagCan
     hasText
       ? `Document text (already extracted to plain text):\n${input.documentText}`
       : '(No document text is available -- only the title above.)',
+    ...(priceHints
+      ? [
+          '',
+          'Baht amounts found by an automatic scan of the FULL document ' +
+            '(the text above is cut off, so the price may appear only here), best match first:',
+          priceHints
+        ]
+      : []),
     '',
     'Candidate tags -- choose only from this list:',
     options || '(none configured)'

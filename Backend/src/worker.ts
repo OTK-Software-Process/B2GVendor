@@ -1,7 +1,7 @@
 import cron from 'node-cron';
 import { connectDb } from './config/db';
 import { env } from './config/env';
-import { claimNextPollJob, executePollJob } from './services/pollJob.service';
+import { claimNextPollJob, executePollJob, reapStalePollJobs } from './services/pollJob.service';
 import { enqueueDueSitePolls } from './services/scheduler.service';
 import { sendDailyDigests } from './services/notification.service';
 import { logger } from './utils/logger';
@@ -14,8 +14,9 @@ import { logger } from './utils/logger';
  * Three independent loops:
  *   1. Job-claim loop -- picks up PollJob rows (both scheduler-created and
  *      admin-triggered "Poll Now" requests) and executes them.
- *   2. Scheduler tick -- every minute, checks which GovSites are due for
- *      their next scheduled poll (FR-N1.2) and enqueues a job for them.
+ *   2. Scheduler tick -- every minute, closes jobs a dead worker left behind
+ *      (so they stop locking "Poll Now"), then checks which GovSites are due
+ *      for their next scheduled poll (FR-N1.2) and enqueues a job for them.
  *   3. Daily digest tick -- once a day, sends the batched summary email to
  *      every account on 'daily' notification frequency (see
  *      account/notifications/settings and notification.service.ts's
@@ -44,6 +45,18 @@ async function claimLoop(): Promise<void> {
   }
 }
 
+async function schedulerTick(): Promise<void> {
+  try {
+    const closed = await reapStalePollJobs();
+    if (closed > 0) logger.warn('worker', `Closed ${closed} abandoned/expired poll job(s)`);
+  } catch (err) {
+    // Housekeeping only -- never let it stop the schedule below from running.
+    logger.error('worker', 'Stale poll-job cleanup failed', err);
+  }
+
+  await enqueueDueSitePolls();
+}
+
 async function main(): Promise<void> {
   await connectDb();
   logger.info('worker', 'ingestion-worker started');
@@ -53,7 +66,7 @@ async function main(): Promise<void> {
   }, env.POLL_JOB_CLAIM_INTERVAL_MS);
 
   cron.schedule('* * * * *', () => {
-    enqueueDueSitePolls().catch(err => logger.error('worker', 'Scheduler tick failed', err));
+    schedulerTick().catch(err => logger.error('worker', 'Scheduler tick failed', err));
   });
 
   // 08:00 daily, matching what the settings page tells the user to expect

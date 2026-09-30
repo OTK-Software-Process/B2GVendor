@@ -25,6 +25,26 @@ export const STATUS_BY_ANNOUNCE_TYPE: Record<AnnounceType, WorkStatus> = {
 
 export type TorLinkType = 'pdf' | 'zip' | 'html' | 'other';
 
+// Why a work has no price -- so the website can say something truthful
+// instead of a bare "0" or blank. Only meaningful while `budget` is unset:
+//   'not-stated'  -- we read the document text and it states no price
+//   'unreadable'  -- a document was downloaded, but no text could be pulled
+//                    out of it (scanned / image-only PDF; we do no OCR)
+//   'no-document' -- nothing could be read: the link couldn't be fetched (or
+//                    is a type we don't read), the download failed, or an
+//                    e-GP HTML link answered with its "file not found" page
+// Left unset on works ingested before this field existed; the UI then falls
+// back to a generic "price not specified" message.
+export type BudgetMissingReason = 'not-stated' | 'unreadable' | 'no-document';
+export const BUDGET_MISSING_REASONS: readonly BudgetMissingReason[] = ['not-stated', 'unreadable', 'no-document'] as const;
+
+// What kind of price `budget` holds. Unset (the normal case) = an estimated /
+// reference price: a ราคากลาง or วงเงิน figure read from a TOR, or data.go.th's
+// project budget. 'awarded' = the WINNING BID read from a winner announcement --
+// a different number, so the website labels it "winning bid" instead of budget.
+export type BudgetBasis = 'awarded';
+export const BUDGET_BASES: readonly BudgetBasis[] = ['awarded'] as const;
+
 export interface ITorFile {
   announceType: AnnounceType; // which lifecycle stage this document belongs to
   linkType: TorLinkType;
@@ -37,6 +57,13 @@ export interface ITorFile {
   // stored for download but not sent to Vertex AI. Undefined for plain
   // 'pdf'/'html'/'other' entries, which are always a single file.
   role?: 'primary' | 'attachment';
+  // An 'html' entry has no storageKey (the page is read, not stored); for it
+  // `downloadedAt` marks "the page was read". Counts the retry sweeps that
+  // failed to read a still-unread html page, so one that keeps failing (removed,
+  // or e-GP's "file not found") is given up on instead of retried forever;
+  // `fetchAttemptedAt` spaces those retries out (see ingestion.service.ts).
+  fetchAttempts?: number;
+  fetchAttemptedAt?: Date;
   // Set when a later item for the SAME announceType arrives with a different
   // link (e.g. a corrected/re-issued document) -- lets the frontend show
   // only the current document per stage while still keeping history.
@@ -73,6 +100,10 @@ export interface IWork extends Document {
   // (FR-N1.3a) -- enrichWorkFromContractRecord always wins when it has a
   // value, so this field converges from "estimate" to "actual" over time.
   budget?: number;
+  // Set only while `budget` is still empty -- see BudgetMissingReason.
+  budgetMissingReason?: BudgetMissingReason;
+  // Set only when `budget` is a winning bid rather than an estimate -- see BudgetBasis.
+  budgetBasis?: BudgetBasis;
   contractNumber?: string;
   contractDate?: Date;
   winnerName?: string;
@@ -108,6 +139,8 @@ const TorFileSchema = new Schema<ITorFile>(
     filename: { type: String },
     downloadedAt: { type: Date },
     role: { type: String, enum: ['primary', 'attachment'] },
+    fetchAttempts: { type: Number, min: 0 },
+    fetchAttemptedAt: { type: Date },
     supersededAt: { type: Date }
   },
   { _id: false }
@@ -138,6 +171,8 @@ const WorkSchema = new Schema<IWork>(
     statusHistory: { type: [StatusHistorySchema], default: [] },
 
     budget: { type: Number, min: 0 },
+    budgetMissingReason: { type: String, enum: BUDGET_MISSING_REASONS },
+    budgetBasis: { type: String, enum: BUDGET_BASES },
     contractNumber: { type: String, trim: true },
     contractDate: { type: Date },
     winnerName: { type: String, trim: true },

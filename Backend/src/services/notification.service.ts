@@ -1,7 +1,7 @@
 import { Types } from 'mongoose';
 import { Account } from '../models/account.model';
 import { Follow } from '../models/follow.model';
-import { IWork, WorkStatus } from '../models/work.model';
+import { Work, IWork, WorkStatus, BudgetMissingReason, BudgetBasis } from '../models/work.model';
 import { Tag } from '../models/tag.model';
 import { GovSite } from '../models/govSite.model';
 import { Notification, INotification } from '../models/notification.model';
@@ -14,7 +14,12 @@ export interface NotificationView {
   workId: string;
   workTitle: string;
   agencyName: string;
-  budget: number;
+  // null (not 0) when the work has no known price -- the UI shows a message
+  // for it, see BudgetMissingReason.
+  budget: number | null;
+  budgetMissingReason?: BudgetMissingReason;
+  // Present when `budget` is not a project budget but a winning bid (see BudgetBasis).
+  budgetBasis?: BudgetBasis;
   method: string;
   status: 'INVITATION' | 'BIDDING' | 'EVALUATION' | 'AWARDED' | 'CANCELLED';
   statusLabel: string;
@@ -32,13 +37,37 @@ const STATUS_FOR_UI: Record<WorkStatus, NotificationView['status']> = {
   AWARDED: 'AWARDED'
 };
 
-function toNotificationView(notification: INotification): NotificationView {
+type CurrentPrice = Pick<IWork, 'budget' | 'budgetMissingReason' | 'budgetBasis'>;
+
+// The price on a notification is the work's CURRENT one, not the copy taken when
+// the notification was created. Prices arrive late by design (a page or PDF that
+// failed the first time is retried, data.go.th enrichment corrects figures), so
+// a card still saying "couldn't read a price" for a work that now has one -- or
+// showing a winning bid without saying so -- would be wrong. The copy on the
+// notification is only the fallback for a work that no longer exists.
+async function loadCurrentPrices(workIds: Types.ObjectId[]): Promise<Map<string, CurrentPrice>> {
+  if (workIds.length === 0) return new Map();
+  const works = await Work.find({ _id: { $in: workIds } })
+    .select('budget budgetMissingReason budgetBasis')
+    .lean();
+  return new Map(works.map(work => [work._id.toString(), work]));
+}
+
+async function toNotificationViews(notifications: INotification[]): Promise<NotificationView[]> {
+  const prices = await loadCurrentPrices(notifications.map(notification => notification.workId));
+  return notifications.map(notification => toNotificationView(notification, prices.get(notification.workId.toString())));
+}
+
+function toNotificationView(notification: INotification, current?: CurrentPrice): NotificationView {
+  const budget = current ? current.budget : notification.budget;
   return {
     id: notification._id.toString(),
     workId: notification.workId.toString(),
     workTitle: notification.workTitle,
     agencyName: notification.agencyName,
-    budget: notification.budget ?? 0,
+    budget: budget && budget > 0 ? budget : null,
+    budgetMissingReason: current ? current.budgetMissingReason : notification.budgetMissingReason,
+    budgetBasis: current?.budgetBasis,
     method: notification.method,
     status: STATUS_FOR_UI[notification.status],
     statusLabel: notification.statusLabel,
@@ -50,7 +79,7 @@ function toNotificationView(notification: INotification): NotificationView {
 
 export async function listNotifications(accountId: string): Promise<NotificationView[]> {
   const notifications = await Notification.find({ accountId }).sort({ createdAt: -1 }).limit(100);
-  return notifications.map(toNotificationView);
+  return toNotificationViews(notifications);
 }
 
 export async function markNotificationAsRead(accountId: string, notificationId: string): Promise<NotificationView> {
@@ -60,7 +89,8 @@ export async function markNotificationAsRead(accountId: string, notificationId: 
     { new: true }
   );
   if (!notification) throw AppError.notFound('Notification not found.');
-  return toNotificationView(notification);
+  const [view] = await toNotificationViews([notification]);
+  return view;
 }
 
 export async function markAllNotificationsAsRead(accountId: string): Promise<{ updatedCount: number }> {
@@ -104,6 +134,7 @@ export async function notifyNewWorkMatches(work: IWork, tagIds: Types.ObjectId[]
             workTitle: work.title,
             agencyName: site?.name ?? 'Government procurement',
             budget: work.budget,
+            budgetMissingReason: work.budgetMissingReason,
             method: work.announceType,
             status: work.status,
             statusLabel: work.status,

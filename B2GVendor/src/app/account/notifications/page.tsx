@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { PublicShell } from '@/components/PublicShell';
 import { StatusBadge } from '@/components/StatusBadge';
+import { BudgetText } from '@/components/BudgetText';
 import { useApp } from '@/context/AppContext';
 import { Bell, CheckCheck, ExternalLink, Filter, Tag, Calendar, Building2 } from 'lucide-react';
 
@@ -110,9 +111,7 @@ export default function AccountNotificationsPage() {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-emerald-700">
-                      {new Intl.NumberFormat('th-TH', { style: 'currency', currency: 'THB', maximumFractionDigits: 0 }).format(item.budget)}
-                    </span>
+                    <BudgetText budget={item.budget} reason={item.budgetMissingReason} basis={item.budgetBasis} className="text-xs font-bold text-emerald-700" showBasisTag />
                   </div>
                 </div>
 

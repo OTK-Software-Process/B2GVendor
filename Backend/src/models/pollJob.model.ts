@@ -15,6 +15,12 @@ export interface IPollJob extends Document {
 
   status: PollJobStatus;
   claimedAt?: Date;
+  // Refreshed every few seconds by the worker while it executes the job. A
+  // 'running' job whose heartbeat has gone quiet belongs to a worker that
+  // died (crash, redeploy, tsx-watch restart) -- see pollJob.service.ts. Without
+  // this, such a job would look "in progress" forever and lock Poll Now for
+  // every admin.
+  heartbeatAt?: Date;
   finishedAt?: Date;
   resultRunIds: Types.ObjectId[];
   error?: string;
@@ -32,6 +38,7 @@ const PollJobSchema = new Schema<IPollJob>(
 
     status: { type: String, enum: ['queued', 'running', 'done', 'failed'], default: 'queued', required: true, index: true },
     claimedAt: { type: Date },
+    heartbeatAt: { type: Date },
     finishedAt: { type: Date },
     resultRunIds: { type: [{ type: Schema.Types.ObjectId, ref: 'IngestionRun' }], default: [] },
     error: { type: String }

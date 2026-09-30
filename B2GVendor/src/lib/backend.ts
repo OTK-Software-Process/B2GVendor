@@ -4,16 +4,21 @@
 // components (WorkCard, StatusBadge, TORDownloadList, FilterBar, ...) can
 // render real data without a full rewrite. Also backs the admin ingestion
 // pages (poll trigger, run history/detail) -- see fetchIngestionRuns,
-// pollSite/pollAllSites, toIngestionRun below. Pages that still use MOCK_*
-// data (source config, tag management, account/user admin) are unaffected.
+// pollSite/pollAllSites, toIngestionRun below -- and the department list,
+// poll status and automatic schedule (fetchAdminGovSites, fetchPollStatus,
+// fetchSchedule). Pages that still use MOCK_* data (tag management,
+// account/user admin) are unaffected.
 
 import { api } from './api';
 import {
   WorkItem,
   TagItem,
   GovSiteItem,
+  SiteLastRun,
   TORFile,
   ProcurementStatus,
+  BudgetMissingReason,
+  BudgetBasis,
   IngestionRun,
   LogEntry,
   MOCK_STATUS_CONFIG
@@ -48,8 +53,19 @@ export interface BackendGovSite extends BackendGovSiteRef {
   dataGoThOrgSlug?: string;
   enabled: boolean;
   requestsPerMinute: number;
+  pollIntervalMinutes?: number;
+  // Real number of listed works -- both the public directory and the admin
+  // list carry it.
+  worksCount?: number;
   createdAt: string;
   updatedAt: string;
+}
+
+// GET /admin/gov-sites -- the same site plus its real run results and schedule.
+export interface BackendAdminGovSite extends BackendGovSite {
+  lastRun: SiteLastRun | null;
+  effectiveIntervalMinutes: number;
+  nextRunAt: string | null;
 }
 
 export interface BackendTorFile {
@@ -82,6 +98,8 @@ export interface BackendWork {
   torFiles: BackendTorFile[];
   statusHistory: BackendStatusHistoryEntry[];
   budget?: number;
+  budgetMissingReason?: BudgetMissingReason;
+  budgetBasis?: BudgetBasis;
   contractNumber?: string;
   contractDate?: string;
   winnerName?: string;
@@ -134,6 +152,29 @@ export function fetchGovSites(): Promise<BackendGovSite[]> {
   return api.get<BackendGovSite[]>('/gov-sites');
 }
 
+// Admin list: real works count, last run and next scheduled run per site.
+export function fetchAdminGovSites(): Promise<BackendAdminGovSite[]> {
+  return api.get<BackendAdminGovSite[]>('/admin/gov-sites');
+}
+
+// Enable/disable a department for polling (Super Admin only -- the API
+// answers 403 to a regular admin). Returns the updated site.
+export function updateGovSite(id: string, patch: { enabled?: boolean }): Promise<BackendGovSite> {
+  return api.patch<BackendGovSite>(`/admin/gov-sites/${id}`, patch);
+}
+
+export interface CreateGovSiteBody {
+  name: string;
+  nameEn?: string;
+  shortCode: string;
+  deptId: string;
+  requestsPerMinute?: number;
+}
+
+export function createGovSite(body: CreateGovSiteBody): Promise<BackendGovSite> {
+  return api.post<BackendGovSite>('/admin/gov-sites', body);
+}
+
 export function torFileUrl(workId: string, index: number): string {
   return `${API_BASE}/works/${workId}/tor/${index}`;
 }
@@ -152,16 +193,23 @@ export function toTagItem(tag: BackendTag): TagItem {
   };
 }
 
-export function toGovSiteItem(site: BackendGovSite): GovSiteItem {
+export function toGovSiteItem(site: BackendGovSite | BackendAdminGovSite): GovSiteItem {
+  const admin = site as Partial<BackendAdminGovSite>;
   return {
     id: site._id,
     name: site.name,
     nameEn: site.nameEn ?? site.shortCode,
     shortCode: site.shortCode,
-    datasetId: site.dataGoThOrgSlug ?? site.deptId,
     enabled: site.enabled,
     requestsPerMin: site.requestsPerMinute,
-    worksCount: 0 // not tracked by the backend yet
+    worksCount: site.worksCount ?? 0,
+    deptId: site.deptId,
+    announceTypes: site.announceTypes,
+    dataGoThOrgSlug: site.dataGoThOrgSlug,
+    pollIntervalMinutes: site.pollIntervalMinutes ?? null,
+    effectiveIntervalMinutes: admin.effectiveIntervalMinutes,
+    nextRunAt: admin.nextRunAt,
+    lastRun: admin.lastRun
   };
 }
 
@@ -195,7 +243,9 @@ export function toTORFile(workId: string, file: BackendTorFile, index: number): 
     name: torFileName(file, index),
     size: '', // the backend doesn't track file size
     url: downloadable ? torFileUrl(workId, index) : file.sourceUrl,
-    date: (file.downloadedAt ?? '').slice(0, 10),
+    // Only a file WE downloaded has a download date: an HTML announcement page
+    // is read (its `downloadedAt` marks that) but stays a link to the source site.
+    date: downloadable ? (file.downloadedAt ?? '').slice(0, 10) : '',
     type: file.linkType.toUpperCase(),
     external: !downloadable
   };
@@ -221,7 +271,10 @@ export function toWorkItem(work: BackendWork): WorkItem {
     category: categoryTag?.name ?? '',
     method: 'e-bidding',
     methodLabel: methodTag?.name ?? ANNOUNCE_TYPE_LABEL[work.announceType] ?? work.announceType,
-    budget: work.budget ?? 0,
+    // No price is null, not 0 -- the UI shows why (budgetMissingReason).
+    budget: work.budget && work.budget > 0 ? work.budget : null,
+    budgetMissingReason: work.budgetMissingReason,
+    budgetBasis: work.budgetBasis,
     publishDate: (work.pubDate ?? work.createdAt).slice(0, 10),
     closingDate: '', // not tracked by the backend (no bid-closing-date field on Work)
     status: work.status as ProcurementStatus,
@@ -311,14 +364,11 @@ export function fetchIngestionRunById(id: string): Promise<BackendIngestionRun> 
   return api.get<BackendIngestionRun>(`/admin/ingestion/runs/${id}`);
 }
 
-export function fetchPollJob(id: string): Promise<BackendPollJob> {
-  return api.get<BackendPollJob>(`/admin/ingestion/jobs/${id}`);
-}
-
 // Enqueues a real PollJob -- the ingestion-worker process (not this request)
 // actually claims and executes it (see Backend/src/worker.ts). Returns
-// immediately with status "queued"; the caller polls fetchPollJob() for
-// completion (see waitForPollJob in AppContext.tsx).
+// immediately with status "queued"; whether it is still running is read from
+// fetchPollStatus() below (see the status loop in AppContext.tsx). Answers 409
+// when a poll is already running.
 export function pollSite(siteId: string, source: 'rss' | 'data_go_th' | 'both' = 'both'): Promise<BackendPollJob> {
   return api.post<BackendPollJob>(`/admin/gov-sites/${siteId}/poll`, { source });
 }
@@ -327,9 +377,60 @@ export function pollAllSites(): Promise<BackendPollJob> {
   return api.post<BackendPollJob>('/admin/gov-sites/poll-all', {});
 }
 
+// Server-side truth for "is a poll running?" -- the same answer for every
+// admin account, and it survives a page refresh (unlike a flag in this tab).
+export interface BackendActivePollJob {
+  id: string;
+  scope: 'site' | 'all';
+  siteId?: string;
+  siteName?: string;
+  source: 'rss' | 'data_go_th' | 'both';
+  status: 'queued' | 'running';
+  trigger: 'scheduler' | 'manual';
+  createdAt: string;
+  claimedAt?: string;
+}
+
+export interface BackendPollStatus {
+  isPolling: boolean;
+  activeJobs: BackendActivePollJob[];
+}
+
+export function fetchPollStatus(): Promise<BackendPollStatus> {
+  return api.get<BackendPollStatus>('/admin/ingestion/status');
+}
+
+// The automatic schedule (admin > Data Ingestion > Automatic Schedule).
+export interface BackendScheduleOverview {
+  pollIntervalMinutes: number;
+  scheduleEnabled: boolean;
+  minIntervalMinutes: number; // the floor the API enforces (2 hours)
+  maxIntervalMinutes: number;
+  defaultIntervalMinutes: number; // 24 hours
+  nextRunAt: string | null;
+  updatedAt: string;
+}
+
+export function fetchSchedule(): Promise<BackendScheduleOverview> {
+  return api.get<BackendScheduleOverview>('/admin/ingestion/settings');
+}
+
+export function updateSchedule(patch: { pollIntervalMinutes?: number; scheduleEnabled?: boolean }): Promise<BackendScheduleOverview> {
+  return api.patch<BackendScheduleOverview>('/admin/ingestion/settings', patch);
+}
+
+// "YYYY-MM-DD HH:mm:ss" in the viewer's LOCAL time. (Was a raw slice of the UTC
+// ISO string, which read 7 hours behind the local times the rest of the admin
+// area shows -- the department list, next-run countdowns -- for the same run.)
 function formatDateTime(iso: string | undefined): string {
   if (!iso) return '';
-  return iso.slice(0, 19).replace('T', ' ');
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
+    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  );
 }
 
 function formatDuration(startedAt: string, finishedAt: string | undefined): string {
