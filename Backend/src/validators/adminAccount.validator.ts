@@ -1,14 +1,14 @@
 import { z } from 'zod';
 import { NAME_REGEX } from './auth.validator';
 
-const nameSchema = z
+export const nameSchema = z
   .string()
   .trim()
   .min(1, 'Name is required')
   .max(150)
   .regex(NAME_REGEX, 'Name can only contain letters, hyphens, and apostrophes, with at most one space');
 
-const phoneSchema = z
+export const phoneSchema = z
   .string()
   .trim()
   .regex(/^(\+66|0)[\d\-\s]{8,12}$/, 'Invalid Thai phone number');

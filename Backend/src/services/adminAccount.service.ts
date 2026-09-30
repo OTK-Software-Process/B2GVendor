@@ -149,7 +149,7 @@ export interface SetupEmailResult {
 
 // Issues a fresh one-time link and emails it. A vendor who has never signed in
 // gets the "your account was created" wording; anyone else gets a plain reset.
-async function sendPasswordLink(account: IAccount): Promise<SetupEmailResult> {
+export async function sendPasswordLink(account: IAccount): Promise<SetupEmailResult> {
   if (!isEmailConfigured()) {
     // Still issue the token so the logged link works in local development.
     const raw = await issueToken(account._id, 'password_reset');
@@ -231,14 +231,10 @@ export async function sendVendorPasswordLink(id: string): Promise<SetupEmailResu
   return sendPasswordLink(account);
 }
 
-// Permanent. Removes the account and everything that only makes sense with it:
-// sessions, follows, in-app notifications and outstanding reset links.
-// Dependents go first so a failure part-way leaves a still-deletable account,
-// never orphaned rows pointing at nothing.
-export async function deleteVendor(id: string): Promise<{ id: string; email: string }> {
-  const account = await findVendor(id);
-  const accountId = account._id;
-
+// Shared by vendor and admin deletion. Dependents go first so a failure
+// part-way leaves a still-deletable account, never orphaned rows pointing at
+// nothing.
+export async function deleteAccountAndData(accountId: Types.ObjectId): Promise<void> {
   await Promise.all([
     Session.deleteMany({ accountId }),
     Follow.deleteMany({ accountId }),
@@ -246,6 +242,12 @@ export async function deleteVendor(id: string): Promise<{ id: string; email: str
     Token.deleteMany({ accountId })
   ]);
   await Account.deleteOne({ _id: accountId });
+}
 
-  return { id: accountId.toString(), email: account.email };
+// Permanent. Removes the account and everything that only makes sense with it:
+// sessions, follows, in-app notifications and outstanding reset links.
+export async function deleteVendor(id: string): Promise<{ id: string; email: string }> {
+  const account = await findVendor(id);
+  await deleteAccountAndData(account._id);
+  return { id: account._id.toString(), email: account.email };
 }

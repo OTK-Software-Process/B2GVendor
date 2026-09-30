@@ -8,6 +8,7 @@ import { dataGoThDiscoveryRouter } from './dataGoThDiscovery.routes';
 import { adminDashboardRouter } from './adminDashboard.routes';
 import { adminWorkRouter } from './adminWork.routes';
 import { adminAccountRouter } from './adminAccount.routes';
+import { adminStaffRouter } from './adminStaff.routes';
 
 export const adminRouter = Router();
 
@@ -20,5 +21,6 @@ adminRouter.use('/gov-sites', adminGovSiteRouter);
 adminRouter.use('/tags', adminTagRouter);
 adminRouter.use('/works', adminWorkRouter);
 adminRouter.use('/accounts', adminAccountRouter);
+adminRouter.use('/staff', adminStaffRouter);
 adminRouter.use('/ingestion', ingestionRouter);
 adminRouter.use('/data-go-th', dataGoThDiscoveryRouter);

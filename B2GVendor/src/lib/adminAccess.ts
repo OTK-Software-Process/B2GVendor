@@ -7,8 +7,11 @@ import type { UserRole } from '@/context/AppContext';
 // This is UX only -- the real enforcement is server-side (requireAdmin /
 // requireSuperAdmin in Backend/src/routes/admin.routes.ts).
 
-/** Admin pages only a Super Admin may open. Everything else under /admin is Admin + Super Admin. */
-const SUPER_ADMIN_ONLY_PREFIXES = ['/admin/source-config'];
+/**
+ * Admin pages only a Super Admin may open: source configuration, and managing
+ * other admins (/admin/users). Everything else under /admin is Admin + Super Admin.
+ */
+const SUPER_ADMIN_ONLY_PREFIXES = ['/admin/source-config', '/admin/users'];
 
 export function isAdminRole(role: UserRole): boolean {
   return role === 'admin' || role === 'superadmin';

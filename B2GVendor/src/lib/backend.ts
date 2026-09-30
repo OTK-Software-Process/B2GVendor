@@ -710,3 +710,80 @@ export function sendVendorPasswordLink(id: string): Promise<BackendSetupEmailRes
 export function deleteVendor(id: string): Promise<{ id: string; email: string }> {
   return api.del<{ id: string; email: string }>(`/admin/accounts/${encodeURIComponent(id)}`);
 }
+
+// ---------------------------------------------------------------------------
+// Admin (staff) accounts -- /admin/staff (Backend/src/services/adminStaff.service.ts).
+// Super Admin only. Plain Admins can be changed; Super Admins are listed
+// read-only (`manageable: false`).
+// ---------------------------------------------------------------------------
+
+export type BackendStaffRole = 'admin' | 'superadmin';
+
+export interface BackendStaff {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  role: BackendStaffRole;
+  status: BackendAccountStatus;
+  createdAt: string;
+  updatedAt: string;
+  lastActiveAt: string | null;
+  /** Live (not revoked, not expired) sessions: who could act right now. */
+  activeSessions: number;
+  manageable: boolean;
+}
+
+export interface BackendStaffList {
+  items: BackendStaff[];
+  total: number;
+  page: number;
+  pageSize: number;
+  /** Unfiltered totals, independent of search/filters. */
+  summary: { total: number; admins: number; superadmins: number; suspended: number };
+}
+
+export function fetchStaff(
+  params: {
+    q?: string;
+    status?: BackendAccountStatus;
+    role?: BackendStaffRole;
+    sort?: 'newest' | 'oldest' | 'name';
+    page?: number;
+    pageSize?: number;
+  } = {}
+): Promise<BackendStaffList> {
+  return api.get<BackendStaffList>(`/admin/staff${buildQuery(params)}`);
+}
+
+export function createAdminAccount(input: {
+  name: string;
+  email: string;
+  phone?: string;
+}): Promise<{ admin: BackendStaff; setupEmail: BackendSetupEmailResult }> {
+  return api.post('/admin/staff', input);
+}
+
+export function updateAdminAccount(id: string, input: { name?: string; phone?: string | null }): Promise<BackendStaff> {
+  return api.patch<BackendStaff>(`/admin/staff/${encodeURIComponent(id)}`, input);
+}
+
+export function suspendAdminAccount(id: string): Promise<BackendStaff> {
+  return api.patch<BackendStaff>(`/admin/staff/${encodeURIComponent(id)}/suspend`);
+}
+
+export function reactivateAdminAccount(id: string): Promise<BackendStaff> {
+  return api.patch<BackendStaff>(`/admin/staff/${encodeURIComponent(id)}/reactivate`);
+}
+
+export function signOutAdminAccount(id: string): Promise<{ revoked: number }> {
+  return api.post<{ revoked: number }>(`/admin/staff/${encodeURIComponent(id)}/sign-out`);
+}
+
+export function sendAdminPasswordLink(id: string): Promise<BackendSetupEmailResult> {
+  return api.post<BackendSetupEmailResult>(`/admin/staff/${encodeURIComponent(id)}/password-link`);
+}
+
+export function deleteAdminAccount(id: string): Promise<{ id: string; email: string }> {
+  return api.del<{ id: string; email: string }>(`/admin/staff/${encodeURIComponent(id)}`);
+}
