@@ -100,6 +100,13 @@ function computeRelevance(analysis: DocumentAnalysisResult, inScopeTagIds: Set<s
   return analysis.tagIds.some(id => inScopeTagIds.has(id)) ? 'shown' : 'not-related';
 }
 
+// An admin can remove a tag from a work by hand (see adminWork.service.ts).
+// Every place ingestion merges AI/auto tags into an EXISTING work must respect
+// that, or the next poll would put the tag straight back.
+export function isTagExcluded(work: { excludedTags?: Types.ObjectId[] }, tagId: Types.ObjectId): boolean {
+  return !!work.excludedTags?.some(t => t.equals(tagId));
+}
+
 export async function runRssPoll(site: IGovSite, triggeredBy: TriggeredBy): Promise<IIngestionRun> {
   // FR-N1.10: a manual and scheduled poll for the same site+source must not
   // run destructively at the same time.
@@ -236,10 +243,10 @@ async function retryMissingTorDownloads(site: IGovSite, candidateTags: TagCandid
             if (analysis.budget && !work.budget) work.budget = analysis.budget;
             for (const tagIdStr of analysis.tagIds) {
               const tagId = new Types.ObjectId(tagIdStr);
-              if (!work.tags.some(t => t.equals(tagId))) work.tags.push(tagId);
+              if (!isTagExcluded(work, tagId) && !work.tags.some(t => t.equals(tagId))) work.tags.push(tagId);
             }
             const newTagId = await resolveNewTag(analysis, candidateTags);
-            if (newTagId && !work.tags.some(t => t.equals(newTagId))) work.tags.push(newTagId);
+            if (newTagId && !isTagExcluded(work, newTagId) && !work.tags.some(t => t.equals(newTagId))) work.tags.push(newTagId);
           }
         }
       } catch (err) {
@@ -486,14 +493,14 @@ async function upsertWorkFromRssItem(
     }
     for (const tagIdStr of analysis.tagIds) {
       const tagId = new Types.ObjectId(tagIdStr);
-      if (!existing.tags.some(t => t.equals(tagId))) {
+      if (!isTagExcluded(existing, tagId) && !existing.tags.some(t => t.equals(tagId))) {
         existing.tags.push(tagId);
         newlyAddedTagIds.push(tagId);
         changed = true;
       }
     }
     const newTagId = await resolveNewTag(analysis, candidateTags);
-    if (newTagId && !existing.tags.some(t => t.equals(newTagId))) {
+    if (newTagId && !isTagExcluded(existing, newTagId) && !existing.tags.some(t => t.equals(newTagId))) {
       existing.tags.push(newTagId);
       changed = true;
     }

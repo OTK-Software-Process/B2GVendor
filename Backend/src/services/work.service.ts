@@ -79,6 +79,7 @@ export async function listWorks(filter: ListWorksFilter = {}): Promise<ListWorks
       .sort(SORTS[filter.sort ?? 'date'])
       .skip((page - 1) * pageSize)
       .limit(pageSize)
+      .select('-excludedTags')
       .populate('siteId', 'name shortCode')
       .populate('tags', 'name facet'),
     Work.countDocuments(query)
@@ -89,6 +90,7 @@ export async function listWorks(filter: ListWorksFilter = {}): Promise<ListWorks
 
 export async function getWorkById(id: string): Promise<IWork> {
   const work = await Work.findOne({ _id: id, ingestionRelevance: { $ne: 'not-related' } })
+    .select('-excludedTags')
     .populate('siteId', 'name shortCode')
     .populate('tags', 'name facet');
   if (!work) throw AppError.notFound('Work not found.');

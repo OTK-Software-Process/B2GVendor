@@ -15,6 +15,7 @@
     "check:admin-guard": "tsx tests/integration/admin-guard.check.ts",
     "check:admin-dashboard": "tsx tests/integration/admin-dashboard.check.ts",
     "check:admin-tags": "tsx tests/integration/admin-tags.check.ts",
+    "check:admin-works": "tsx tests/integration/admin-works.check.ts",
     "check:ingestion": "tsx tests/integration/ingestion-flow.check.ts",
     "seed:superadmin": "tsx src/scripts/seedSuperAdmin.ts",
     "seed:gov-sites": "tsx src/scripts/seedGovSites.ts",

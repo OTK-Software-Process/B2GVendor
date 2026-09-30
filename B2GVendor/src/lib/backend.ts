@@ -564,3 +564,66 @@ export function retireAdminTag(id: string): Promise<BackendAdminTag> {
 export function reactivateAdminTag(id: string): Promise<BackendAdminTag> {
   return api.patch<BackendAdminTag>(`/admin/tags/${id}/reactivate`);
 }
+
+// ---------------------------------------------------------------------------
+// Admin work tag curation -- /admin/works (Backend/src/services/adminWork.service.ts).
+// The only thing an admin edits on a work is which tags it carries; status and
+// every other field stay source-derived.
+// ---------------------------------------------------------------------------
+
+export interface BackendAdminWorkTag {
+  _id: string;
+  name: string;
+  facet: BackendTagFacet;
+  retired?: boolean;
+}
+
+export type BackendIngestionRelevance = 'shown' | 'not-related';
+
+export interface BackendAdminWork {
+  _id: string;
+  siteId: BackendGovSiteRef;
+  projectId: string;
+  title: string;
+  status: BackendWorkStatus;
+  announceType: BackendAnnounceType;
+  pubDate?: string;
+  tags: BackendAdminWorkTag[];
+  /** Tags an admin removed by hand; future polls never re-add them (detail only). */
+  excludedTags?: string[];
+  ingestionRelevance?: BackendIngestionRelevance;
+  updatedAt: string;
+}
+
+export interface BackendAdminWorkList {
+  items: BackendAdminWork[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface BackendAdminWorkDetail {
+  work: BackendAdminWork;
+  ingestionFilter: { active: boolean; inScopeTagIds: string[] };
+}
+
+export interface BackendSetWorkTagsResult {
+  work: BackendAdminWork;
+  added: { id: string; name: string }[];
+  removed: { id: string; name: string }[];
+  relevance: { from: BackendIngestionRelevance | null; to: BackendIngestionRelevance | null };
+}
+
+export function fetchAdminWorks(
+  params: { q?: string; siteId?: string; tag?: string; visibility?: 'visible' | 'hidden'; page?: number; pageSize?: number } = {}
+): Promise<BackendAdminWorkList> {
+  return api.get<BackendAdminWorkList>(`/admin/works${buildQuery(params)}`);
+}
+
+export function fetchAdminWork(id: string): Promise<BackendAdminWorkDetail> {
+  return api.get<BackendAdminWorkDetail>(`/admin/works/${encodeURIComponent(id)}`);
+}
+
+export function setAdminWorkTags(id: string, tagIds: string[]): Promise<BackendSetWorkTagsResult> {
+  return api.put<BackendSetWorkTagsResult>(`/admin/works/${encodeURIComponent(id)}/tags`, { tagIds });
+}

@@ -80,6 +80,12 @@ export interface IWork extends Document {
   enrichedAt?: Date;
 
   tags: Types.ObjectId[];
+  // Tags an admin deliberately REMOVED from this work by hand. Ingestion
+  // merges AI-proposed tags back in whenever a new document arrives, so
+  // without this list the next poll would silently undo a manual removal --
+  // ingestion.service.ts never re-adds a tag listed here. Set/cleared only by
+  // adminWork.service.ts's setWorkTags.
+  excludedTags: Types.ObjectId[];
 
   // Customer requirement: restrict the public site to one topic (e.g.
   // "software") -- see Tag.includeInIngestionFilter, computed once when the
@@ -145,6 +151,7 @@ const WorkSchema = new Schema<IWork>(
     enrichedAt: { type: Date },
 
     tags: { type: [{ type: Schema.Types.ObjectId, ref: 'Tag' }], default: [] },
+    excludedTags: { type: [{ type: Schema.Types.ObjectId, ref: 'Tag' }], default: [] },
 
     ingestionRelevance: { type: String, enum: ['shown', 'not-related'], index: true }
   },

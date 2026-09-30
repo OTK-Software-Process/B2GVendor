@@ -42,7 +42,7 @@ export function AdminSidebar() {
       title: lang === 'en' ? 'Taxonomy & Works' : 'คำศัพท์แท็ก & รายการ',
       items: [
         { href: '/admin/tags', label: lang === 'en' ? 'Tag Vocabulary' : 'การจัดการแท็ก & ชื่อพ้อง', icon: Tags },
-        { href: '/admin/works/W-2026-0891/tags', label: lang === 'en' ? 'Work Tag Curation' : 'จัดระเบียบแท็กในโครงการ', icon: Tag },
+        { href: '/admin/works', label: lang === 'en' ? 'Work Tag Curation' : 'จัดระเบียบแท็กในโครงการ', icon: Tag },
       ]
     },
     {

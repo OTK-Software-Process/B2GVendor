@@ -3,12 +3,10 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { api, SESSION_INVALID_EVENT } from '@/lib/api';
 import {
-  WorkItem,
   TagItem,
   NotificationItem,
   IngestionRun,
   GovSiteItem,
-  MOCK_WORKS,
   MOCK_GOV_SITES
 } from '@/lib/mock-data';
 import {
@@ -63,7 +61,6 @@ interface AppContextType {
   unreadCount: number;
   markNotificationAsRead: (id: string) => Promise<void>;
   markAllNotificationsAsRead: () => Promise<void>;
-  works: WorkItem[];
   tags: TagItem[];
   ingestionRuns: IngestionRun[];
   refreshIngestionRuns: (filters?: { siteId?: string }) => Promise<void>;
@@ -72,7 +69,6 @@ interface AppContextType {
   // Re-reads the public tag taxonomy -- call after an admin changes tags so
   // filters and the tag lists elsewhere reflect it without a page reload.
   refreshTags: () => Promise<void>;
-  updateWorkTags: (workId: string, tagIds: string[]) => void;
   govSites: GovSiteItem[];
   addGovSite: (site: { name: string; nameEn: string; shortCode: string; datasetId: string; requestsPerMin: number }) => void;
   toggleGovSiteEnabled: (siteId: string) => void;
@@ -87,7 +83,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [lang, setLang] = useState<AppLang>('th');
   const [followedTagIds, setFollowedTagIds] = useState<string[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
-  const [works, setWorks] = useState<WorkItem[]>(MOCK_WORKS);
   const [tags, setTags] = useState<TagItem[]>([]);
   const [ingestionRuns, setIngestionRuns] = useState<IngestionRun[]>([]);
   const [isPolling, setIsPolling] = useState<boolean>(false);
@@ -289,13 +284,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setTags(list.map(toTagItem));
   };
 
-  const updateWorkTags = (workId: string, tagIds: string[]) => {
-    const newTags = tags.filter(t => tagIds.includes(t.id));
-    setWorks(prev =>
-      prev.map(w => (w.id === workId ? { ...w, tags: newTags } : w))
-    );
-  };
-
   return (
     <AppContext.Provider
       value={{
@@ -314,14 +302,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         unreadCount,
         markNotificationAsRead,
         markAllNotificationsAsRead,
-        works,
         tags,
         ingestionRuns,
         refreshIngestionRuns,
         isPolling,
         triggerPollNow,
         refreshTags,
-        updateWorkTags,
         govSites,
         addGovSite,
         toggleGovSiteEnabled
