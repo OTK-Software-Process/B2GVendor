@@ -28,6 +28,10 @@ export function AdminSidebar() {
     account?.permissions?.includes('poll:manage') === true ||
     account?.permissions?.includes('poll&tag:manage') === true
   ));
+  const canCurateWorkTags = isSuperAdmin || (role === 'admin' && (
+    account?.permissions?.includes('tag:manage') === true ||
+    account?.permissions?.includes('poll&tag:manage') === true
+  ));
 
   const navGroups = [
     {
@@ -42,13 +46,13 @@ export function AdminSidebar() {
         { href: '/admin/ingestion', label: lang === 'en' ? 'Polling System' : 'ระบบดึงข้อมูล', icon: RefreshCw },
       ]
     }] : []),
-    {
+    ...(canCurateWorkTags ? [{
       title: lang === 'en' ? 'Taxonomy & Works' : 'คำศัพท์แท็ก & รายการ',
       items: [
         { href: '/admin/tags', label: lang === 'en' ? 'Tag Vocabulary' : 'การจัดการแท็ก & ชื่อพ้อง', icon: Tags },
         { href: '/admin/works/W-2026-0891/tags', label: lang === 'en' ? 'Work Tag Curation' : 'จัดระเบียบแท็กในโครงการ', icon: Tag },
       ]
-    },
+    }] : []),
     {
       title: lang === 'en' ? 'Accounts & Security' : 'บัญชี & บันทึกระบบ',
       items: [
