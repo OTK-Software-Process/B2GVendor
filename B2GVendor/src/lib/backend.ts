@@ -491,3 +491,76 @@ export interface BackendAdminDashboard {
 export function fetchAdminDashboard(): Promise<BackendAdminDashboard> {
   return api.get<BackendAdminDashboard>('/admin/dashboard');
 }
+
+// ---------------------------------------------------------------------------
+// Admin tag management -- /admin/tags (Backend/src/services/tag.service.ts).
+// Duplicate handling is governance, not merging: a redundant tag is retired.
+// ---------------------------------------------------------------------------
+
+export interface BackendAdminTag {
+  _id: string;
+  name: string;
+  facet: BackendTagFacet;
+  aliases: string[];
+  siteId?: string;
+  retired: boolean;
+  includeInIngestionFilter: boolean;
+  worksCount: number;
+  followerCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BackendTagMatch {
+  tagId: string;
+  name: string;
+  facet: BackendTagFacet;
+  retired: boolean;
+  candidateTerm: string;
+  existingTerm: string;
+  similarity: number;
+}
+
+export interface BackendTagConflicts {
+  exact: BackendTagMatch[];
+  similar: BackendTagMatch[];
+}
+
+export function fetchAdminTags(
+  params: { facet?: BackendTagFacet; includeRetired?: boolean; search?: string } = {}
+): Promise<BackendAdminTag[]> {
+  return api.get<BackendAdminTag[]>(`/admin/tags${buildQuery(params)}`);
+}
+
+export function checkTagDuplicates(input: {
+  name: string;
+  aliases?: string[];
+  facet?: BackendTagFacet;
+  excludeId?: string;
+}): Promise<BackendTagConflicts> {
+  return api.post<BackendTagConflicts>('/admin/tags/check-duplicates', input);
+}
+
+export function createAdminTag(input: {
+  name: string;
+  facet: Exclude<BackendTagFacet, 'site'>;
+  aliases?: string[];
+  confirmNearDuplicate?: boolean;
+}): Promise<BackendAdminTag> {
+  return api.post<BackendAdminTag>('/admin/tags', input);
+}
+
+export function updateAdminTag(
+  id: string,
+  input: { name?: string; aliases?: string[]; confirmNearDuplicate?: boolean }
+): Promise<BackendAdminTag> {
+  return api.patch<BackendAdminTag>(`/admin/tags/${id}`, input);
+}
+
+export function retireAdminTag(id: string): Promise<BackendAdminTag> {
+  return api.patch<BackendAdminTag>(`/admin/tags/${id}/retire`);
+}
+
+export function reactivateAdminTag(id: string): Promise<BackendAdminTag> {
+  return api.patch<BackendAdminTag>(`/admin/tags/${id}/reactivate`);
+}

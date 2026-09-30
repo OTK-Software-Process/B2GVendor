@@ -10,6 +10,8 @@ export type ErrorCode =
   | 'BAD_REQUEST'
   | 'RATE_LIMITED'
   | 'NOT_FOUND'
+  | 'DUPLICATE_TAG'
+  | 'NEAR_DUPLICATE_TAG'
   | 'INTERNAL_ERROR';
 
 export type FieldErrors = Record<string, string>;
@@ -18,13 +20,17 @@ export class AppError extends Error {
   readonly status: number;
   readonly code: ErrorCode;
   readonly fields?: FieldErrors;
+  // Structured, machine-readable context for the client (e.g. which existing
+  // tags a new tag collides with) -- not for field-level validation, use `fields`.
+  readonly details?: unknown;
 
-  constructor(status: number, code: ErrorCode, message: string, fields?: FieldErrors) {
+  constructor(status: number, code: ErrorCode, message: string, fields?: FieldErrors, details?: unknown) {
     super(message);
     this.name = 'AppError';
     this.status = status;
     this.code = code;
     this.fields = fields;
+    this.details = details;
     Error.captureStackTrace?.(this, AppError);
   }
 

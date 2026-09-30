@@ -28,7 +28,7 @@ export type TriggeredBy = 'scheduler' | Types.ObjectId;
 
 async function getCandidateTags(): Promise<TagCandidate[]> {
   const tags = await Tag.find({ facet: { $in: ['category', 'keyword'] }, retired: false });
-  return tags.map(t => ({ id: t._id.toString(), name: t.name, facet: t.facet as 'category' | 'keyword' }));
+  return tags.map(t => ({ id: t._id.toString(), name: t.name, facet: t.facet as 'category' | 'keyword', aliases: t.aliases }));
 }
 
 // Customer requirement: restrict the public site to one topic (e.g.
@@ -82,7 +82,7 @@ async function resolveNewTag(analysis: DocumentAnalysisResult, candidateTags: Ta
     const tag = await findOrCreateAiTag(analysis.newTag.name, analysis.newTag.facet);
     const idStr = tag._id.toString();
     if (!candidateTags.some(c => c.id === idStr)) {
-      candidateTags.push({ id: idStr, name: tag.name, facet: tag.facet as 'category' | 'keyword' });
+      candidateTags.push({ id: idStr, name: tag.name, facet: tag.facet as 'category' | 'keyword', aliases: tag.aliases });
     }
     return tag._id;
   } catch (err) {

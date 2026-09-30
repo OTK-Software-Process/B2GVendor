@@ -33,7 +33,7 @@ export function errorHandler(
   _next: NextFunction
 ): Response {
   if (err instanceof AppError) {
-    return fail(res, err.status, err.code, err.message, err.fields);
+    return fail(res, err.status, err.code, err.message, err.fields, err.details);
   }
 
   if (err instanceof mongoose.Error.ValidationError) {

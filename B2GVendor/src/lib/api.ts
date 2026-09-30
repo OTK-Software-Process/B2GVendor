@@ -6,13 +6,16 @@ export class ApiError extends Error {
   code: string;
   status: number;
   fields?: Record<string, string>;
+  // Structured context from the server, e.g. the existing tags a new tag collides with.
+  details?: unknown;
 
-  constructor(status: number, code: string, message: string, fields?: Record<string, string>) {
+  constructor(status: number, code: string, message: string, fields?: Record<string, string>, details?: unknown) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
     this.fields = fields;
+    this.details = details;
   }
 }
 
@@ -42,7 +45,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       res.status,
       body?.error?.code ?? 'UNKNOWN',
       body?.error?.message ?? 'Something went wrong',
-      body?.error?.fields
+      body?.error?.fields,
+      body?.error?.details
     );
   }
 

@@ -69,8 +69,9 @@ interface AppContextType {
   refreshIngestionRuns: (filters?: { siteId?: string }) => Promise<void>;
   isPolling: boolean;
   triggerPollNow: (siteId?: string) => Promise<void>;
-  retireTag: (tagId: string) => void;
-  createTag: (name: string, facet: TagItem['facet']) => void;
+  // Re-reads the public tag taxonomy -- call after an admin changes tags so
+  // filters and the tag lists elsewhere reflect it without a page reload.
+  refreshTags: () => Promise<void>;
   updateWorkTags: (workId: string, tagIds: string[]) => void;
   govSites: GovSiteItem[];
   addGovSite: (site: { name: string; nameEn: string; shortCode: string; datasetId: string; requestsPerMin: number }) => void;
@@ -283,20 +284,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setGovSites(prev => prev.map(s => (s.id === siteId ? { ...s, enabled: !s.enabled } : s)));
   };
 
-  const retireTag = (tagId: string) => {
-    setTags(prev => prev.map(t => (t.id === tagId ? { ...t, retired: true } : t)));
-  };
-
-  const createTag = (name: string, facet: TagItem['facet']) => {
-    const newTag: TagItem = {
-      id: `tag-${Date.now()}`,
-      name,
-      facet,
-      aliases: [],
-      followerCount: 0,
-      worksCount: 0
-    };
-    setTags(prev => [newTag, ...prev]);
+  const refreshTags = async () => {
+    const list = await fetchTags();
+    setTags(list.map(toTagItem));
   };
 
   const updateWorkTags = (workId: string, tagIds: string[]) => {
@@ -330,8 +320,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         refreshIngestionRuns,
         isPolling,
         triggerPollNow,
-        retireTag,
-        createTag,
+        refreshTags,
         updateWorkTags,
         govSites,
         addGovSite,
