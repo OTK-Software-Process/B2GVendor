@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-const NAME_REGEX = /^[\p{L}][\p{L}\p{M}'-]*(?: [\p{L}][\p{L}\p{M}'-]*)?$/u;
+export const NAME_REGEX = /^[\p{L}][\p{L}\p{M}'-]*(?: [\p{L}][\p{L}\p{M}'-]*)?$/u;
 
 const businessProfileSchema = z.object({
   companyName: z.string().trim().min(1, 'Company name is required').max(200),

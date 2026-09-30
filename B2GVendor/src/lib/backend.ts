@@ -627,3 +627,86 @@ export function fetchAdminWork(id: string): Promise<BackendAdminWorkDetail> {
 export function setAdminWorkTags(id: string, tagIds: string[]): Promise<BackendSetWorkTagsResult> {
   return api.put<BackendSetWorkTagsResult>(`/admin/works/${encodeURIComponent(id)}/tags`, { tagIds });
 }
+
+// ---------------------------------------------------------------------------
+// Admin vendor accounts -- /admin/accounts (Backend/src/services/adminAccount.service.ts).
+// Only vendor ("user") accounts; staff are managed separately. The admin never
+// sets a vendor's password: creating an account emails the vendor a link.
+// ---------------------------------------------------------------------------
+
+export type BackendAccountStatus = 'active' | 'suspended';
+export type BackendAccountType = 'individual' | 'business';
+
+export interface BackendVendor {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  type: BackendAccountType;
+  businessProfile?: { companyName: string; taxId: string };
+  status: BackendAccountStatus;
+  createdAt: string;
+  updatedAt: string;
+  followedTagsCount: number;
+  lastActiveAt: string | null;
+}
+
+export interface BackendVendorList {
+  items: BackendVendor[];
+  total: number;
+  page: number;
+  pageSize: number;
+  /** Unfiltered totals, independent of search/filters. */
+  summary: { total: number; active: number; suspended: number };
+}
+
+export interface BackendSetupEmailResult {
+  sent: boolean;
+  reason?: 'smtp_not_configured' | 'send_failed';
+}
+
+export function fetchVendors(
+  params: {
+    q?: string;
+    status?: BackendAccountStatus;
+    type?: BackendAccountType;
+    sort?: 'newest' | 'oldest' | 'name';
+    page?: number;
+    pageSize?: number;
+  } = {}
+): Promise<BackendVendorList> {
+  return api.get<BackendVendorList>(`/admin/accounts${buildQuery(params)}`);
+}
+
+export function createVendor(input: {
+  name: string;
+  email: string;
+  phone?: string;
+  type: BackendAccountType;
+  businessProfile?: { companyName: string; taxId: string };
+}): Promise<{ vendor: BackendVendor; setupEmail: BackendSetupEmailResult }> {
+  return api.post('/admin/accounts', input);
+}
+
+export function updateVendor(
+  id: string,
+  input: { name?: string; phone?: string | null; businessProfile?: { companyName: string; taxId: string } }
+): Promise<BackendVendor> {
+  return api.patch<BackendVendor>(`/admin/accounts/${encodeURIComponent(id)}`, input);
+}
+
+export function suspendVendor(id: string): Promise<BackendVendor> {
+  return api.patch<BackendVendor>(`/admin/accounts/${encodeURIComponent(id)}/suspend`);
+}
+
+export function reactivateVendor(id: string): Promise<BackendVendor> {
+  return api.patch<BackendVendor>(`/admin/accounts/${encodeURIComponent(id)}/reactivate`);
+}
+
+export function sendVendorPasswordLink(id: string): Promise<BackendSetupEmailResult> {
+  return api.post<BackendSetupEmailResult>(`/admin/accounts/${encodeURIComponent(id)}/password-link`);
+}
+
+export function deleteVendor(id: string): Promise<{ id: string; email: string }> {
+  return api.del<{ id: string; email: string }>(`/admin/accounts/${encodeURIComponent(id)}`);
+}
