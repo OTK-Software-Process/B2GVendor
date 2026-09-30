@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
+import { canAccessAdminPath } from '@/lib/adminAccess';
 import {
   LayoutDashboard,
   RefreshCw,
@@ -23,7 +24,6 @@ export function AdminSidebar() {
   const pathname = usePathname();
   const { lang, role, isPolling, triggerPollNow } = useApp();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const isSuperAdmin = role === 'superadmin';
 
   const navGroups = [
     {
@@ -53,14 +53,18 @@ export function AdminSidebar() {
         { href: '/admin/audit-log', label: lang === 'en' ? 'Audit Log' : 'บันทึกประวัติการแก้ไข', icon: History },
       ]
     },
-    ...(isSuperAdmin ? [{
+    {
       title: lang === 'en' ? 'Super Admin Only' : 'สำหรับผู้ดูแลระบบสูงสุด',
       lockIcon: true,
       items: [
         { href: '/admin/source-config', label: lang === 'en' ? 'Source Config' : 'การตั้งค่าแหล่งข้อมูล', icon: Sliders },
       ]
-    }] : [])
-  ];
+    }
+  ]
+    // Same policy the route guard uses (lib/adminAccess.ts), so a link is shown
+    // only if the page behind it is actually reachable for this role.
+    .map(group => ({ ...group, items: group.items.filter(item => canAccessAdminPath(role, item.href)) }))
+    .filter(group => group.items.length > 0);
 
   const sidebarInner = (
     <>
@@ -133,7 +137,10 @@ export function AdminSidebar() {
       {/* Footer Info */}
       <div className="p-4 border-t border-slate-100 text-[10px] text-slate-400 text-center">
         <p>B2G Vendor Admin Shell v2.0</p>
-        <p>Role Access: Full SuperAdmin</p>
+        <p>
+          {lang === 'en' ? 'Role Access: ' : 'สิทธิ์การใช้งาน: '}
+          {role === 'superadmin' ? 'Super Admin' : 'Admin'}
+        </p>
       </div>
     </>
   );

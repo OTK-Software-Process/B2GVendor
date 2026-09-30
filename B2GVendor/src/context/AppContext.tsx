@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { api } from '@/lib/api';
+import { api, SESSION_INVALID_EVENT } from '@/lib/api';
 import {
   WorkItem,
   TagItem,
@@ -171,6 +171,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // A request failed because the session expired or the account was
+  // suspended -- clear local auth state so guarded pages redirect to login
+  // instead of sitting on a screen whose every call fails.
+  useEffect(() => {
+    const handleSessionInvalid = () => {
+      setAccount(null);
+      setRole('visitor');
+    };
+    window.addEventListener(SESSION_INVALID_EVENT, handleSessionInvalid);
+    return () => window.removeEventListener(SESSION_INVALID_EVENT, handleSessionInvalid);
   }, []);
 
   const signOut = async () => {

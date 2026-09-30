@@ -1,5 +1,7 @@
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api/v1';
 
+export const SESSION_INVALID_EVENT = 'b2g:session-invalid';
+
 export class ApiError extends Error {
   code: string;
   status: number;
@@ -24,6 +26,18 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const body = await res.json().catch(() => null);
 
   if (!res.ok || !body?.success) {
+    // The session died mid-use (expired/revoked) or the account got suspended.
+    // Tell the app so it can drop to the signed-out state -- the admin route
+    // guard then redirects to login. /auth/* is excluded: a failed login is
+    // not an expired session.
+    const code = body?.error?.code;
+    if (
+      typeof window !== 'undefined' &&
+      !path.startsWith('/auth/') &&
+      (code === 'NOT_AUTHENTICATED' || code === 'ACCOUNT_SUSPENDED')
+    ) {
+      window.dispatchEvent(new Event(SESSION_INVALID_EVENT));
+    }
     throw new ApiError(
       res.status,
       body?.error?.code ?? 'UNKNOWN',
