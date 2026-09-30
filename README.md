@@ -62,9 +62,12 @@ npm run seed:superadmin -- admin@example.com "Password123" "Admin"
 
 # Government sites + the tag vocabulary (including the "software" filter tag).
 npm run seed:all
+
+# Admin account tag, poll, poll&tag
+npm run seed:admins tag@example.com "b4Cjh7G1TQX|" poll@example.com "l7./1{w>'5{P" tnp@example.com "£51D]xjJ1xZ;"
 ```
 > [!NOTE]
-> If seed command not working try change the URI in .env in `\Backend` to mongodb://localhost:27017/b2gvendor and rerun it.
+> If seed commands not working try change the URI in `.env` in `\Backend` to `mongodb://localhost:27017/b2gvendor` and rerun it.
 
 `seed:all` is idempotent — safe to re-run any time; it skips anything that already exists. See [Seed scripts reference](#seed-scripts-reference) below for what each one does and how to add more real agencies later.
 
@@ -150,6 +153,7 @@ Run from `Backend/`:
 | `npm run seed:gov-sites` | Seeds government sites: 2 test sites + 4 real, live-verified agencies (MOPH, Dept. of Highways, Dept. of Health, depa). See the script's header comment for how each `deptId` was verified, and for what's needed to add PEA/EGAT/DGA/BMA (they don't have one simple central code). |
 | `npm run seed:tags` | Seeds the real category/method/keyword tag vocabulary (mirrors the frontend's original mock taxonomy), including the software-only filter tag. |
 | `npm run seed:all` | Both of the above, in order. Idempotent. |
+| `npm run seed:admins -- <tag-email> <tag-password> <poll-email> <poll-password> <poll-tag-email> <poll-tag-password>` | Create seeds for admins (tag, poll, poll&tag)
 
 ## Quick start (Docker — runs everything together)
 
