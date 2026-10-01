@@ -6,6 +6,7 @@ import { ApiError } from '@/lib/api';
 import { ConfirmModal } from '@/components/ConfirmModal';
 import { ErrorRetry } from '@/components/ErrorRetry';
 import { formatDate, setupEmailMessage, Translate } from '@/lib/adminUi';
+import { ADMIN_PERMISSIONS, ADMIN_ROLE_LABEL, AdminPermission, adminRoleName } from '@/lib/adminAccess';
 import {
   BackendAccountStatus,
   BackendStaff,
@@ -60,6 +61,8 @@ function StaffFormModal({
   const [name, setName] = useState(admin?.name ?? '');
   const [email, setEmail] = useState(admin?.email ?? '');
   const [phone, setPhone] = useState(admin?.phone ?? '');
+  // Which of the three Admin roles this account holds (none yet = not chosen).
+  const [permission, setPermission] = useState<AdminPermission | ''>(admin?.permission ?? '');
   const [saving, setSaving] = useState(false);
   const [busyAction, setBusyAction] = useState<'link' | 'signout' | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -74,8 +77,8 @@ function StaffFormModal({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose, saving]);
 
-  const requiredMissing = !name.trim() || (!isEdit && !email.trim());
-  const unchanged = isEdit && name.trim() === admin.name && phone.trim() === (admin.phone ?? '');
+  const requiredMissing = !name.trim() || (!isEdit && !email.trim()) || permission === '';
+  const unchanged = isEdit && name.trim() === admin.name && phone.trim() === (admin.phone ?? '') && permission === (admin.permission ?? '');
 
   const save = async () => {
     setSaving(true);
@@ -83,10 +86,18 @@ function StaffFormModal({
     setFormError(null);
     try {
       if (isEdit) {
-        await updateAdminAccount(admin.id, { name: name.trim(), phone: phone.trim() === '' ? null : phone.trim() });
+        // Send only what changed: giving an existing Admin a role must not
+        // re-validate (and possibly reject) a name or phone number that was
+        // already on the account and that nobody touched.
+        await updateAdminAccount(admin.id, {
+          ...(name.trim() !== admin.name ? { name: name.trim() } : {}),
+          ...(phone.trim() !== (admin.phone ?? '') ? { phone: phone.trim() === '' ? null : phone.trim() } : {}),
+          ...(permission !== '' && permission !== admin.permission ? { permission } : {})
+        });
         onSaved({ ok: true, text: t(`บันทึกบัญชี ${name.trim()} แล้ว`, `Saved ${name.trim()}`) });
       } else {
-        const result = await createAdminAccount({ name: name.trim(), email: email.trim(), ...(phone.trim() ? { phone: phone.trim() } : {}) });
+        if (permission === '') return; // the button is disabled until a role is chosen
+        const result = await createAdminAccount({ name: name.trim(), email: email.trim(), permission, ...(phone.trim() ? { phone: phone.trim() } : {}) });
         const mail = setupEmailMessage(result.admin.email, result.setupEmail, t);
         onSaved({ ok: mail.ok, text: t(`สร้างบัญชีผู้ดูแล ${result.admin.name} แล้ว — `, `Created admin ${result.admin.name} — `) + mail.text });
       }
@@ -163,10 +174,41 @@ function StaffFormModal({
             <input id="sf-phone" type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="0812345678" className={inputClass('phone')} />
             {fieldError('phone')}
           </div>
-          <div>
-            <span className="text-xs font-bold text-slate-500 uppercase">{t('สิทธิ์ในระบบ', 'Role')}</span>
-            <p className="mt-1 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5">Admin</p>
-            <p className="text-[11px] text-slate-500 mt-1">{t('บัญชีที่สร้างที่นี่เป็น Admin เสมอ — ผู้ดูแลระบบสูงสุดสร้างผ่านช่องทางอื่น', 'Accounts created here are always plain Admins. Super Admins are set up outside the panel.')}</p>
+          <div role="radiogroup" aria-labelledby="sf-role-label">
+            <span id="sf-role-label" className="text-xs font-bold text-slate-500 uppercase">{t('สิทธิ์ในระบบ', 'Role')}</span>
+            <div className="mt-1 space-y-2">
+              {ADMIN_PERMISSIONS.map(option => {
+                const selected = permission === option;
+                return (
+                  <label
+                    key={option}
+                    className={`flex items-start gap-3 rounded-xl border px-3 py-2.5 cursor-pointer transition-colors ${
+                      selected ? 'border-sky-400 bg-sky-50' : 'border-slate-200 hover:border-sky-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="sf-role"
+                      value={option}
+                      checked={selected}
+                      onChange={() => setPermission(option)}
+                      className="mt-1 accent-sky-600"
+                    />
+                    <span>
+                      <span className="block text-sm font-bold text-slate-900">{ADMIN_ROLE_LABEL[option][lang === 'en' ? 'en' : 'th']}</span>
+                      <span className="block text-[11px] text-slate-500">{ADMIN_ROLE_LABEL[option][lang === 'en' ? 'descriptionEn' : 'descriptionTh']}</span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+            {fieldError('permission')}
+            <p className="text-[11px] text-slate-500 mt-1">
+              {t(
+                'บัญชีที่สร้างที่นี่เป็น Admin เสมอ และเห็นเฉพาะเมนูตามสิทธิ์ที่เลือก — ผู้ดูแลระบบสูงสุดสร้างผ่านช่องทางอื่น',
+                'Accounts created here are always plain Admins and only see the menus their role covers. Super Admins are set up outside the panel.'
+              )}
+            </p>
           </div>
         </div>
 
@@ -456,10 +498,14 @@ export default function AdminUsersPage() {
                       <td className="p-4">
                         <span
                           className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border whitespace-nowrap ${
-                            staff.role === 'superadmin' ? 'bg-violet-50 text-violet-700 border-violet-100' : 'bg-sky-50 text-sky-700 border-sky-100'
+                            staff.role === 'superadmin'
+                              ? 'bg-violet-50 text-violet-700 border-violet-100'
+                              : staff.permission
+                                ? 'bg-sky-50 text-sky-700 border-sky-100'
+                                : 'bg-amber-50 text-amber-800 border-amber-200'
                           }`}
                         >
-                          {staff.role === 'superadmin' ? 'Super Admin' : 'Admin'}
+                          {staff.role === 'superadmin' ? 'Super Admin' : adminRoleName(staff.permission, lang === 'en' ? 'en' : 'th')}
                         </span>
                       </td>
                       <td className="p-4">

@@ -361,7 +361,9 @@ async function main(): Promise<void> {
         email: `${role}${Math.random().toString(36).slice(2)}@x.co.th`,
         passwordHash: 'SecurePass123',
         name: `Test ${role}`,
-        role
+        role,
+        // the admins here run polls: a Poll Admin is enough (the role split is covered by check:admin-permissions)
+        permissions: role === 'admin' ? ['poll:manage'] : []
       });
       const { raw, tokenHash } = issueSessionToken();
       await Session.create({ accountId: account._id, tokenHash, expiresAt: new Date(Date.now() + SESSION_TTL_MS) });

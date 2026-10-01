@@ -52,7 +52,8 @@ async function main(): Promise<void> {
       name: `Test ${role}`,
       type: 'individual',
       status,
-      role
+      role,
+      permissions: role === 'admin' ? ['poll&tag:manage'] : []
     });
   }
 
@@ -153,7 +154,8 @@ async function main(): Promise<void> {
     name: 'Second admin',
     type: 'individual',
     status: 'active',
-    role: 'admin'
+    role: 'admin',
+    permissions: ['poll&tag:manage']
   });
   const secondCookie = await loginCookie('second-admin@example.com');
   record((await call('GET', '/admin/ingestion/runs', secondCookie)).status === 200, 'second admin works before suspension');
@@ -172,7 +174,8 @@ async function main(): Promise<void> {
     name: 'Third admin',
     type: 'individual',
     status: 'active',
-    role: 'admin'
+    role: 'admin',
+    permissions: ['poll&tag:manage']
   });
   const thirdCookie = await loginCookie('third-admin@example.com');
   await Account.updateOne({ _id: thirdAdmin._id }, { role: 'user' });

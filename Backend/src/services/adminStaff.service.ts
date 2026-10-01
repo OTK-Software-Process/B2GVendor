@@ -1,6 +1,6 @@
 import { randomBytes } from 'crypto';
 import { Types } from 'mongoose';
-import { Account, AccountRole, IAccount } from '../models/account.model';
+import { Account, AccountRole, IAccount, Permission, adminPermissionProfile } from '../models/account.model';
 import { Session } from '../models/session.model';
 import { AppError } from '../utils/AppError';
 import { deleteAccountAndData, SetupEmailResult, sendPasswordLink } from './adminAccount.service';
@@ -22,6 +22,14 @@ export interface StaffView {
   email: string;
   phone?: string;
   role: 'admin' | 'superadmin';
+  /**
+   * Which of the three Admin roles this Admin holds: 'poll:manage' (Poll Admin),
+   * 'tag:manage' (Tag Admin) or 'poll&tag:manage' (Poll and Tag Admin). null
+   * for a Super Admin (needs none) and for an Admin nobody has assigned a role
+   * yet (created before roles were split) -- that Admin can open only the
+   * dashboard and vendor accounts until a Super Admin picks one.
+   */
+  permission: Permission | null;
   status: 'active' | 'suspended';
   createdAt: Date;
   updatedAt: Date;
@@ -54,6 +62,7 @@ function toStaffView(account: IAccount, lastActiveAt: Date | null, activeSession
     email: account.email,
     phone: account.phone,
     role,
+    permission: role === 'admin' ? adminPermissionProfile(account.permissions ?? []) : null,
     status: account.status,
     createdAt: account.createdAt,
     updatedAt: account.updatedAt,
@@ -168,6 +177,7 @@ export async function createAdmin(input: CreateAdminInput): Promise<{ admin: Sta
     type: 'individual',
     passwordHash: randomBytes(32).toString('hex'),
     role: 'admin',
+    permissions: [input.permission],
     status: 'active'
   });
 
@@ -179,6 +189,9 @@ export async function updateAdmin(id: string, input: UpdateAdminInput): Promise<
   const account = await findManageableAdmin(id);
   if (input.name !== undefined) account.name = input.name;
   if (input.phone !== undefined) account.phone = input.phone ?? undefined;
+  // Takes effect on the admin's very next request: permissions are read from
+  // the account on every call, not baked into the session.
+  if (input.permission !== undefined) account.permissions = [input.permission];
   await account.save();
   return viewOf(account);
 }

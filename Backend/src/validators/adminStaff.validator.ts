@@ -1,5 +1,12 @@
 import { z } from 'zod';
+import { PERMISSIONS } from '../models/account.model';
 import { nameSchema, phoneSchema } from './adminAccount.validator';
+
+// What an Admin is allowed to do -- the same three role names the rest of the
+// admin panel is gated by (see PERMISSIONS in account.model.ts).
+export const permissionSchema = z.enum(PERMISSIONS, {
+  errorMap: () => ({ message: 'Choose Poll Admin, Tag Admin or Poll and Tag Admin' })
+});
 
 export const listStaffQuerySchema = z
   .object({
@@ -12,9 +19,10 @@ export const listStaffQuerySchema = z
   })
   .strict();
 
-// The role is NOT accepted: this API only ever creates plain Admins. As with
-// vendors, nobody chooses the new staff member's password -- they are emailed
-// a link to set their own.
+// The account role is NOT accepted: this API only ever creates plain Admins
+// (what they may do is the required `permission`). As with vendors, nobody
+// chooses the new staff member's password -- they are emailed a link to set
+// their own.
 export const createAdminSchema = z
   .object({
     name: nameSchema,
@@ -24,21 +32,24 @@ export const createAdminSchema = z
       .toLowerCase()
       .regex(/^\S+$/, 'Email cannot contain spaces')
       .email('Invalid email address'),
-    phone: phoneSchema.optional()
+    phone: phoneSchema.optional(),
+    permission: permissionSchema
   })
   .strict();
 
 export type CreateAdminInput = z.infer<typeof createAdminSchema>;
 
-// Email and role are identity/privilege: they cannot be changed here.
-// `phone: null` clears the phone number.
+// Email and the account role are identity/privilege: they cannot be changed
+// here (what the Admin may do, `permission`, can). `phone: null` clears the
+// phone number.
 export const updateAdminSchema = z
   .object({
     name: nameSchema.optional(),
-    phone: phoneSchema.nullable().optional()
+    phone: phoneSchema.nullable().optional(),
+    permission: permissionSchema.optional()
   })
   .strict()
-  .refine(v => v.name !== undefined || v.phone !== undefined, {
+  .refine(v => v.name !== undefined || v.phone !== undefined || v.permission !== undefined, {
     message: 'Nothing to update',
     path: ['name']
   });

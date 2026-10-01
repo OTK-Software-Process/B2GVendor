@@ -12,6 +12,7 @@ import { LoadingSkeleton } from '@/components/LoadingSkeleton';
 import { ErrorRetry } from '@/components/ErrorRetry';
 import { useApp } from '@/context/AppContext';
 import { fetchWorkById, toWorkItem } from '@/lib/backend';
+import { canManageTags } from '@/lib/adminAccess';
 import { WorkItem } from '@/lib/mock-data';
 import {
   FileText,
@@ -25,7 +26,7 @@ import {
 export default function WorkDetailPage() {
   const params = useParams();
   const { id } = params;
-  const { lang, role } = useApp();
+  const { lang, role, account } = useApp();
 
   const [work, setWork] = useState<WorkItem | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -87,7 +88,7 @@ export default function WorkDetailPage() {
             <span>{lang === 'en' ? 'Back to Search Results' : 'กลับสู่รายการค้นหา'}</span>
           </Link>
 
-          {(role === 'admin' || role === 'superadmin') && (
+          {canManageTags(role, account?.permissions) && (
             <Link
               href={`/admin/works/${work.id}/tags`}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl bg-sky-50 text-sky-700 hover:bg-sky-100 transition-colors"

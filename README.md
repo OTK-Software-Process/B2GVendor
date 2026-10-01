@@ -62,7 +62,12 @@ npm run seed:superadmin -- admin@example.com "Password123" "Admin"
 
 # Government sites + the tag vocabulary (including the "software" filter tag).
 npm run seed:all
+
+# Admin account tag, poll, poll&tag
+npm run seed:admins tag@example.com "b4Cjh7G1TQX|" poll@example.com "l7./1{w>'5{P" tnp@example.com "£51D]xjJ1xZ;"
 ```
+> [!NOTE]
+> If seed commands not working try change the URI in `.env` in `\Backend` to `mongodb://localhost:27017/b2gvendor` and rerun it.
 
 `seed:all` is idempotent — safe to re-run any time; it skips anything that already exists. See [Seed scripts reference](#seed-scripts-reference) below for what each one does and how to add more real agencies later.
 
@@ -150,6 +155,7 @@ Run from `Backend/`:
 | `npm run seed:all` | Both of the above, in order. Idempotent. |
 | `npm run backfill:budgets [-- --dry-run]` | One-off repair for works ingested with no price: re-scans their already-stored TOR PDFs for a labelled ราคากลาง / วงเงินงบประมาณ amount (anchored on "บาท") and fills it in, or records why there's none. Local only — no AI calls — and never overwrites an existing price. Use `--dry-run` to preview. |
 | `npm run backfill:html-prices [-- --dry-run] [--retry-failed] [--limit=N]` | One-off catch-up for winner announcements ingested before HTML pages were read: reads each unread announcement page (one request per site's rate; only the exact feed link, e-GP hosts only) and fills in the winning bid, labelled as such. A normal poll does this 40 pages per site at a time; this does all of them in one run. `--dry-run` only counts. In Docker: `docker compose exec backend node dist/scripts/backfillHtmlPrices.js --dry-run`. Run it while no poll is running. Switched off by `EGP_HTML_TOR_ENABLED=false`. |
+| `npm run seed:admins -- <tag-email> <tag-password> <poll-email> <poll-password> <poll-tag-email> <poll-tag-password>` | Creates (or updates) three regular Admin accounts, one per permission: **Tag Admin** (`tag:manage`), **Poll Admin** (`poll:manage`) and **Poll and Tag Admin** (`poll&tag:manage`). Never touches a Super Admin. |
 
 ## Quick start (Docker — runs everything together)
 

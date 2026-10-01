@@ -7,12 +7,12 @@ import { Lock } from 'lucide-react';
 import { AdminSidebar } from '@/components/AdminSidebar';
 import { PollStatusBanner } from '@/components/PollStatusBanner';
 import { useApp } from '@/context/AppContext';
-import { canAccessAdminPath, isAdminRole } from '@/lib/adminAccess';
+import { adminAreaFor, adminRoleName, canAccessAdminPath, isAdminRole, permissionProfile } from '@/lib/adminAccess';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { role, authChecked, lang } = useApp();
+  const { role, account, authChecked, lang } = useApp();
   const isVisitor = role === 'visitor';
 
   // Nobody signed in (or the session expired): send them to login and bring
@@ -31,10 +31,13 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     );
   }
 
-  // Signed in, but not allowed here: a vendor account, or an Admin opening a
-  // Super-Admin-only page.
-  if (!canAccessAdminPath(role, pathname)) {
+  // Signed in, but not allowed here: a vendor account, an Admin opening a
+  // Super-Admin-only page, or an Admin whose role (Poll Admin / Tag Admin)
+  // doesn't cover this area.
+  if (!canAccessAdminPath(role, pathname, account?.permissions)) {
     const needsSuperAdmin = isAdminRole(role);
+    const area = adminAreaFor(pathname);
+    const myRole = adminRoleName(permissionProfile(account?.permissions), lang === 'en' ? 'en' : 'th');
     return (
       <div className="min-h-screen flex items-center justify-center bg-white px-4">
         <div className="max-w-md w-full text-center space-y-4 border border-slate-200 rounded-3xl p-10">
@@ -45,13 +48,21 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             {lang === 'en' ? 'Access denied' : 'ไม่มีสิทธิ์เข้าถึง'}
           </h1>
           <p className="text-sm text-slate-500">
-            {needsSuperAdmin
+            {!needsSuperAdmin
               ? lang === 'en'
-                ? 'This page is restricted to Super Admins.'
-                : 'หน้านี้สงวนไว้สำหรับผู้ดูแลระบบสูงสุดเท่านั้น'
-              : lang === 'en'
                 ? 'Your account does not have admin access.'
-                : 'บัญชีของคุณไม่มีสิทธิ์เข้าใช้งานส่วนผู้ดูแลระบบ'}
+                : 'บัญชีของคุณไม่มีสิทธิ์เข้าใช้งานส่วนผู้ดูแลระบบ'
+              : area === 'poll'
+                ? lang === 'en'
+                  ? `This page is for Poll Admins (Poll Now, schedule, run history). Your role: ${myRole}.`
+                  : `หน้านี้สำหรับผู้ดูแลการดึงข้อมูล (Poll Now ตารางเวลา ประวัติการดึงข้อมูล) สิทธิ์ของคุณ: ${myRole}`
+                : area === 'tag'
+                  ? lang === 'en'
+                    ? `This page is for Tag Admins (tag vocabulary and the tags on works). Your role: ${myRole}.`
+                    : `หน้านี้สำหรับผู้ดูแลแท็ก (คลังแท็กและแท็กในโครงการ) สิทธิ์ของคุณ: ${myRole}`
+                  : lang === 'en'
+                    ? 'This page is restricted to Super Admins.'
+                    : 'หน้านี้สงวนไว้สำหรับผู้ดูแลระบบสูงสุดเท่านั้น'}
           </p>
           <Link
             href={needsSuperAdmin ? '/admin' : '/'}

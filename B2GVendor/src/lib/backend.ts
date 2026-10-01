@@ -828,6 +828,11 @@ export interface BackendStaff {
   email: string;
   phone?: string;
   role: BackendStaffRole;
+  /**
+   * Which of the three Admin roles an Admin holds. null for a Super Admin, and
+   * for an Admin nobody has assigned a role yet (created before roles were split).
+   */
+  permission: 'poll:manage' | 'tag:manage' | 'poll&tag:manage' | null;
   status: BackendAccountStatus;
   createdAt: string;
   updatedAt: string;
@@ -863,11 +868,15 @@ export function createAdminAccount(input: {
   name: string;
   email: string;
   phone?: string;
+  permission: 'poll:manage' | 'tag:manage' | 'poll&tag:manage';
 }): Promise<{ admin: BackendStaff; setupEmail: BackendSetupEmailResult }> {
   return api.post('/admin/staff', input);
 }
 
-export function updateAdminAccount(id: string, input: { name?: string; phone?: string | null }): Promise<BackendStaff> {
+export function updateAdminAccount(
+  id: string,
+  input: { name?: string; phone?: string | null; permission?: 'poll:manage' | 'tag:manage' | 'poll&tag:manage' }
+): Promise<BackendStaff> {
   return api.patch<BackendStaff>(`/admin/staff/${encodeURIComponent(id)}`, input);
 }
 

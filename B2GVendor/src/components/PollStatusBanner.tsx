@@ -3,6 +3,7 @@
 import React from 'react';
 import { useApp, AppLang } from '@/context/AppContext';
 import { BackendActivePollJob } from '@/lib/backend';
+import { canManagePolling } from '@/lib/adminAccess';
 import { Loader2, AlertTriangle, X } from 'lucide-react';
 
 function timeOf(iso: string | undefined): string {
@@ -33,8 +34,10 @@ function describeJob(job: BackendActivePollJob, lang: AppLang): string {
 // server, so this is what tells an admin -- on any account, right after a page
 // refresh, from any tab -- that a poll is still working in the background.
 export function PollStatusBanner() {
-  const { lang, isPolling, pollStatus, pollError, clearPollError } = useApp();
+  const { lang, role, account, isPolling, pollStatus, pollError, clearPollError } = useApp();
 
+  // Only the roles that can run polls get this box; a Tag Admin has nothing to do with it.
+  if (!canManagePolling(role, account?.permissions)) return null;
   if (!isPolling && !pollError) return null;
 
   return (

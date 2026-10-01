@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import * as tagController from '../controllers/tag.controller';
 import { validate } from '../middlewares/validate.middleware';
+import { requireTagAccess } from '../middlewares/requirePermission';
 import {
   checkDuplicatesSchema,
   createTagSchema,
@@ -20,7 +21,13 @@ tagRouter.get('/', validate(listTagsQuerySchema, 'query'), asyncHandler(tagContr
 // Admin-only -- mounted under /admin (requireAuth + requireAdmin applied
 // there). No merge endpoint by design (FR-N3.4): duplicates are retired, not
 // merged.
+//
+// Managing the tag vocabulary belongs to the Tag Admin and Poll-and-Tag Admin
+// roles (Super Admin always passes). The check runs BEFORE any handler: a
+// requirePermission placed after the handler would never stop anything.
 export const adminTagRouter = Router();
+adminTagRouter.use(requireTagAccess);
+
 adminTagRouter.get('/', validate(listAdminTagsQuerySchema, 'query'), asyncHandler(tagController.listAdmin));
 adminTagRouter.post('/check-duplicates', validate(checkDuplicatesSchema), asyncHandler(tagController.checkDuplicates));
 adminTagRouter.post('/', validate(createTagSchema), asyncHandler(tagController.create));

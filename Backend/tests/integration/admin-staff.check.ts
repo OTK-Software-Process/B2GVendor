@@ -104,7 +104,7 @@ async function main(): Promise<void> {
   const endpoints: [string, string, unknown?][] = [
     ['GET', '/admin/staff'],
     ['GET', `/admin/staff/${aId}`],
-    ['POST', '/admin/staff', { name: 'X', email: 'x@example.com' }],
+    ['POST', '/admin/staff', { permission: 'tag:manage', name: 'X', email: 'x@example.com' }],
     ['PATCH', `/admin/staff/${aId}`, { name: 'Y' }],
     ['PATCH', `/admin/staff/${aId}/suspend`],
     ['PATCH', `/admin/staff/${aId}/reactivate`],
@@ -157,7 +157,7 @@ async function main(): Promise<void> {
 
   // ------------------------------------------------------------------ create
   capturedLogs.length = 0;
-  const created = await call('POST', '/admin/staff', superCookie, { name: 'Napat', email: '  NEW.ADMIN@Example.com ', phone: '0899999999' });
+  const created = await call('POST', '/admin/staff', superCookie, { permission: 'tag:manage', name: 'Napat', email: '  NEW.ADMIN@Example.com ', phone: '0899999999' });
   record(created.status === 201 && created.json.data.admin.email === 'new.admin@example.com', 'super admin creates an admin (email normalised)', String(created.status));
   const newId: string = created.json.data.admin.id;
   const newDb = await Account.findById(newId).select('+passwordHash');
@@ -176,17 +176,17 @@ async function main(): Promise<void> {
   record((await call('GET', '/admin/staff', newCookie)).status === 403, '...but NOT staff-management access (that is Super Admin only)');
   record((await call('GET', '/admin/gov-sites', newCookie)).status !== 500, 'sanity: normal admin routes still work for the new admin');
 
-  const dup = await call('POST', '/admin/staff', superCookie, { name: 'Dup', email: 'ADMIN-A@example.com' });
+  const dup = await call('POST', '/admin/staff', superCookie, { permission: 'tag:manage', name: 'Dup', email: 'ADMIN-A@example.com' });
   record(dup.status === 409 && dup.json.error.code === 'EMAIL_ALREADY_REGISTERED', 'a duplicate email (any case) is rejected with 409');
-  const dupVendor = await call('POST', '/admin/staff', superCookie, { name: 'Dup', email: 'vendor@example.com' });
+  const dupVendor = await call('POST', '/admin/staff', superCookie, { permission: 'tag:manage', name: 'Dup', email: 'vendor@example.com' });
   record(dupVendor.status === 409, 'an email already used by a VENDOR is rejected too (no silent promotion)');
   const before = await Account.countDocuments({});
-  record((await call('POST', '/admin/staff', superCookie, { name: 'Bad', email: 'nope' })).status === 400, 'invalid email is rejected');
-  record((await call('POST', '/admin/staff', superCookie, { name: 'B4d 1', email: 'b1@example.com' })).status === 400, 'a name with digits is rejected');
-  record((await call('POST', '/admin/staff', superCookie, { name: 'Bad', email: 'b2@example.com', phone: '1' })).status === 400, 'a bad phone number is rejected');
-  record((await call('POST', '/admin/staff', superCookie, { name: 'Evil', email: 'b3@example.com', role: 'superadmin' })).status === 400, 'a role field is rejected: no way to create a Super Admin');
-  record((await call('POST', '/admin/staff', superCookie, { name: 'Evil', email: 'b4@example.com', password: 'Password123' })).status === 400, 'a password field is rejected');
-  record((await call('POST', '/admin/staff', superCookie, { name: 'Evil', email: 'b5@example.com', type: 'business' })).status === 400, 'other fields are rejected (strict body)');
+  record((await call('POST', '/admin/staff', superCookie, { permission: 'tag:manage', name: 'Bad', email: 'nope' })).status === 400, 'invalid email is rejected');
+  record((await call('POST', '/admin/staff', superCookie, { permission: 'tag:manage', name: 'B4d 1', email: 'b1@example.com' })).status === 400, 'a name with digits is rejected');
+  record((await call('POST', '/admin/staff', superCookie, { permission: 'tag:manage', name: 'Bad', email: 'b2@example.com', phone: '1' })).status === 400, 'a bad phone number is rejected');
+  record((await call('POST', '/admin/staff', superCookie, { permission: 'tag:manage', name: 'Evil', email: 'b3@example.com', role: 'superadmin' })).status === 400, 'a role field is rejected: no way to create a Super Admin');
+  record((await call('POST', '/admin/staff', superCookie, { permission: 'tag:manage', name: 'Evil', email: 'b4@example.com', password: 'Password123' })).status === 400, 'a password field is rejected');
+  record((await call('POST', '/admin/staff', superCookie, { permission: 'tag:manage', name: 'Evil', email: 'b5@example.com', type: 'business' })).status === 400, 'other fields are rejected (strict body)');
   record((await Account.countDocuments({})) === before, 'none of the invalid requests created an account');
 
   // ------------------------------------------------------------------ update
@@ -281,7 +281,7 @@ async function main(): Promise<void> {
   // ------------------------------------------------------ mail failure is not fatal
   (env as { SMTP_HOST?: string; SMTP_PORT?: number }).SMTP_HOST = '127.0.0.1';
   (env as { SMTP_HOST?: string; SMTP_PORT?: number }).SMTP_PORT = 1; // nothing listens here: connection refused
-  const failMail = await call('POST', '/admin/staff', superCookie, { name: 'Mailfail', email: 'mailfail@example.com' });
+  const failMail = await call('POST', '/admin/staff', superCookie, { permission: 'tag:manage', name: 'Mailfail', email: 'mailfail@example.com' });
   record(
     failMail.status === 201 && failMail.json.data.setupEmail.reason === 'send_failed' && (await Account.findOne({ email: 'mailfail@example.com' })) !== null,
     'if the mail server is unreachable the admin is STILL created and the response says the email failed',

@@ -43,7 +43,7 @@ async function main(): Promise<void> {
   }
 
   async function makeAccount(email: string, role: AccountRole) {
-    return Account.create({ email, passwordHash: PASSWORD, name: email, type: 'individual', status: 'active', role });
+    return Account.create({ email, passwordHash: PASSWORD, name: email, type: 'individual', status: 'active', role, permissions: role === 'admin' ? ['tag:manage'] : [] });
   }
   async function loginCookie(email: string): Promise<string> {
     const res = await call('POST', '/auth/login', undefined, { email, password: PASSWORD });

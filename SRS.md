@@ -189,12 +189,12 @@ The system identifies four primary user classes, plus one non-human actor. The f
 
 - **Admin**
   - *Characteristics:* Portal operations staff responsible for day-to-day data quality.
-  - *Privileges:* Trigger and schedule polling, review run history, manage the tag vocabulary, manage vendor accounts, review the audit log.
-  - *Restrictions:* Cannot add, remove, or repoint which government sites are polled.
+  - *Privileges:* Every Admin can use the dashboard, manage vendor accounts and review the audit log. Beyond that an Admin holds one of three roles, chosen by a Super Admin: **Poll Admin** (trigger and schedule polling, review run history), **Tag Admin** (manage the tag vocabulary and the tags on each work) or **Poll and Tag Admin** (both).
+  - *Restrictions:* Cannot add, remove, or repoint which government sites are polled, and cannot manage other admin accounts. An Admin sees, and may call, only what their role covers — enforced server-side, not only hidden in the UI. An Admin created before roles were split has no role until a Super Admin assigns one.
 
 - **Super Admin (Primary among staff)**
   - *Characteristics:* Senior or trusted operations staff, a tier above Admin.
-  - *Privileges:* Everything an Admin can do, plus **source configuration** — adding a new government site, enabling/disabling one, and setting its poll scope and request-rate limit.
+  - *Privileges:* Everything an Admin can do under any role, plus **source configuration** — adding a new government site, enabling/disabling one, and setting its poll scope and request-rate limit — and **admin account management**: creating Admin accounts, choosing each one's role, suspending or removing them.
   - *Restrictions:* Still bound by a fixed internal concurrency-safety limit that is not exposed as a setting to anyone, including Super Admin.
 
 - **System (Non-human)**

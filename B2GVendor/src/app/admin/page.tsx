@@ -11,6 +11,7 @@ import {
   BackendIngestionRunStatus
 } from '@/lib/backend';
 import { describeInterval } from '@/lib/datetime';
+import { adminRoleName, canManagePolling, canManageTags, permissionProfile } from '@/lib/adminAccess';
 import {
   RefreshCw,
   Activity,
@@ -95,7 +96,14 @@ function StatCard({
 }
 
 export default function AdminDashboardPage() {
-  const { lang, isPolling, triggerPollNow } = useApp();
+  const { lang, isPolling, triggerPollNow, role, account } = useApp();
+  // Each admin sees only the boxes for the work their role covers (the server
+  // refuses the rest anyway): polling for Poll Admins, tags for Tag Admins, both
+  // for Poll and Tag Admins and Super Admins.
+  const canPoll = canManagePolling(role, account?.permissions);
+  const canTag = canManageTags(role, account?.permissions);
+  const isSuper = role === 'superadmin';
+  const myRole = role === 'superadmin' ? 'Super Admin' : adminRoleName(permissionProfile(account?.permissions), lang === 'en' ? 'en' : 'th');
   const [data, setData] = useState<BackendAdminDashboard | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -157,11 +165,15 @@ export default function AdminDashboardPage() {
               'System health snapshot, polling status across all government sites, and key statistics'
             )}
           </p>
-          {data && (
-            <p className="text-[11px] text-slate-400 mt-1">
-              {t('อัปเดตเมื่อ', 'Updated')} {formatDateTime(data.generatedAt, lang)}
-            </p>
-          )}
+          <p className="text-[11px] text-slate-500 mt-1">
+            {t('สิทธิ์ของคุณ', 'Your role')}: <span className="font-bold text-sky-700">{myRole}</span>
+            {data && (
+              <span className="text-slate-400">
+                {' · '}
+                {t('อัปเดตเมื่อ', 'Updated')} {formatDateTime(data.generatedAt, lang)}
+              </span>
+            )}
+          </p>
         </div>
 
         <div className="flex items-center gap-2">
@@ -173,18 +185,20 @@ export default function AdminDashboardPage() {
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             <span>{t('รีเฟรช', 'Refresh')}</span>
           </button>
-          <button
-            onClick={() => triggerPollNow()}
-            disabled={isPolling}
-            className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition-all duration-150 cursor-pointer ${
-              isPolling
-                ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                : 'bg-sky-600 hover:bg-sky-700 text-white'
-            }`}
-          >
-            <RefreshCw className={`w-4 h-4 ${isPolling ? 'animate-spin' : ''}`} />
-            <span>{isPolling ? t('กำลังดึงข้อมูล...', 'Polling In Progress...') : t('สั่ง Poll Now ทันที', 'Poll Now')}</span>
-          </button>
+          {canPoll && (
+            <button
+              onClick={() => triggerPollNow()}
+              disabled={isPolling}
+              className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition-all duration-150 cursor-pointer ${
+                isPolling
+                  ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                  : 'bg-sky-600 hover:bg-sky-700 text-white'
+              }`}
+            >
+              <RefreshCw className={`w-4 h-4 ${isPolling ? 'animate-spin' : ''}`} />
+              <span>{isPolling ? t('กำลังดึงข้อมูล...', 'Polling In Progress...') : t('สั่ง Poll Now ทันที', 'Poll Now')}</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -192,10 +206,20 @@ export default function AdminDashboardPage() {
 
       {!loading && error !== null && !data && <ErrorRetry message={error || undefined} onRetry={load} />}
 
+      {role === 'admin' && !permissionProfile(account?.permissions) && (
+        <p role="status" className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-2xl p-4">
+          {t(
+            'บัญชีของคุณยังไม่ได้รับสิทธิ์ Poll Admin หรือ Tag Admin จึงใช้ได้เฉพาะแดชบอร์ดและบัญชีผู้ค้า — โปรดแจ้งผู้ดูแลระบบสูงสุดให้กำหนดสิทธิ์ที่หน้า "จัดการเจ้าหน้าที่"',
+            'Your account has not been given the Poll Admin or Tag Admin role yet, so you can only use the dashboard and vendor accounts. Ask a Super Admin to set it under Admin Staff.'
+          )}
+        </p>
+      )}
+
       {data && ing && (
         <>
           {/* System Health Snapshot Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(13rem,1fr))] gap-4">
+            {canPoll && (
             <StatCard label={t('สถานะการดึงข้อมูลล่าสุด', 'Last Poll Status')} icon={<Activity className="w-4 h-4 text-emerald-600" />}>
               {lastRun ? (
                 <>
@@ -212,7 +236,9 @@ export default function AdminDashboardPage() {
                 </>
               )}
             </StatCard>
+            )}
 
+            {canPoll && (
             <StatCard label={t('รอบดึงข้อมูลถัดไป', 'Next Scheduled Run')} icon={<Clock className="w-4 h-4 text-sky-600" />}>
               {!ing.scheduleEnabled ? (
                 <p className="text-sm font-bold text-slate-900">{t('หยุดอยู่', 'Paused')}</p>
@@ -231,14 +257,18 @@ export default function AdminDashboardPage() {
                       : t('ยังไม่มีหน่วยงานที่เปิดใช้งาน', 'No department enabled')}
               </p>
             </StatCard>
+            )}
 
+            {canPoll && (
             <StatCard label={t('หน่วยงานภาครัฐที่เชื่อมต่อ', 'Connected Government Sites')} icon={<Landmark className="w-4 h-4 text-sky-600" />}>
               <p className="text-2xl font-extrabold text-slate-900">
                 {data.sites.enabled} <span className="text-xs text-slate-400">/ {data.sites.total}</span>
               </p>
               <p className="text-xs text-slate-400 mt-1">{t('เปิดใช้งาน / ทั้งหมด', 'Enabled / total')}</p>
             </StatCard>
+            )}
 
+            {canTag && (
             <StatCard label={t('คลังคำศัพท์แท็ก', 'Active Tags Taxonomy')} icon={<Tags className="w-4 h-4 text-emerald-600" />}>
               <p className="text-2xl font-extrabold text-slate-900">
                 {data.tags.active} <span className="text-xs text-slate-400">tags</span>
@@ -247,6 +277,7 @@ export default function AdminDashboardPage() {
                 {t(`ปลดระวางแล้ว ${data.tags.retired} แท็ก`, `${data.tags.retired} retired`)}
               </p>
             </StatCard>
+            )}
 
             <StatCard label={t('บัญชีผู้ค้าที่ใช้งานอยู่', 'Active Vendor Accounts')} icon={<Users className="w-4 h-4 text-sky-600" />}>
               <p className="text-2xl font-extrabold text-slate-900">
@@ -259,7 +290,8 @@ export default function AdminDashboardPage() {
           </div>
 
           {/* Secondary stats */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(13rem,1fr))] gap-4">
+            {isSuper && (
             <StatCard label={t('เจ้าหน้าที่ผู้ดูแลระบบ', 'Admin Staff')} icon={<ShieldCheck className="w-4 h-4 text-sky-600" />}>
               <p className="text-2xl font-extrabold text-slate-900">{data.accounts.admins.total}</p>
               <p className="text-xs text-slate-400 mt-1">
@@ -269,6 +301,7 @@ export default function AdminDashboardPage() {
                 )}
               </p>
             </StatCard>
+            )}
 
             <StatCard label={t('โครงการที่รวบรวมได้', 'Ingested Works')} icon={<FileText className="w-4 h-4 text-emerald-600" />}>
               <p className="text-2xl font-extrabold text-slate-900">{data.works.visible}</p>
@@ -282,6 +315,7 @@ export default function AdminDashboardPage() {
               </p>
             </StatCard>
 
+            {canPoll && (
             <StatCard label={t('รอบที่ล้มเหลว (24 ชม.)', 'Failed Runs (24h)')} icon={<AlertTriangle className="w-4 h-4 text-amber-600" />}>
               <p className={`text-2xl font-extrabold ${ing.failedRuns24h > 0 ? 'text-rose-700' : 'text-slate-900'}`}>
                 {ing.failedRuns24h}
@@ -292,8 +326,11 @@ export default function AdminDashboardPage() {
                   : t('ไม่พบความผิดปกติ', 'No failures')}
               </p>
             </StatCard>
+            )}
           </div>
 
+          {canPoll && (
+            <>
           {/* Latest poll result per government site */}
           <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
             <h3 className="font-bold text-slate-900 text-base flex items-center justify-between border-b border-slate-100 pb-3">
@@ -356,8 +393,12 @@ export default function AdminDashboardPage() {
             )}
           </div>
 
+            </>
+          )}
+
           {/* Quick Admin Actions Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {canPoll && (
             <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
               <h3 className="font-bold text-slate-900 text-base flex items-center justify-between border-b border-slate-100 pb-3">
                 <span>{t('ระบบจัดการการดึงข้อมูล', 'Ingestion Controls')}</span>
@@ -381,7 +422,9 @@ export default function AdminDashboardPage() {
                 </Link>
               </div>
             </div>
+            )}
 
+            {canTag && (
             <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
               <h3 className="font-bold text-slate-900 text-base flex items-center justify-between border-b border-slate-100 pb-3">
                 <span>{t('จัดการคำศัพท์แท็ก', 'Tag Vocabulary')}</span>
@@ -405,6 +448,7 @@ export default function AdminDashboardPage() {
                 </Link>
               </div>
             </div>
+            )}
           </div>
         </>
       )}

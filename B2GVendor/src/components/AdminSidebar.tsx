@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
-import { canAccessAdminPath } from '@/lib/adminAccess';
+import { adminRoleName, canAccessAdminPath, canManagePolling, permissionProfile } from '@/lib/adminAccess';
 import {
   LayoutDashboard,
   RefreshCw,
@@ -22,8 +22,9 @@ import {
 
 export function AdminSidebar() {
   const pathname = usePathname();
-  const { lang, role, isPolling, triggerPollNow } = useApp();
+  const { lang, role, account, isPolling, triggerPollNow } = useApp();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const canPoll = canManagePolling(role, account?.permissions);
 
   const navGroups = [
     {
@@ -62,8 +63,9 @@ export function AdminSidebar() {
     }
   ]
     // Same policy the route guard uses (lib/adminAccess.ts), so a link is shown
-    // only if the page behind it is actually reachable for this role.
-    .map(group => ({ ...group, items: group.items.filter(item => canAccessAdminPath(role, item.href)) }))
+    // only if the page behind it is actually reachable for this role -- a Tag
+    // Admin never sees the polling pages, a Poll Admin never sees the tag pages.
+    .map(group => ({ ...group, items: group.items.filter(item => canAccessAdminPath(role, item.href, account?.permissions)) }))
     .filter(group => group.items.length > 0);
 
   const sidebarInner = (
@@ -86,7 +88,7 @@ export function AdminSidebar() {
       </div>
 
       {/* Quick Poll Trigger */}
-      <div className="p-4 border-b border-slate-100">
+      {canPoll && <div className="p-4 border-b border-slate-100">
         <button
           onClick={() => triggerPollNow()}
           disabled={isPolling}
@@ -99,7 +101,7 @@ export function AdminSidebar() {
           <RefreshCw className={`w-3.5 h-3.5 ${isPolling ? 'animate-spin' : ''}`} />
           <span>{isPolling ? (lang === 'en' ? 'Polling sites...' : 'กำลังดึงข้อมูล...') : (lang === 'en' ? 'Poll Now' : 'สั่ง Poll Now ทันที')}</span>
         </button>
-      </div>
+      </div>}
 
       {/* Navigation Groups */}
       <div className="flex-1 overflow-y-auto p-4 space-y-6 text-xs">
@@ -139,7 +141,7 @@ export function AdminSidebar() {
         <p>B2G Vendor Admin Shell v2.0</p>
         <p>
           {lang === 'en' ? 'Role Access: ' : 'สิทธิ์การใช้งาน: '}
-          {role === 'superadmin' ? 'Super Admin' : 'Admin'}
+          {role === 'superadmin' ? 'Super Admin' : adminRoleName(permissionProfile(account?.permissions), lang === 'en' ? 'en' : 'th')}
         </p>
       </div>
     </>
