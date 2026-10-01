@@ -132,6 +132,12 @@ async function main(): Promise<void> {
   const detail = await getWorkById(String((await Work.findOne({ projectId: '91000001' }))?._id));
   record(!exposes(detail), 'public work detail never exposes excludedTags');
 
+  // the dashboard's work count is the number the search page shows (works the topic filter hid are counted apart)
+  await legacyWork('91000005', { ingestionRelevance: 'not-related', torFiles: [] });
+  const listed = (await listWorks({ pageSize: 50 })).total;
+  const counts = (await getAdminDashboard()).works;
+  record(counts.visible === listed && counts.hidden === 1 && counts.total === listed + 1, 'dashboard works: "visible" equals the search page total; hidden ones are counted apart', `search ${listed}, dashboard ${JSON.stringify(counts)}`);
+
   // ===================================================================== C. dashboard follows the ingestion schedule rules
   const adminId = new mongoose.Types.ObjectId();
   const monthAhead = new Date(Date.now() + 30 * 24 * 3600 * 1000);

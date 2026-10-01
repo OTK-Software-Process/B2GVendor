@@ -5,6 +5,7 @@ import { GovSite } from '../../src/models/govSite.model';
 import { IngestionRun } from '../../src/models/ingestionRun.model';
 import { PollJob } from '../../src/models/pollJob.model';
 import { Tag } from '../../src/models/tag.model';
+import { Work } from '../../src/models/work.model';
 import { SESSION_COOKIE_NAME } from '../../src/config/cookie';
 
 // Uses its own throwaway database (dropped at the start and end) -- never
@@ -109,6 +110,19 @@ async function main(): Promise<void> {
   // Disabled site with the EARLIEST nextPollAt -- must not be reported as "next run".
   const siteC = await GovSite.create({ name: 'Site C', shortCode: 'CCC', deptId: '3', enabled: false, nextPollAt: earlier });
 
+  // Two works the public site lists (one explicitly 'shown', one never evaluated) and one the
+  // topic filter hid ('not-related') -- the search page would say 2, never 3.
+  const mkWork = (projectId: string, over: Record<string, unknown> = {}) => ({
+    siteId: siteA._id,
+    projectId,
+    title: `work ${projectId}`,
+    status: 'BIDDING',
+    announceType: 'D0',
+    statusHistory: [{ status: 'BIDDING', announceType: 'D0', changedAt: new Date() }],
+    ...over
+  });
+  await Work.insertMany([mkWork('W1', { ingestionRelevance: 'shown' }), mkWork('W2'), mkWork('W3', { ingestionRelevance: 'not-related' })]);
+
   const mkRun = (siteId: unknown, minutesAgo: number, status: string, extra: Record<string, unknown> = {}) => ({
     siteId,
     source: 'rss',
@@ -149,6 +163,11 @@ async function main(): Promise<void> {
     JSON.stringify(d.tags.byFacet)
   );
   record(d.sites.total === 3 && d.sites.enabled === 2, 'sites: 3 total / 2 enabled', JSON.stringify(d.sites));
+  record(
+    d.works.visible === 2 && d.works.hidden === 1 && d.works.total === 3,
+    'works: visible matches what the public search lists, hidden (not-related) is counted apart, total = both',
+    JSON.stringify(d.works)
+  );
   record(d.ingestion.lastRun?.site?.shortCode === 'BBB' && d.ingestion.lastRun?.status === 'failed', 'lastRun is the most recent run (Site B, failed)', JSON.stringify(d.ingestion.lastRun));
   record(d.ingestion.failedRuns24h === 1, 'failedRuns24h counts only runs from the last 24h', String(d.ingestion.failedRuns24h));
   record(d.ingestion.runningNow === 1, 'runningNow counts running runs', String(d.ingestion.runningNow));

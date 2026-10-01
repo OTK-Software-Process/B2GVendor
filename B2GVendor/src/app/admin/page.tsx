@@ -271,8 +271,15 @@ export default function AdminDashboardPage() {
             </StatCard>
 
             <StatCard label={t('โครงการที่รวบรวมได้', 'Ingested Works')} icon={<FileText className="w-4 h-4 text-emerald-600" />}>
-              <p className="text-2xl font-extrabold text-slate-900">{data.works.total}</p>
-              <p className="text-xs text-slate-400 mt-1">{t('โครงการทั้งหมดในระบบ', 'Total works in the system')}</p>
+              <p className="text-2xl font-extrabold text-slate-900">{data.works.visible}</p>
+              <p className="text-xs text-slate-400 mt-1">
+                {data.works.hidden > 0
+                  ? t(
+                      `แสดงบนเว็บไซต์ · ซ่อนไว้ ${data.works.hidden} (ไม่ตรงหัวข้อที่กรอง) · รวม ${data.works.total}`,
+                      `Shown on the site · ${data.works.hidden} hidden (off-topic) · ${data.works.total} in total`
+                    )
+                  : t('โครงการทั้งหมดที่แสดงบนเว็บไซต์', 'Works shown on the site')}
+              </p>
             </StatCard>
 
             <StatCard label={t('รอบที่ล้มเหลว (24 ชม.)', 'Failed Runs (24h)')} icon={<AlertTriangle className="w-4 h-4 text-amber-600" />}>

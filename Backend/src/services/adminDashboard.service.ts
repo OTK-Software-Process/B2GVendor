@@ -35,7 +35,9 @@ export interface AdminDashboard {
   };
   tags: { active: number; retired: number; byFacet: Record<TagFacet, number> };
   sites: { total: number; enabled: number };
-  works: { total: number };
+  // `visible` is what the public search lists; `hidden` are works the topic
+  // filter marked 'not-related' (kept, but never shown). total = visible + hidden.
+  works: { total: number; visible: number; hidden: number };
   ingestion: {
     lastRun: (DashboardRunSummary & { site: { id: string; name: string; shortCode: string } }) | null;
     failedRuns24h: number;
@@ -80,7 +82,8 @@ export async function getAdminDashboard(): Promise<AdminDashboard> {
     tagGroups,
     retiredTagCount,
     sites,
-    workTotal,
+    workVisible,
+    workHidden,
     lastRun,
     latestRunPerSite,
     failedRuns24h,
@@ -97,7 +100,8 @@ export async function getAdminDashboard(): Promise<AdminDashboard> {
     ]),
     Tag.countDocuments({ retired: true }),
     GovSite.find().select('name shortCode enabled').sort({ name: 1 }).lean(),
-    Work.estimatedDocumentCount(),
+    Work.countDocuments({ ingestionRelevance: { $ne: 'not-related' } }),
+    Work.countDocuments({ ingestionRelevance: 'not-related' }),
     IngestionRun.findOne().sort({ startedAt: -1 }).populate('siteId', 'name shortCode'),
     IngestionRun.aggregate<{ _id: Types.ObjectId; run: IIngestionRun }>([
       { $sort: { startedAt: -1 } },
@@ -158,7 +162,7 @@ export async function getAdminDashboard(): Promise<AdminDashboard> {
       byFacet
     },
     sites: { total: sites.length, enabled: enabledSites.length },
-    works: { total: workTotal },
+    works: { total: workVisible + workHidden, visible: workVisible, hidden: workHidden },
     ingestion: {
       lastRun: lastRunSummary,
       failedRuns24h,

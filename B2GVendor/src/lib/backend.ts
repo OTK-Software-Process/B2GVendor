@@ -578,7 +578,7 @@ export interface BackendAdminDashboard {
   };
   tags: { active: number; retired: number; byFacet: Record<BackendTagFacet, number> };
   sites: { total: number; enabled: number };
-  works: { total: number };
+  works: { total: number; visible: number; hidden: number };
   ingestion: {
     lastRun: (BackendDashboardRun & { site: { id: string; name: string; shortCode: string } }) | null;
     failedRuns24h: number;
