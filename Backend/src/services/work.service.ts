@@ -69,6 +69,7 @@ async function listWorksPricedFirst(
         .sort({ budget: 1, _id: 1 })
         .skip(skip)
         .limit(pageSize)
+        .select('-excludedTags')
         .populate(POPULATE_SITE)
         .populate(POPULATE_TAGS))
     );
@@ -81,6 +82,7 @@ async function listWorksPricedFirst(
         .sort(SORTS.date)
         .skip(Math.max(0, skip - pricedTotal))
         .limit(remaining)
+        .select('-excludedTags')
         .populate(POPULATE_SITE)
         .populate(POPULATE_TAGS))
     );
@@ -134,6 +136,7 @@ export async function listWorks(filter: ListWorksFilter = {}): Promise<ListWorks
       .sort(SORTS[filter.sort ?? 'date'])
       .skip((page - 1) * pageSize)
       .limit(pageSize)
+      .select('-excludedTags')
       .populate(POPULATE_SITE)
       .populate(POPULATE_TAGS),
     Work.countDocuments(query)
@@ -144,8 +147,9 @@ export async function listWorks(filter: ListWorksFilter = {}): Promise<ListWorks
 
 export async function getWorkById(id: string): Promise<IWork> {
   const work = await Work.findOne({ _id: id, ingestionRelevance: { $ne: 'not-related' } })
-    .populate('siteId', 'name shortCode')
-    .populate('tags', 'name facet');
+    .select('-excludedTags')
+    .populate(POPULATE_SITE)
+    .populate(POPULATE_TAGS);
   if (!work) throw AppError.notFound('Work not found.');
   return work;
 }

@@ -544,3 +544,349 @@ export function updateNotificationSettings(update: {
 export function setTagPaused(tagId: string, paused: boolean): Promise<void> {
   return api.patch(`/follows/tags/${tagId}/pause`, { paused });
 }
+
+// ---------------------------------------------------------------------------
+// Admin dashboard -- GET /admin/dashboard (Backend/src/services/adminDashboard.service.ts).
+// One read-only snapshot of live counts; nothing on it is editable.
+// ---------------------------------------------------------------------------
+
+export interface BackendDashboardRun {
+  id: string;
+  source: BackendIngestionSource;
+  status: BackendIngestionRunStatus;
+  startedAt: string;
+  finishedAt?: string;
+  fetchedCount: number;
+  newCount: number;
+  updatedCount: number;
+  failedCount: number;
+}
+
+export interface BackendDashboardSiteRow {
+  siteId: string;
+  name: string;
+  shortCode: string;
+  enabled: boolean;
+  lastRun: BackendDashboardRun | null;
+}
+
+export interface BackendAdminDashboard {
+  generatedAt: string;
+  accounts: {
+    vendors: { total: number; active: number; suspended: number };
+    admins: { total: number; admin: number; superadmin: number; suspended: number };
+  };
+  tags: { active: number; retired: number; byFacet: Record<BackendTagFacet, number> };
+  sites: { total: number; enabled: number };
+  works: { total: number };
+  ingestion: {
+    lastRun: (BackendDashboardRun & { site: { id: string; name: string; shortCode: string } }) | null;
+    failedRuns24h: number;
+    runningNow: number;
+    queuedJobs: number;
+    nextScheduledAt: string | null;
+    scheduleEnabled: boolean;
+    pollIntervalMinutes: number;
+    sites: BackendDashboardSiteRow[];
+  };
+}
+
+export function fetchAdminDashboard(): Promise<BackendAdminDashboard> {
+  return api.get<BackendAdminDashboard>('/admin/dashboard');
+}
+
+// ---------------------------------------------------------------------------
+// Admin tag management -- /admin/tags (Backend/src/services/tag.service.ts).
+// Duplicate handling is governance, not merging: a redundant tag is retired.
+// ---------------------------------------------------------------------------
+
+export interface BackendAdminTag {
+  _id: string;
+  name: string;
+  facet: BackendTagFacet;
+  aliases: string[];
+  siteId?: string;
+  retired: boolean;
+  includeInIngestionFilter: boolean;
+  worksCount: number;
+  followerCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BackendTagMatch {
+  tagId: string;
+  name: string;
+  facet: BackendTagFacet;
+  retired: boolean;
+  candidateTerm: string;
+  existingTerm: string;
+  similarity: number;
+}
+
+export interface BackendTagConflicts {
+  exact: BackendTagMatch[];
+  similar: BackendTagMatch[];
+}
+
+export function fetchAdminTags(
+  params: { facet?: BackendTagFacet; includeRetired?: boolean; search?: string } = {}
+): Promise<BackendAdminTag[]> {
+  return api.get<BackendAdminTag[]>(`/admin/tags${buildQuery(params)}`);
+}
+
+export function checkTagDuplicates(input: {
+  name: string;
+  aliases?: string[];
+  facet?: BackendTagFacet;
+  excludeId?: string;
+}): Promise<BackendTagConflicts> {
+  return api.post<BackendTagConflicts>('/admin/tags/check-duplicates', input);
+}
+
+export function createAdminTag(input: {
+  name: string;
+  facet: Exclude<BackendTagFacet, 'site'>;
+  aliases?: string[];
+  confirmNearDuplicate?: boolean;
+}): Promise<BackendAdminTag> {
+  return api.post<BackendAdminTag>('/admin/tags', input);
+}
+
+export function updateAdminTag(
+  id: string,
+  input: { name?: string; aliases?: string[]; confirmNearDuplicate?: boolean }
+): Promise<BackendAdminTag> {
+  return api.patch<BackendAdminTag>(`/admin/tags/${id}`, input);
+}
+
+export function retireAdminTag(id: string): Promise<BackendAdminTag> {
+  return api.patch<BackendAdminTag>(`/admin/tags/${id}/retire`);
+}
+
+export function reactivateAdminTag(id: string): Promise<BackendAdminTag> {
+  return api.patch<BackendAdminTag>(`/admin/tags/${id}/reactivate`);
+}
+
+// ---------------------------------------------------------------------------
+// Admin work tag curation -- /admin/works (Backend/src/services/adminWork.service.ts).
+// The only thing an admin edits on a work is which tags it carries; status and
+// every other field stay source-derived.
+// ---------------------------------------------------------------------------
+
+export interface BackendAdminWorkTag {
+  _id: string;
+  name: string;
+  facet: BackendTagFacet;
+  retired?: boolean;
+}
+
+export type BackendIngestionRelevance = 'shown' | 'not-related';
+
+export interface BackendAdminWork {
+  _id: string;
+  siteId: BackendGovSiteRef;
+  projectId: string;
+  title: string;
+  status: BackendWorkStatus;
+  announceType: BackendAnnounceType;
+  pubDate?: string;
+  tags: BackendAdminWorkTag[];
+  /** Tags an admin removed by hand; future polls never re-add them (detail only). */
+  excludedTags?: string[];
+  ingestionRelevance?: BackendIngestionRelevance;
+  updatedAt: string;
+}
+
+export interface BackendAdminWorkList {
+  items: BackendAdminWork[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface BackendAdminWorkDetail {
+  work: BackendAdminWork;
+  ingestionFilter: { active: boolean; inScopeTagIds: string[] };
+}
+
+export interface BackendSetWorkTagsResult {
+  work: BackendAdminWork;
+  added: { id: string; name: string }[];
+  removed: { id: string; name: string }[];
+  relevance: { from: BackendIngestionRelevance | null; to: BackendIngestionRelevance | null };
+}
+
+export function fetchAdminWorks(
+  params: { q?: string; siteId?: string; tag?: string; visibility?: 'visible' | 'hidden'; page?: number; pageSize?: number } = {}
+): Promise<BackendAdminWorkList> {
+  return api.get<BackendAdminWorkList>(`/admin/works${buildQuery(params)}`);
+}
+
+export function fetchAdminWork(id: string): Promise<BackendAdminWorkDetail> {
+  return api.get<BackendAdminWorkDetail>(`/admin/works/${encodeURIComponent(id)}`);
+}
+
+export function setAdminWorkTags(id: string, tagIds: string[]): Promise<BackendSetWorkTagsResult> {
+  return api.put<BackendSetWorkTagsResult>(`/admin/works/${encodeURIComponent(id)}/tags`, { tagIds });
+}
+
+// ---------------------------------------------------------------------------
+// Admin vendor accounts -- /admin/accounts (Backend/src/services/adminAccount.service.ts).
+// Only vendor ("user") accounts; staff are managed separately. The admin never
+// sets a vendor's password: creating an account emails the vendor a link.
+// ---------------------------------------------------------------------------
+
+export type BackendAccountStatus = 'active' | 'suspended';
+export type BackendAccountType = 'individual' | 'business';
+
+export interface BackendVendor {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  type: BackendAccountType;
+  businessProfile?: { companyName: string; taxId: string };
+  status: BackendAccountStatus;
+  createdAt: string;
+  updatedAt: string;
+  followedTagsCount: number;
+  lastActiveAt: string | null;
+}
+
+export interface BackendVendorList {
+  items: BackendVendor[];
+  total: number;
+  page: number;
+  pageSize: number;
+  /** Unfiltered totals, independent of search/filters. */
+  summary: { total: number; active: number; suspended: number };
+}
+
+export interface BackendSetupEmailResult {
+  sent: boolean;
+  reason?: 'smtp_not_configured' | 'send_failed';
+}
+
+export function fetchVendors(
+  params: {
+    q?: string;
+    status?: BackendAccountStatus;
+    type?: BackendAccountType;
+    sort?: 'newest' | 'oldest' | 'name';
+    page?: number;
+    pageSize?: number;
+  } = {}
+): Promise<BackendVendorList> {
+  return api.get<BackendVendorList>(`/admin/accounts${buildQuery(params)}`);
+}
+
+export function createVendor(input: {
+  name: string;
+  email: string;
+  phone?: string;
+  type: BackendAccountType;
+  businessProfile?: { companyName: string; taxId: string };
+}): Promise<{ vendor: BackendVendor; setupEmail: BackendSetupEmailResult }> {
+  return api.post('/admin/accounts', input);
+}
+
+export function updateVendor(
+  id: string,
+  input: { name?: string; phone?: string | null; businessProfile?: { companyName: string; taxId: string } }
+): Promise<BackendVendor> {
+  return api.patch<BackendVendor>(`/admin/accounts/${encodeURIComponent(id)}`, input);
+}
+
+export function suspendVendor(id: string): Promise<BackendVendor> {
+  return api.patch<BackendVendor>(`/admin/accounts/${encodeURIComponent(id)}/suspend`);
+}
+
+export function reactivateVendor(id: string): Promise<BackendVendor> {
+  return api.patch<BackendVendor>(`/admin/accounts/${encodeURIComponent(id)}/reactivate`);
+}
+
+export function sendVendorPasswordLink(id: string): Promise<BackendSetupEmailResult> {
+  return api.post<BackendSetupEmailResult>(`/admin/accounts/${encodeURIComponent(id)}/password-link`);
+}
+
+export function deleteVendor(id: string): Promise<{ id: string; email: string }> {
+  return api.del<{ id: string; email: string }>(`/admin/accounts/${encodeURIComponent(id)}`);
+}
+
+// ---------------------------------------------------------------------------
+// Admin (staff) accounts -- /admin/staff (Backend/src/services/adminStaff.service.ts).
+// Super Admin only. Plain Admins can be changed; Super Admins are listed
+// read-only (`manageable: false`).
+// ---------------------------------------------------------------------------
+
+export type BackendStaffRole = 'admin' | 'superadmin';
+
+export interface BackendStaff {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  role: BackendStaffRole;
+  status: BackendAccountStatus;
+  createdAt: string;
+  updatedAt: string;
+  lastActiveAt: string | null;
+  /** Live (not revoked, not expired) sessions: who could act right now. */
+  activeSessions: number;
+  manageable: boolean;
+}
+
+export interface BackendStaffList {
+  items: BackendStaff[];
+  total: number;
+  page: number;
+  pageSize: number;
+  /** Unfiltered totals, independent of search/filters. */
+  summary: { total: number; admins: number; superadmins: number; suspended: number };
+}
+
+export function fetchStaff(
+  params: {
+    q?: string;
+    status?: BackendAccountStatus;
+    role?: BackendStaffRole;
+    sort?: 'newest' | 'oldest' | 'name';
+    page?: number;
+    pageSize?: number;
+  } = {}
+): Promise<BackendStaffList> {
+  return api.get<BackendStaffList>(`/admin/staff${buildQuery(params)}`);
+}
+
+export function createAdminAccount(input: {
+  name: string;
+  email: string;
+  phone?: string;
+}): Promise<{ admin: BackendStaff; setupEmail: BackendSetupEmailResult }> {
+  return api.post('/admin/staff', input);
+}
+
+export function updateAdminAccount(id: string, input: { name?: string; phone?: string | null }): Promise<BackendStaff> {
+  return api.patch<BackendStaff>(`/admin/staff/${encodeURIComponent(id)}`, input);
+}
+
+export function suspendAdminAccount(id: string): Promise<BackendStaff> {
+  return api.patch<BackendStaff>(`/admin/staff/${encodeURIComponent(id)}/suspend`);
+}
+
+export function reactivateAdminAccount(id: string): Promise<BackendStaff> {
+  return api.patch<BackendStaff>(`/admin/staff/${encodeURIComponent(id)}/reactivate`);
+}
+
+export function signOutAdminAccount(id: string): Promise<{ revoked: number }> {
+  return api.post<{ revoked: number }>(`/admin/staff/${encodeURIComponent(id)}/sign-out`);
+}
+
+export function sendAdminPasswordLink(id: string): Promise<BackendSetupEmailResult> {
+  return api.post<BackendSetupEmailResult>(`/admin/staff/${encodeURIComponent(id)}/password-link`);
+}
+
+export function deleteAdminAccount(id: string): Promise<{ id: string; email: string }> {
+  return api.del<{ id: string; email: string }>(`/admin/staff/${encodeURIComponent(id)}`);
+}

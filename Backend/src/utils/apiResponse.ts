@@ -12,6 +12,7 @@ export interface ErrorEnvelope {
     code: ErrorCode;
     message: string;
     fields?: FieldErrors;
+    details?: unknown;
   };
 }
 
@@ -29,9 +30,11 @@ export function fail(
   status: number,
   code: ErrorCode,
   message: string,
-  fields?: FieldErrors
+  fields?: FieldErrors,
+  details?: unknown
 ): Response {
   const body: ErrorEnvelope = { success: false, error: { code, message } };
   if (fields) body.error.fields = fields;
+  if (details !== undefined) body.error.details = details;
   return res.status(status).json(body);
 }

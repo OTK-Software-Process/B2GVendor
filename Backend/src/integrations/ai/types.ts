@@ -4,6 +4,9 @@ export interface TagCandidate {
   id: string;
   name: string;
   facet: 'category' | 'keyword';
+  // Admin-managed synonyms -- shown to the model as hints so "ไอที" still
+  // resolves to the tag an admin filed it under.
+  aliases?: string[];
 }
 
 export interface DocumentAnalysisInput {

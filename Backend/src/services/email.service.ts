@@ -19,6 +19,11 @@ function getTransporter(): Transporter | null {
   return transporter;
 }
 
+/** Whether outgoing mail is actually configured -- when it is not, send() only logs. */
+export function isEmailConfigured(): boolean {
+  return !!env.SMTP_HOST;
+}
+
 interface Mail {
   to: string;
   subject: string;

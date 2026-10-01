@@ -77,7 +77,12 @@ export const SYSTEM_PROMPT = [
 ].join('\n');
 
 export function buildUserPrompt(input: DocumentAnalysisInput, candidates: TagCandidate[]): string {
-  const options = candidates.map(c => `- ${c.id}: ${c.name} (${c.facet})`).join('\n');
+  const options = candidates
+    .map(c => {
+      const aliasHint = c.aliases && c.aliases.length > 0 ? ` -- also known as: ${c.aliases.join(', ')}` : '';
+      return `- ${c.id}: ${c.name} (${c.facet})${aliasHint}`;
+    })
+    .join('\n');
   const hasText = !!input.documentText;
   // Price hints only make sense alongside document text -- with title only,
   // "budget" must stay null (see the system prompt).

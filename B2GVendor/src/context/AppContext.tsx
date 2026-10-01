@@ -1,14 +1,12 @@
 'use client';
 
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { api, ApiError } from '@/lib/api';
+import { api, ApiError, SESSION_INVALID_EVENT } from '@/lib/api';
 import {
-  WorkItem,
   TagItem,
   NotificationItem,
   IngestionRun,
-  GovSiteItem,
-  MOCK_WORKS
+  GovSiteItem
 } from '@/lib/mock-data';
 import {
   fetchGovSites,
@@ -70,7 +68,6 @@ interface AppContextType {
   unreadCount: number;
   markNotificationAsRead: (id: string) => Promise<void>;
   markAllNotificationsAsRead: () => Promise<void>;
-  works: WorkItem[];
   tags: TagItem[];
   ingestionRuns: IngestionRun[];
   refreshIngestionRuns: (filters?: { siteId?: string }) => Promise<void>;
@@ -81,9 +78,9 @@ interface AppContextType {
   pollError: string | null;
   clearPollError: () => void;
   triggerPollNow: (siteId?: string) => Promise<void>;
-  retireTag: (tagId: string) => void;
-  createTag: (name: string, facet: TagItem['facet']) => void;
-  updateWorkTags: (workId: string, tagIds: string[]) => void;
+  // Re-reads the public tag taxonomy -- call after an admin changes tags so
+  // filters and the tag lists elsewhere reflect it without a page reload.
+  refreshTags: () => Promise<void>;
   govSites: GovSiteItem[];
   govSitesStatus: GovSitesStatus;
   refreshGovSites: () => Promise<void>;
@@ -130,7 +127,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [lang, setLang] = useState<AppLang>('th');
   const [followedTagIds, setFollowedTagIds] = useState<string[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
-  const [works, setWorks] = useState<WorkItem[]>(MOCK_WORKS);
   const [tags, setTags] = useState<TagItem[]>([]);
   const [ingestionRuns, setIngestionRuns] = useState<IngestionRun[]>([]);
   const [pollStatus, setPollStatus] = useState<BackendPollStatus>({ isPolling: false, activeJobs: [] });
@@ -277,6 +273,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       cancelled = true;
     };
   }, [isAdminRole]);
+
+  // A request failed because the session expired or the account was
+  // suspended -- clear local auth state so guarded pages redirect to login
+  // instead of sitting on a screen whose every call fails.
+  useEffect(() => {
+    const handleSessionInvalid = () => {
+      setAccount(null);
+      setRole('visitor');
+    };
+    window.addEventListener(SESSION_INVALID_EVENT, handleSessionInvalid);
+    return () => window.removeEventListener(SESSION_INVALID_EVENT, handleSessionInvalid);
+  }, []);
 
   const signOut = async () => {
     try {
@@ -426,27 +434,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     refreshGovSites();
   };
 
-  const retireTag = (tagId: string) => {
-    setTags(prev => prev.map(t => (t.id === tagId ? { ...t, retired: true } : t)));
-  };
-
-  const createTag = (name: string, facet: TagItem['facet']) => {
-    const newTag: TagItem = {
-      id: `tag-${Date.now()}`,
-      name,
-      facet,
-      aliases: [],
-      followerCount: 0,
-      worksCount: 0
-    };
-    setTags(prev => [newTag, ...prev]);
-  };
-
-  const updateWorkTags = (workId: string, tagIds: string[]) => {
-    const newTags = tags.filter(t => tagIds.includes(t.id));
-    setWorks(prev =>
-      prev.map(w => (w.id === workId ? { ...w, tags: newTags } : w))
-    );
+  const refreshTags = async () => {
+    const list = await fetchTags();
+    setTags(list.map(toTagItem));
   };
 
   return (
@@ -467,7 +457,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         unreadCount,
         markNotificationAsRead,
         markAllNotificationsAsRead,
-        works,
         tags,
         ingestionRuns,
         refreshIngestionRuns,
@@ -476,9 +465,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         pollError,
         clearPollError,
         triggerPollNow,
-        retireTag,
-        createTag,
-        updateWorkTags,
+        refreshTags,
         govSites,
         govSitesStatus,
         refreshGovSites,

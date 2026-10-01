@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { PublicShell } from '@/components/PublicShell';
 import { useApp, AccountView } from '@/context/AppContext';
 import { api, ApiError } from '@/lib/api';
+import { safeNextPath } from '@/lib/adminAccess';
 import { Lock, Mail, ArrowRight } from 'lucide-react';
 
 export default function LoginPage() {
@@ -27,7 +28,9 @@ export default function LoginPage() {
     try {
       const account = await api.post<AccountView>('/auth/login', { email, password });
       signIn(account);
-      router.push('/account');
+      // Returning from a guarded page (e.g. /admin) sends the user back there.
+      const next = safeNextPath(new URLSearchParams(window.location.search).get('next'));
+      router.push(next ?? '/account');
     } catch (err) {
       if (err instanceof ApiError) {
         setFormError(err.message);
