@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useApp, AppLang } from '@/context/AppContext';
 import { ApiError } from '@/lib/api';
 import { ErrorRetry } from '@/components/ErrorRetry';
+import { initialQueryParam } from '@/lib/auditUi';
 import {
   BackendAdminTag,
   BackendTagConflicts,
@@ -469,7 +470,7 @@ export default function AdminTagsPage() {
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState<number>(0);
 
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(() => initialQueryParam('q'));
   const [facetFilter, setFacetFilter] = useState<BackendTagFacet | 'all'>('all');
   const [showRetired, setShowRetired] = useState(false);
 

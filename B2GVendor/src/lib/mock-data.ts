@@ -180,15 +180,6 @@ export interface IngestionRun {
   logs: LogEntry[];
 }
 
-export interface AuditLogEntry {
-  id: string;
-  timestamp: string;
-  actor: string;
-  action: string;
-  target: string;
-  details: string;
-}
-
 
 export const MOCK_STATUS_CONFIG: Record<ProcurementStatus, { label: string; labelEn: string; boxClass: string; dotClass: string }> = {
   INVITATION: {
@@ -632,13 +623,6 @@ export const MOCK_INGESTION_RUNS: IngestionRun[] = [
       { time: '08:04:12', level: 'WARN', message: 'จบการทำงานพร้อมข้อผิดพลาดไม่รุนแรง 2 รายการ จากแหล่งข้อมูล กรมทางหลวง' }
     ]
   }
-];
-
-export const MOCK_AUDIT_LOGS: AuditLogEntry[] = [
-  { id: 'aud-1', timestamp: '2026-08-11 15:30', actor: 'admin@bma.go.th', action: 'TAG_RETIRE', target: 'แท็ก #ปรับปรุงถนนเก่า', details: 'ปลดระวางแท็กที่ไม่ใช้งานแล้ว' },
-  { id: 'aud-2', timestamp: '2026-08-11 10:15', actor: 'system-scheduler', action: 'INGESTION_RUN', target: 'Run #RUN-20260811-0800', details: 'ดึงข้อมูลสำเร็จ 135 รายการ พบงานใหม่ 3 รายการ จาก 6 หน่วยงาน' },
-  { id: 'aud-3', timestamp: '2026-08-10 16:45', actor: 'superadmin@bma.go.th', action: 'SOURCE_CONFIG_UPDATE', target: 'กรมทางหลวง (Department of Highways)', details: 'ปรับ Requests Per Min จาก 60 เป็น 90 req/min' },
-  { id: 'aud-4', timestamp: '2026-08-09 11:05', actor: 'superadmin@bma.go.th', action: 'SITE_ADDED', target: 'สำนักงานส่งเสริมเศรษฐกิจดิจิทัล (depa)', details: 'เพิ่มหน่วยงานใหม่เข้าสู่ระบบ Poll ผ่าน api.data.go.th (ชุดข้อมูล depa-procurement-disclosure)' }
 ];
 
 export interface VendorAccount {

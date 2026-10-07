@@ -939,3 +939,101 @@ export function sendAdminPasswordLink(id: string): Promise<BackendSetupEmailResu
 export function deleteAdminAccount(id: string): Promise<{ id: string; email: string }> {
   return api.del<{ id: string; email: string }>(`/admin/staff/${encodeURIComponent(id)}`);
 }
+
+// ---------------------------------------------------------------------------
+// Audit log -- /admin/audit-log (Backend/src/services/auditLog.service.ts).
+// Read-only. `action` and `entityType` are free strings: nothing here lists
+// them, so a newly audited entity needs no change on this side.
+// ---------------------------------------------------------------------------
+
+export interface BackendAuditChange {
+  /** Dotted path of the field, e.g. "businessProfile.companyName". */
+  path: string;
+  /** Absent when the field did not exist before. */
+  before?: unknown;
+  /** Absent when the field was removed. */
+  after?: unknown;
+  /** True when the real values were replaced by "[REDACTED]". */
+  redacted?: boolean;
+}
+
+export interface BackendAuditActor {
+  type: 'user' | 'system' | 'anonymous';
+  id?: string;
+  email?: string;
+  name?: string;
+  role?: string;
+  label?: string;
+}
+
+export interface BackendAuditEntry {
+  id: string;
+  createdAt: string;
+  action: string;
+  entityType: string;
+  entityId: string;
+  entityLabel?: string;
+  actor: BackendAuditActor;
+  /** Masked (a.b.xx.xx). */
+  ip?: string;
+  userAgent?: string;
+  requestId?: string;
+  request?: { method?: string; path?: string };
+  changeCount: number;
+  changes: BackendAuditChange[];
+  /** True when the list cut `changes` short; fetchAuditEntry() has them all. */
+  changesCutShort: boolean;
+  metadata?: Record<string, unknown>;
+  truncated?: boolean;
+}
+
+export interface BackendAuditList {
+  items: BackendAuditEntry[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface BackendAuditActorOption {
+  /** Pass this as the "actor" filter. */
+  key: string;
+  type: string;
+  email?: string;
+  name?: string;
+  role?: string;
+  label?: string;
+}
+
+export interface BackendAuditFilters {
+  actions: string[];
+  entityTypes: string[];
+  actors: BackendAuditActorOption[];
+}
+
+export interface AuditLogParams {
+  q?: string;
+  actor?: string;
+  action?: string[];
+  entityType?: string[];
+  entityId?: string;
+  from?: string;
+  to?: string;
+  sort?: 'newest' | 'oldest';
+  page?: number;
+  pageSize?: number;
+}
+
+export function fetchAuditLog(params: AuditLogParams = {}): Promise<BackendAuditList> {
+  const { action, entityType, ...rest } = params;
+  return api.get<BackendAuditList>(
+    `/admin/audit-log${buildQuery({ ...rest, action: action?.join(','), entityType: entityType?.join(',') })}`
+  );
+}
+
+export function fetchAuditFilters(): Promise<BackendAuditFilters> {
+  return api.get<BackendAuditFilters>('/admin/audit-log/filters');
+}
+
+export function fetchAuditEntry(id: string): Promise<BackendAuditEntry> {
+  return api.get<BackendAuditEntry>(`/admin/audit-log/${encodeURIComponent(id)}`);
+}

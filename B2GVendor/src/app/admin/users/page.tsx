@@ -5,6 +5,7 @@ import { useApp } from '@/context/AppContext';
 import { ApiError } from '@/lib/api';
 import { ConfirmModal } from '@/components/ConfirmModal';
 import { ErrorRetry } from '@/components/ErrorRetry';
+import { initialQueryParam } from '@/lib/auditUi';
 import { formatDate, setupEmailMessage, Translate } from '@/lib/adminUi';
 import { ADMIN_PERMISSIONS, ADMIN_ROLE_LABEL, AdminPermission, adminRoleName } from '@/lib/adminAccess';
 import {
@@ -283,8 +284,8 @@ export default function AdminUsersPage() {
   const { lang, account } = useApp();
   const t: Translate = (th, en) => (lang === 'en' ? en : th);
 
-  const [searchInput, setSearchInput] = useState('');
-  const [q, setQ] = useState('');
+  const [searchInput, setSearchInput] = useState(() => initialQueryParam('q'));
+  const [q, setQ] = useState(() => initialQueryParam('q'));
   const [role, setRole] = useState<'' | BackendStaffRole>('');
   const [status, setStatus] = useState<'' | BackendAccountStatus>('');
   const [page, setPage] = useState(1);
