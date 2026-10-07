@@ -124,4 +124,22 @@ export function asSystem<T>(label: string, fn: () => T): T {
   return runWithAuditContext({ ...base, getActor: () => ({ type: 'system', label }) }, fn);
 }
 
-export const audit = { log, asSystem };
+/**
+ * Runs `fn` with the AUTOMATIC capture (registry/plugin) switched off, so a
+ * hand-written audit.log() inside it is the only row. For custom actions that
+ * deserve their own name or extra metadata:
+ *
+ *   await audit.withoutAuto(async () => {
+ *     await account.save();
+ *     await audit.log({ action: 'account.suspend', entity: account, ... });
+ *   });
+ */
+export function withoutAuto<T>(fn: () => T): T {
+  const base = getAuditContext();
+  return runWithAuditContext(
+    { ...base, getActor: base?.getActor ?? (() => ({ type: 'system', label: 'system' })), suppressAuto: true },
+    fn
+  );
+}
+
+export const audit = { log, asSystem, withoutAuto };

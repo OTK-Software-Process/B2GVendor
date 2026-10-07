@@ -1,3 +1,5 @@
+// Must stay the FIRST import: the audit plugin only covers models compiled after it.
+import './audit/install';
 import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';

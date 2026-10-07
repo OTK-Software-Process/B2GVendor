@@ -27,6 +27,8 @@ export interface AuditContext {
    * run, which is AFTER this context was created.
    */
   getActor: () => AuditActor | undefined;
+  /** True inside audit.withoutAuto(): the automatic plugin stays quiet so a manual audit.log() is the only row. */
+  suppressAuto?: boolean;
 }
 
 const storage = new AsyncLocalStorage<AuditContext>();

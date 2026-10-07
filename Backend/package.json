@@ -19,6 +19,7 @@
     "check:admin-accounts": "tsx tests/integration/admin-accounts.check.ts",
     "check:admin-staff": "tsx tests/integration/admin-staff.check.ts",
     "check:audit-core": "tsx tests/integration/audit-core.check.ts",
+    "check:audit-plugin": "tsx tests/integration/audit-plugin.check.ts",
     "check:admin-ingestion": "tsx tests/integration/admin-ingestion.check.ts",
     "check:admin-permissions": "tsx tests/integration/admin-permissions.check.ts",
     "check:ingestion": "tsx tests/integration/ingestion-flow.check.ts",

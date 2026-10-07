@@ -1,3 +1,5 @@
+// Must stay the FIRST import: the audit plugin only covers models compiled after it.
+import { verifyAuditSetup } from './audit/install';
 import cron from 'node-cron';
 import { connectDb } from './config/db';
 import { env } from './config/env';
@@ -59,6 +61,7 @@ async function schedulerTick(): Promise<void> {
 
 async function main(): Promise<void> {
   await connectDb();
+  for (const problem of verifyAuditSetup()) logger.error('audit', problem);
   logger.info('worker', 'ingestion-worker started');
 
   setInterval(() => {
