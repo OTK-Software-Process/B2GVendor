@@ -1,5 +1,6 @@
 import mongoose, { Schema, Document, Model, Types } from 'mongoose';
 import { AnnounceType } from './govSite.model';
+import { normalizeThaiSearchText } from '../utils/thaiSearch';
 
 // Status is derived only from the e-GP RSS announce-type signal (FR-N4.4) --
 // data.go.th enrichment never sets this, it has no status field at all.
@@ -82,6 +83,7 @@ export interface IWork extends Document {
   projectId: string; // the e-GP project identifier -- stable key for upsert
 
   title: string;
+  searchText?: string;
   // AI-generated summary of the TOR PDF's actual content (FR-3.2) -- only
   // present when a downloadable PDF was available and text extraction +
   // Vertex AI both succeeded; null/absent otherwise (title-only fallback).
@@ -168,6 +170,7 @@ const WorkSchema = new Schema<IWork>(
     projectId: { type: String, required: true, trim: true },
 
     title: { type: String, required: true, trim: true },
+    searchText: { type: String, select: false },
     description: { type: String, trim: true, maxlength: 2000 },
     status: { type: String, required: true, index: true },
     announceType: { type: String, required: true },
@@ -192,6 +195,10 @@ const WorkSchema = new Schema<IWork>(
   },
   { timestamps: true }
 );
+
+WorkSchema.pre('validate', function updateSearchText() {
+  this.searchText = normalizeThaiSearchText(`${this.title}\n${this.description ?? ''}`);
+});
 
 // Stable upsert key -- FR-N1.4: correlates RSS items and data.go.th
 // enrichment records for the same site to the same work.

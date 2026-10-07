@@ -26,6 +26,8 @@
     "check:poll-control": "tsx tests/integration/poll-control.check.ts",
     "backfill:budgets": "tsx src/scripts/backfillBudgets.ts",
     "backfill:html-prices": "tsx src/scripts/backfillHtmlPrices.ts",
+    "backfill:search-text": "tsx src/scripts/backfillSearchText.ts",
+    "check:thai-search": "tsx tests/unit/thai-search.check.ts",
     "seed:admins": "tsx src/scripts/seedAdmin.ts",
     "seed:superadmin": "tsx src/scripts/seedSuperAdmin.ts",
     "seed:gov-sites": "tsx src/scripts/seedGovSites.ts",

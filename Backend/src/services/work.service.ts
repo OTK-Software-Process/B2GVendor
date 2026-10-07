@@ -1,5 +1,6 @@
 import { Work, IWork, WorkStatus } from '../models/work.model';
 import { AppError } from '../utils/AppError';
+import { buildThaiSearchRegex } from '../utils/thaiSearch';
 
 // Best-effort full-text + facet query against a plain Mongo instance -- NOT
 // MongoDB Atlas Search. Atlas Search ($search/$searchMeta over an Atlas
@@ -26,12 +27,6 @@ export interface ListWorksResult {
   total: number;
   page: number;
   pageSize: number;
-}
-
-// Escapes regex metacharacters so a user's free-text query is matched
-// literally, not interpreted as a regex.
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 const SORTS: Record<NonNullable<ListWorksFilter['sort']>, Record<string, 1 | -1>> = {
@@ -117,12 +112,19 @@ export async function listWorks(filter: ListWorksFilter = {}): Promise<ListWorks
   }
 
   if (filter.q) {
-    // Substring/typo-tolerant-ish match via case-insensitive regex rather
-    // than Mongo's $text (word-stemmed) index: $text tokenizes on word
-    // boundaries, which does not work well for Thai (no spaces between
-    // words) or for partial-word queries -- see ProjectDescription.md N4.
-    const pattern = new RegExp(escapeRegExp(filter.q.trim()), 'i');
-    query.$or = [{ title: pattern }, { description: pattern }];
+    const pattern = buildThaiSearchRegex(filter.q);
+    const legacyExactPattern = new RegExp(
+      filter.q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+      'iu'
+    );
+    // searchText stores normalized Thai text for fuzzy matching. The title
+    // and description clauses retain exact matching until the backfill has
+    // populated searchText on every existing work.
+    query.$or = [
+      { searchText: pattern },
+      { title: legacyExactPattern },
+      { description: legacyExactPattern }
+    ];
   }
 
   // With a budgetMax filter every match already has a price, so the plain
