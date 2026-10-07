@@ -230,6 +230,12 @@ const WorkSchema = new Schema<IWork>(
 );
 
 WorkSchema.pre('validate', function updateSearchText() {
+  // A work loaded with only some fields (e.g. .select('tags excludedTags') for a
+  // tag edit) has no title/description to build the text from -- rebuilding it
+  // would overwrite searchText with "undefined\n" and make the work
+  // unsearchable. Leave it as it is; the next save of a fully-loaded work
+  // refreshes it.
+  if (!this.isSelected('title') || !this.isSelected('description')) return;
   this.searchText = normalizeThaiSearchText(`${this.title}\n${this.description ?? ''}`);
 });
 

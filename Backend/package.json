@@ -26,6 +26,7 @@
     "check:facts": "tsx tests/integration/procurement-facts.check.ts",
     "check:facts-db": "tsx tests/integration/work-facts-db.check.ts",
     "check:facts-ingestion": "tsx tests/integration/ingestion-facts.check.ts",
+    "check:search-tags": "tsx tests/integration/search-tags-merge.check.ts",
     "check:poll-control": "tsx tests/integration/poll-control.check.ts",
     "backfill:budgets": "tsx src/scripts/backfillBudgets.ts",
     "backfill:html-prices": "tsx src/scripts/backfillHtmlPrices.ts",
