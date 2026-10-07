@@ -133,3 +133,20 @@ export function initialQueryParam(name = 'q'): string {
   if (typeof window === 'undefined') return '';
   return (new URLSearchParams(window.location.search).get(name) ?? '').slice(0, 200);
 }
+
+const RELATIVE_UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
+  ['day', 86_400_000],
+  ['hour', 3_600_000],
+  ['minute', 60_000]
+];
+
+/** "5 minutes ago" / "5 นาทีที่แล้ว"; a week or more back, the exact date and time instead. */
+export function timeAgo(iso: string, lang: AppLang, now = Date.now()): string {
+  const elapsed = now - new Date(iso).getTime();
+  if (elapsed < 0 || elapsed >= 7 * 86_400_000) return formatDateTime(iso, lang);
+  const formatter = new Intl.RelativeTimeFormat(lang === 'en' ? 'en' : 'th', { numeric: 'auto' });
+  for (const [unit, size] of RELATIVE_UNITS) {
+    if (elapsed >= size) return formatter.format(-Math.floor(elapsed / size), unit);
+  }
+  return lang === 'en' ? 'just now' : 'เมื่อสักครู่';
+}

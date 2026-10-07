@@ -54,7 +54,7 @@ export default function AdminAuditLogPage() {
   const [action, setAction] = useState('');
   const [entityType, setEntityType] = useState(() => initialQueryParam('entityType'));
   const [entityId, setEntityId] = useState(() => initialQueryParam('entityId'));
-  const [entityName, setEntityName] = useState(''); // only for display in the "one item" chip
+  const [entityName, setEntityName] = useState(() => initialQueryParam('entityName')); // only for display in the "one item" chip
   const [actor, setActor] = useState('');
   const [fromDay, setFromDay] = useState('');
   const [toDay, setToDay] = useState('');

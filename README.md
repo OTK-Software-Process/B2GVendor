@@ -5,10 +5,10 @@ A multi-agency Thai government procurement disclosure portal — polls TOR/procu
 ## Repo layout
 
 ```
-B2GVendor/    Next.js frontend — public pages (search/home/agencies/work detail) are wired to
-              the real Backend; admin tooling for ingestion (poll trigger + run history) is
-              also wired real. A few admin screens (source config, tag/account management)
-              still run on in-memory mock data -- see src/lib/mock-data.ts.
+B2GVendor/    Next.js frontend — public pages (search/home/agencies/work detail) and every admin
+              screen (dashboard, ingestion, source config, tags, vendor/admin accounts, audit
+              log) are wired to the real Backend; src/lib/mock-data.ts now only holds shared
+              types and label tables.
 Backend/      Express + TypeScript API + a separate ingestion-worker process. Real e-GP RSS
               polling, data.go.th enrichment, AI tagging/summarization/price extraction
               (OpenRouter or Vertex AI), notifications + email, auth, admin endpoints.
@@ -142,6 +142,47 @@ A new work is only shown on the public site if the AI's resulting tags include a
 ## Email delivery
 
 `SMTP_HOST` is commented out by default in `Backend/.env.example` — with it unset, the app still boots and every notification/password-reset email is logged (not sent) with its full content, so you can see exactly what would have been sent. Set `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS` to actually deliver email.
+
+## Audit log (developer guide)
+
+Every admin edit is written to an append-only audit log: who did it, what changed (field by field, before and after), and when. Admins review it at **Admin → Audit Log**, and on the dashboard under **Recent Activity**; the API is `GET /api/v1/admin/audit-log` (read-only).
+
+### Audit a new model in one line
+
+Add the model's name — the string you pass to `mongoose.model('Gadget', …)` — to `AUDITED_MODELS` in `Backend/src/audit/registry.ts`:
+
+```ts
+export const AUDITED_MODELS: Record<string, AuditRegistration> = {
+  // …existing models…
+  Gadget: {},
+};
+```
+
+That is all. Creates, updates and deletes of that model (`save`, `create`, `insertMany`, `updateOne/Many`, `findOneAndUpdate`, `deleteOne/Many`, `findOneAndDelete`, upserts) are now recorded with a diff and the signed-in admin as the actor. The model, your services and the Audit Log page need no change: its filters and before/after viewer are built from the data.
+
+Optional settings go inside the braces:
+
+| Option | What it does |
+|---|---|
+| `label` | Field (or function) used as the entry's readable name. Default: `email`, then `name`, then `title`. |
+| `redact` / `ignore` | Extra fields to mask as `[REDACTED]` / to leave out. |
+| `operations` | Record only some of `'create' \| 'update' \| 'delete'`. |
+| `fields` | Audit only these top-level fields. Use it for models that other code saves constantly (e.g. `Work`, written by the ingestion worker). |
+| `action` | Give an event a readable name, e.g. a status change becomes `account.suspend` instead of `account.update`. |
+| `metadata` | Extra context stored on the entry, e.g. tag names for tag ids (may be async). |
+
+### Things to know
+
+- **Secrets never reach the log.** Any field whose name contains `password`, `token`, `hash`, `secret`, `apikey`, `authorization` or `credential` is stored as `[REDACTED]`, on every model.
+- **A custom event** that is not a model change (e.g. "password link sent") is one call. Put the target's `role` in `metadata` for events about accounts: entries about admin accounts are visible to Super Admins only.
+  ```ts
+  await audit.log({ action: 'account.password_link_sent', entity: account, metadata: { role: account.role } });
+  ```
+- **No duplicate rows:** if you write a custom entry for something an audited model also records, wrap both in `audit.withoutAuto(async () => { … })`. Background work with no signed-in admin can be named with `audit.asSystem('ingestion-worker', fn)`.
+- **A failed log write never breaks the action** it describes (it is reported in the server log). Pass `strict: true` to `audit.log()` to get the error instead.
+- **Not captured:** `bulkWrite` and raw `Model.collection.*` calls bypass Mongoose hooks. Call `audit.log()` yourself there.
+- **Load order matters.** The audit plugin only covers models loaded after it, so `import './audit/install'` must stay the first import of `app.ts` and `worker.ts`. If a registered model is not covered, the server logs an `[audit]` error at startup.
+- **Tests:** `npm run check:audit-core | check:audit-plugin | check:audit-registry | check:audit-api` (in `Backend/`) run against throwaway databases.
 
 ## Seed scripts reference
 
