@@ -9,8 +9,27 @@ interface TORDownloadListProps {
   files: TORFile[];
 }
 
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+}
+
 export function TORDownloadList({ files }: TORDownloadListProps) {
   const { lang } = useApp();
+
+  // Every TOR links back to where the government published it. A file we host a
+  // copy of gets that as a second link (an external-only entry's main button
+  // already goes there); the several files of one zip share a source, so the
+  // link is shown once, on the first of them.
+  const seenSources = new Set<string>();
+  const showOrigin = files.map(file => {
+    if (!file.sourceUrl || file.external || seenSources.has(file.sourceUrl)) return false;
+    seenSources.add(file.sourceUrl);
+    return true;
+  });
 
   return (
     <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200 space-y-4">
@@ -28,7 +47,7 @@ export function TORDownloadList({ files }: TORDownloadListProps) {
       </div>
 
       <div className="divide-y divide-slate-200">
-        {files.map(file => {
+        {files.map((file, index) => {
           const isExternalReference = Boolean(file.external);
 
           return (
@@ -50,6 +69,17 @@ export function TORDownloadList({ files }: TORDownloadListProps) {
                     <div className="flex items-center gap-3 text-xs text-slate-400 mt-0.5">
                       <span>{lang === 'en' ? 'Downloaded:' : 'ดาวน์โหลดเมื่อ:'} {file.date}</span>
                     </div>
+                  )}
+                  {showOrigin[index] && file.sourceUrl && (
+                    <a
+                      href={file.sourceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs font-medium text-sky-700 hover:underline mt-0.5"
+                    >
+                      <ExternalLink className="w-3 h-3 shrink-0" />
+                      <span>{lang === 'en' ? 'Original TOR on' : 'ดู TOR ต้นฉบับที่'} {hostOf(file.sourceUrl)}</span>
+                    </a>
                   )}
                 </div>
               </div>

@@ -1,4 +1,6 @@
+import { Types } from 'mongoose';
 import { Work, IWork, WorkStatus } from '../models/work.model';
+import { Tag } from '../models/tag.model';
 import { AppError } from '../utils/AppError';
 
 // Best-effort full-text + facet query against a plain Mongo instance -- NOT
@@ -13,10 +15,14 @@ import { AppError } from '../utils/AppError';
 export interface ListWorksFilter {
   siteId?: string;
   status?: WorkStatus;
-  tag?: string; // one or more Tag ObjectIds, comma-separated (matches any)
+  // One or more Tag ObjectIds, comma-separated. Tags of the SAME facet (two
+  // categories) match any of them; tags of DIFFERENT facets (a method AND a
+  // category) must all be matched -- see tagConditions.
+  tag?: string;
   q?: string; // free-text query over title + description (name search)
   budgetMax?: number;
-  sort?: 'date' | 'budget-asc' | 'budget-desc';
+  fiscalYear?: number; // ปีงบประมาณ, Buddhist Era (e.g. 2569)
+  sort?: 'date' | 'budget-asc' | 'budget-desc' | 'deadline';
   page?: number;
   pageSize?: number;
 }
@@ -37,36 +43,43 @@ function escapeRegExp(value: string): string {
 const SORTS: Record<NonNullable<ListWorksFilter['sort']>, Record<string, 1 | -1>> = {
   date: { pubDate: -1, createdAt: -1 },
   'budget-desc': { budget: -1 },
-  'budget-asc': { budget: 1 }
+  'budget-asc': { budget: 1 },
+  deadline: { deadlineAt: 1 }
 };
 
 const POPULATE_SITE = { path: 'siteId', select: 'name shortCode' };
 const POPULATE_TAGS = { path: 'tags', select: 'name facet' };
 
-// "Budget: low to high" must not start with the works that have NO price --
-// Mongo sorts a missing/null field lowest, so they'd float to the top looking
-// like the cheapest. Page through the priced works first (ascending), then the
-// unpriced ones (newest first). A single find() can't sort nulls last, so the
-// page window is split across the two groups.
-async function listWorksPricedFirst(
+interface SortGroup {
+  filter: Record<string, unknown>;
+  sort: Record<string, 1 | -1>;
+}
+
+// Some sorts must put one kind of work first and push the rest to the end
+// (works with no price; works with no deadline). A single find() can't sort
+// "these, then those" -- Mongo sorts a missing field lowest -- so the page
+// window is split across two queries: `first` is paged through, then `rest`
+// takes over where it runs out.
+async function listWorksInTwoGroups(
   query: Record<string, unknown>,
+  first: SortGroup,
+  rest: SortGroup,
   page: number,
   pageSize: number
 ): Promise<ListWorksResult> {
-  const priced = { ...query, budget: { $gt: 0 } };
-  const unpriced = { ...query, budget: { $not: { $gt: 0 } } };
-  const [pricedTotal, unpricedTotal] = await Promise.all([
-    Work.countDocuments(priced),
-    Work.countDocuments(unpriced)
-  ]);
+  // $and (not a spread): a group's own $or / $and must sit NEXT TO the caller's
+  // (the free-text search is an $or, the tag filter an $and), never replace it.
+  const firstQuery = { $and: [query, first.filter] };
+  const restQuery = { $and: [query, rest.filter] };
+  const [firstTotal, restTotal] = await Promise.all([Work.countDocuments(firstQuery), Work.countDocuments(restQuery)]);
 
   const skip = (page - 1) * pageSize;
   const items: IWork[] = [];
 
-  if (skip < pricedTotal) {
+  if (skip < firstTotal) {
     items.push(
-      ...(await Work.find(priced)
-        .sort({ budget: 1, _id: 1 })
+      ...(await Work.find(firstQuery)
+        .sort(first.sort)
         .skip(skip)
         .limit(pageSize)
         .select('-excludedTags')
@@ -78,9 +91,9 @@ async function listWorksPricedFirst(
   const remaining = pageSize - items.length;
   if (remaining > 0) {
     items.push(
-      ...(await Work.find(unpriced)
-        .sort(SORTS.date)
-        .skip(Math.max(0, skip - pricedTotal))
+      ...(await Work.find(restQuery)
+        .sort(rest.sort)
+        .skip(Math.max(0, skip - firstTotal))
         .limit(remaining)
         .select('-excludedTags')
         .populate(POPULATE_SITE)
@@ -88,7 +101,58 @@ async function listWorksPricedFirst(
     );
   }
 
-  return { items, total: pricedTotal + unpricedTotal, page, pageSize };
+  return { items, total: firstTotal + restTotal, page, pageSize };
+}
+
+// "Budget: low to high" must not start with the works that have NO price --
+// they'd float to the top looking like the cheapest. Priced works first
+// (ascending), then the unpriced ones (newest first).
+function listWorksPricedFirst(query: Record<string, unknown>, page: number, pageSize: number): Promise<ListWorksResult> {
+  return listWorksInTwoGroups(
+    query,
+    { filter: { budget: { $gt: 0 } }, sort: { budget: 1, _id: 1 } },
+    { filter: { budget: { $not: { $gt: 0 } } }, sort: SORTS.date },
+    page,
+    pageSize
+  );
+}
+
+// Works can still be bid on are listed first, the one closing soonest at the
+// top; everything else -- no deadline stated, or already closed -- follows,
+// newest first. A cancelled or awarded work is never "upcoming" even if the
+// date it once had is still ahead (unless the user filtered to that status).
+function listWorksByDeadline(query: Record<string, unknown>, page: number, pageSize: number): Promise<ListWorksResult> {
+  const now = new Date();
+  const stillOpen = query.status ? {} : { status: { $nin: ['CANCELLED', 'AWARDED'] } };
+  return listWorksInTwoGroups(
+    query,
+    { filter: { deadlineAt: { $gte: now }, ...stillOpen }, sort: { deadlineAt: 1, _id: 1 } },
+    // $not/$gte also matches a missing deadline, and an open-date one that is excluded above.
+    { filter: { $or: [{ deadlineAt: { $not: { $gte: now } } }, ...(query.status ? [] : [{ status: { $in: ['CANCELLED', 'AWARDED'] } }])] }, sort: SORTS.date },
+    page,
+    pageSize
+  );
+}
+
+// The tag filter is a faceted one: choosing two categories means "either",
+// choosing a method AND a category means "both". (A single $in over every id
+// would make adding a second facet WIDEN the results instead of narrowing them,
+// which is how a method filter used next to a category filter looked broken.)
+// Ids that aren't a real tag match nothing, as they always did.
+async function tagConditions(rawIds: string[]): Promise<Record<string, unknown>[]> {
+  const validIds = rawIds.filter(id => Types.ObjectId.isValid(id));
+  const tags = validIds.length > 0 ? await Tag.find({ _id: { $in: validIds } }, 'facet') : [];
+
+  const byFacet = new Map<string, string[]>();
+  const known = new Set<string>();
+  for (const tag of tags) {
+    known.add(tag._id.toString());
+    byFacet.set(tag.facet, [...(byFacet.get(tag.facet) ?? []), tag._id.toString()]);
+  }
+
+  const conditions = [...byFacet.values()].map(ids => ({ tags: { $in: ids } }));
+  if (rawIds.some(id => !known.has(id))) conditions.push({ tags: { $in: [] } });
+  return conditions;
 }
 
 export async function listWorks(filter: ListWorksFilter = {}): Promise<ListWorksResult> {
@@ -103,13 +167,14 @@ export async function listWorks(filter: ListWorksFilter = {}): Promise<ListWorks
   const query: Record<string, unknown> = { ingestionRelevance: { $ne: 'not-related' } };
   if (filter.siteId) query.siteId = filter.siteId;
   if (filter.status) query.status = filter.status;
+  if (filter.fiscalYear !== undefined) query.fiscalYear = filter.fiscalYear;
 
   if (filter.tag) {
     const tagIds = filter.tag
       .split(',')
       .map(id => id.trim())
       .filter(Boolean);
-    if (tagIds.length > 0) query.tags = { $in: tagIds };
+    if (tagIds.length > 0) query.$and = await tagConditions(tagIds);
   }
 
   if (filter.budgetMax !== undefined) {
@@ -130,6 +195,9 @@ export async function listWorks(filter: ListWorksFilter = {}): Promise<ListWorks
   if (filter.sort === 'budget-asc' && filter.budgetMax === undefined) {
     return listWorksPricedFirst(query, page, pageSize);
   }
+  if (filter.sort === 'deadline') {
+    return listWorksByDeadline(query, page, pageSize);
+  }
 
   const [items, total] = await Promise.all([
     Work.find(query)
@@ -143,6 +211,22 @@ export async function listWorks(filter: ListWorksFilter = {}): Promise<ListWorks
   ]);
 
   return { items, total, page, pageSize };
+}
+
+export interface FiscalYearOption {
+  year: number;
+  count: number;
+}
+
+// The fiscal years that actually have works, newest first -- what the website's
+// ปีงบประมาณ filter offers (no empty choices).
+export async function listFiscalYears(): Promise<FiscalYearOption[]> {
+  const rows = await Work.aggregate<{ _id: number; count: number }>([
+    { $match: { ingestionRelevance: { $ne: 'not-related' }, fiscalYear: { $exists: true, $ne: null } } },
+    { $group: { _id: '$fiscalYear', count: { $sum: 1 } } },
+    { $sort: { _id: -1 } }
+  ]);
+  return rows.map(row => ({ year: row._id, count: row.count }));
 }
 
 export async function getWorkById(id: string): Promise<IWork> {

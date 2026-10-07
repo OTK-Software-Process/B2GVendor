@@ -4,6 +4,7 @@ import { Work } from '../models/work.model';
 import { Follow } from '../models/follow.model';
 import { AppError } from '../utils/AppError';
 import { cleanAliases, compareTagKeys, tagKey, TermMatchKind } from '../utils/tagText';
+import type { ProcurementMethodDef } from '../utils/procurementFacts';
 
 function isDuplicateKeyError(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 11000;
@@ -325,6 +326,38 @@ export async function findOrCreateAiTag(rawName: string, facet: Exclude<TagFacet
     if (isDuplicateKeyError(err)) {
       const winner = await Tag.findOne({ name: pattern });
       if (winner) return winner;
+    }
+    throw err;
+  }
+}
+
+// The 'method' (วิธีการจัดซื้อจัดจ้าง) tag for a procurement method read from a
+// title/document (utils/procurementFacts.ts). Unlike an AI-proposed tag this
+// is a fixed, known vocabulary, so a missing tag is simply created -- a fresh
+// database needs no seeding for filtering by method to work. Two cases keep
+// admin curation intact:
+//   - an admin may have RENAMED the tag, so it is matched by name OR alias
+//     (same normalised key as findOrCreateAiTag) before a new one is created;
+//   - an admin may have RETIRED it, which means "stop using this" -- null, and
+//     nothing is created in its place.
+export async function findOrCreateMethodTag(def: ProcurementMethodDef, opts: { dryRun?: boolean } = {}): Promise<ITag | null> {
+  const keys = new Set([def.tagName, ...def.aliases].map(tagKey));
+  const methodTags = await Tag.find({ facet: 'method' });
+  const existing = methodTags.find(t => [t.name, ...(t.aliases ?? [])].some(term => keys.has(tagKey(term))));
+  if (existing) return existing.retired ? null : existing;
+
+  const fields = { name: def.tagName, facet: 'method' as const, aliases: cleanAliases(def.tagName, def.aliases) };
+  // A preview (the backfill's --dry-run) must not write: hand back a tag that
+  // exists only in memory.
+  if (opts.dryRun) return new Tag(fields);
+
+  try {
+    return await Tag.create(fields);
+  } catch (err) {
+    // Two works resolving the same new method at once race on the {name, facet} index.
+    if (isDuplicateKeyError(err)) {
+      const winner = await Tag.findOne({ name: def.tagName, facet: 'method' });
+      return winner && !winner.retired ? winner : null;
     }
     throw err;
   }

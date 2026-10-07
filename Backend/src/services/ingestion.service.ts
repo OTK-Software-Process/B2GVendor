@@ -10,10 +10,12 @@ import { analyzeTorDocument, TagCandidate, DocumentAnalysisInput, DocumentAnalys
 import { findOrCreateAiTag } from './tag.service';
 import { env } from '../config/env';
 import { saveTorFile } from './fileStorage.service';
-import { extractPdfContent } from './pdfText.service';
+import { extractPdfContent, DocumentContent } from './pdfText.service';
 import { extractHtmlContent } from './htmlText.service';
 import { extractPdfsFromZip, pickPrimaryPdf } from './zipExtraction.service';
 import { PriceCandidate, mergePriceCandidates } from '../utils/priceExtraction';
+import { ProcurementFacts, mergeProcurementFacts } from '../utils/procurementFacts';
+import { applyWorkFacts } from './workFacts.service';
 import { logger } from '../utils/logger';
 import { withRetry, sleep } from '../utils/retry';
 import { notifyNewWorkMatches } from './notification.service';
@@ -354,6 +356,9 @@ async function retryMissingTorDownloads(site: IGovSite, candidateTags: TagCandid
         mutated = true;
         recoveredHere = true;
 
+        // The recovered document may be the one that states the deadline / year.
+        await applyWorkFacts(work, { title: work.title, announceType, documents: factsOf(extracted), reference: work.pubDate });
+
         // Also re-analyze when only the price is missing: the document that
         // just came back may be the one that states it.
         if (!work.description || !work.budget) {
@@ -427,6 +432,13 @@ export interface ExtractedTorFile {
   // "บาท" amounts found in this file's FULL text -- collected from every PDF,
   // because the ราคากลาง table is often a separate attachment.
   priceCandidates: PriceCandidate[];
+  // Method / fiscal year / bid deadline this file states (utils/procurementFacts.ts).
+  facts?: ProcurementFacts;
+}
+
+// What a set of read documents states, primary document first.
+function factsOf(extracted: ExtractedTorFile[] | null): ProcurementFacts {
+  return mergeProcurementFacts(...(extracted ?? []).map(f => f.facts));
 }
 
 // Reading a huge attachment (site drawings, scanned annexes) just to look for
@@ -460,7 +472,7 @@ async function downloadAndExtractTorFiles(item: EgpRssItem, htmlGapMs: number): 
         logger.warn('ingestion', `HTML announcement ${item.link} had no readable document (e-GP "file not found" page, or empty)`);
         return null;
       }
-      return [{ pdfText: content.text, hasText: true, priceCandidates: content.priceCandidates }];
+      return [{ pdfText: content.text, hasText: true, priceCandidates: content.priceCandidates, facts: content.facts }];
     } catch (err) {
       logger.warn('ingestion', `Failed to read HTML announcement ${item.link}`, err);
       return null;
@@ -478,7 +490,8 @@ async function downloadAndExtractTorFiles(item: EgpRssItem, htmlGapMs: number): 
           filename: saved.filename,
           pdfText: content.text,
           hasText: content.text !== null,
-          priceCandidates: content.priceCandidates
+          priceCandidates: content.priceCandidates,
+          facts: content.facts
         }
       ];
     } catch (err) {
@@ -502,7 +515,7 @@ async function downloadAndExtractTorFiles(item: EgpRssItem, htmlGapMs: number): 
         const saved = await saveTorFile(entry.buffer, entry.filename);
         const isPrimary = entry === primaryEntry;
         const skipScan = !isPrimary && entry.buffer.length > MAX_ATTACHMENT_SCAN_BYTES;
-        const content = skipScan
+        const content: DocumentContent = skipScan
           ? { text: null, priceCandidates: [] as PriceCandidate[] }
           : await extractPdfContent(entry.buffer, saved.filename);
         results.push({
@@ -513,7 +526,8 @@ async function downloadAndExtractTorFiles(item: EgpRssItem, htmlGapMs: number): 
           // An attachment we chose not to scan is unknown, not unreadable --
           // count it as readable so it can't wrongly blame a scanned file.
           hasText: skipScan || content.text !== null,
-          priceCandidates: content.priceCandidates
+          priceCandidates: content.priceCandidates,
+          facts: content.facts
         });
       }
       // Primary first, so callers that just want "the" analyzable document
@@ -659,7 +673,7 @@ async function upsertWorkFromRssItem(
 
     logScanRecovery(analysis, item.projectId);
 
-    const createdWork = await Work.create({
+    const createdWork = new Work({
       siteId: site._id,
       projectId: item.projectId,
       title: item.title,
@@ -682,11 +696,21 @@ async function upsertWorkFromRssItem(
       tags: tagIds,
       ingestionRelevance
     });
+    // Method (from the title), fiscal year and bid deadline (from the title /
+    // document) -- see workFacts.service.ts. A method tag it adds is notified
+    // along with the rest below, so followers of that method hear about it.
+    const { addedTagIds } = await applyWorkFacts(createdWork, {
+      title: item.title,
+      announceType,
+      documents: factsOf(extracted),
+      reference: item.pubDate
+    });
+    await createdWork.save();
     // Never notify about a work the recipient can't actually view --
     // work.service.ts's public queries exclude 'not-related' works
     // entirely, so a notification linking to one would just 404.
     if (ingestionRelevance !== 'not-related') {
-      await notifyNewWorkMatches(createdWork, tagIds);
+      await notifyNewWorkMatches(createdWork, [...tagIds, ...addedTagIds]);
     }
 
     return 'new';
@@ -777,6 +801,18 @@ async function upsertWorkFromRssItem(
   }
 
   if (changed) {
+    // Only when something about the work just changed (a new document or a
+    // lifecycle step): an unchanged item is re-seen on every poll and must stay
+    // free of extra queries. Works that predate this are caught up by
+    // `npm run backfill:facts`.
+    const facts = await applyWorkFacts(existing, {
+      title: item.title,
+      announceType,
+      documents: factsOf(newExtracted),
+      reference: item.pubDate
+    });
+    newlyAddedTagIds.push(...facts.addedTagIds);
+
     await existing.save();
     if (newlyAddedTagIds.length > 0) {
       await notifyNewWorkMatches(existing, newlyAddedTagIds);

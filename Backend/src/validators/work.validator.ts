@@ -7,7 +7,9 @@ export const listWorksQuerySchema = z
     tag: z.string().trim().optional(),
     q: z.string().trim().optional(),
     budgetMax: z.coerce.number().min(0).optional(),
-    sort: z.enum(['date', 'budget-asc', 'budget-desc']).optional(),
+    // ปีงบประมาณ in the Buddhist Era (2569), not the Christian year.
+    fiscalYear: z.coerce.number().int().min(2500).max(2700).optional(),
+    sort: z.enum(['date', 'budget-asc', 'budget-desc', 'deadline']).optional(),
     page: z.coerce.number().int().min(1).optional(),
     pageSize: z.coerce.number().int().min(1).max(50).optional()
   })

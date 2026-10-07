@@ -45,6 +45,16 @@ export const BUDGET_MISSING_REASONS: readonly BudgetMissingReason[] = ['not-stat
 export type BudgetBasis = 'awarded';
 export const BUDGET_BASES: readonly BudgetBasis[] = ['awarded'] as const;
 
+// Where `fiscalYear` came from:
+//   'document'  -- stated in the announcement title or document text;
+//   'estimated' -- worked out from the e-GP project number (registered Oct-Dec =
+//                  next fiscal year). Right for the usual project, off by one for
+//                  one registered in advance against the following year's budget,
+//                  so the website marks it as an estimate and a year stated in a
+//                  document always replaces it.
+export type FiscalYearSource = 'document' | 'estimated';
+export const FISCAL_YEAR_SOURCES: readonly FiscalYearSource[] = ['document', 'estimated'] as const;
+
 export interface ITorFile {
   announceType: AnnounceType; // which lifecycle stage this document belongs to
   linkType: TorLinkType;
@@ -109,6 +119,22 @@ export interface IWork extends Document {
   winnerName?: string;
   winnerTin?: string;
   enrichedAt?: Date;
+
+  // ปีงบประมาณ (Buddhist Era, e.g. 2569), filterable on the website. Where it
+  // came from matters because one source is only a guess -- see FiscalYearSource.
+  fiscalYear?: number;
+  fiscalYearSource?: FiscalYearSource;
+
+  // The bid-submission deadline stated by the work's invitation announcement
+  // (D0/D2) -- unset when the document states none (drafts leave it blank).
+  // Stored as real Dates so the site can sort by it and count the days left.
+  // `deadlineAt` is the instant the window CLOSES; `deadlineStartAt` is when it
+  // opens, when the document gives a start ("ระหว่างเวลา 09.00 น. ถึง 12.00 น.");
+  // `deadlineHasTime` is false when only a date was stated (then deadlineAt is
+  // the end of that day and the site shows no clock time).
+  deadlineAt?: Date;
+  deadlineStartAt?: Date;
+  deadlineHasTime?: boolean;
 
   tags: Types.ObjectId[];
   // Tags an admin deliberately REMOVED from this work by hand. Ingestion
@@ -184,6 +210,13 @@ const WorkSchema = new Schema<IWork>(
     winnerName: { type: String, trim: true },
     winnerTin: { type: String, trim: true, index: true },
     enrichedAt: { type: Date },
+
+    fiscalYear: { type: Number, min: 2500, max: 2700, index: true },
+    fiscalYearSource: { type: String, enum: FISCAL_YEAR_SOURCES },
+
+    deadlineAt: { type: Date, index: true },
+    deadlineStartAt: { type: Date },
+    deadlineHasTime: { type: Boolean },
 
     tags: { type: [{ type: Schema.Types.ObjectId, ref: 'Tag' }], default: [] },
     excludedTags: { type: [{ type: Schema.Types.ObjectId, ref: 'Tag' }], default: [] },

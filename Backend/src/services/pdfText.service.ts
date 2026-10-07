@@ -1,6 +1,7 @@
 import pdfParse from 'pdf-parse';
 import { logger } from '../utils/logger';
 import { PriceCandidate, findPriceCandidates } from '../utils/priceExtraction';
+import { ProcurementFacts, extractProcurementFacts } from '../utils/procurementFacts';
 
 // Extracts plain text from a downloaded TOR PDF so the AI-tagging step can
 // read the actual document content (FR-3.2), not just the RSS title.
@@ -29,6 +30,10 @@ export interface DocumentContent {
   // Every "บาท" amount found in the FULL text, before the cap. Empty when
   // there is no text.
   priceCandidates: PriceCandidate[];
+  // Procurement method / fiscal year / bid deadline the document states, read
+  // from the FULL text (the capped copy would miss a deadline sentence deep in a
+  // long document). Absent when there is no text.
+  facts?: ProcurementFacts;
 }
 
 // pdf-parse's raw output carries the source PDF's own line-wrapping and
@@ -55,7 +60,8 @@ export function contentFromText(rawText: string, sourceName?: string): DocumentC
 
   return {
     text: fullText.length > MAX_CHARS ? fullText.slice(0, MAX_CHARS) : fullText,
-    priceCandidates: findPriceCandidates(fullText, sourceName)
+    priceCandidates: findPriceCandidates(fullText, sourceName),
+    facts: extractProcurementFacts(fullText)
   };
 }
 

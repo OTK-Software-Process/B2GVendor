@@ -33,6 +33,7 @@ export function SearchClient() {
   const siteParam = searchParams.get('site') || '';
   const tagsParam = searchParams.get('tags') || '';
   const budgetMaxParam = searchParams.get('budgetMax') || '';
+  const fiscalYearParam = searchParams.get('fiscalYear') || '';
   const sortBy = (searchParams.get('sortBy') as ListWorksParams['sort']) || 'date';
   const view = (searchParams.get('view') === 'grid' ? 'grid' : 'row') as 'row' | 'grid';
   const requestedPage = parseInt(searchParams.get('page') || '1', 10) || 1;
@@ -64,6 +65,7 @@ export function SearchClient() {
           siteId: siteParam || undefined,
           tag: tagsParam || undefined,
           budgetMax: budgetMaxParam ? Number(budgetMaxParam) : undefined,
+          fiscalYear: fiscalYearParam ? Number(fiscalYearParam) : undefined,
           sort: sortBy,
           page: requestedPage,
           pageSize: PAGE_SIZE
@@ -82,7 +84,7 @@ export function SearchClient() {
     return () => {
       cancelled = true;
     };
-  }, [q, statusParam, siteParam, tagsParam, budgetMaxParam, sortBy, requestedPage, lang]);
+  }, [q, statusParam, siteParam, tagsParam, budgetMaxParam, fiscalYearParam, sortBy, requestedPage, lang]);
 
   const removeChip = (key: string) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -127,6 +129,13 @@ export function SearchClient() {
       key: 'budgetMax',
       label: `งบสูงสุด: ${(parseInt(budgetMaxParam) / 1000000).toFixed(0)} ล้านบาท`,
       onRemove: () => removeChip('budgetMax')
+    });
+  }
+  if (fiscalYearParam) {
+    activeChips.push({
+      key: 'fiscalYear',
+      label: `ปีงบประมาณ: ${fiscalYearParam}`,
+      onRemove: () => removeChip('fiscalYear')
     });
   }
 
@@ -219,6 +228,7 @@ export function SearchClient() {
               className="bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-700 outline-hidden font-semibold hover:border-emerald-300 transition-colors"
             >
               <option value="date">{lang === 'en' ? 'Newest Ingested' : 'วันที่ประกาศล่าสุด'}</option>
+              <option value="deadline">{lang === 'en' ? 'Bid deadline: soonest first' : 'กำหนดยื่นข้อเสนอ (ใกล้ถึงก่อน)'}</option>
               <option value="budget-desc">{lang === 'en' ? 'Budget: High to Low' : 'งบประมาณ (สูงไปต่ำ)'}</option>
               <option value="budget-asc">{lang === 'en' ? 'Budget: Low to High' : 'งบประมาณ (ต่ำไปสูง)'}</option>
             </select>

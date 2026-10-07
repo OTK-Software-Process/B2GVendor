@@ -46,7 +46,7 @@ const THAI_DIGITS = '๐๑๒๓๔๕๖๗๘๙';
 
 // Thai government documents often use Thai numerals (๑,๒๐๐,๐๐๐) and PDF text
 // extraction leaves zero-width characters and ragged whitespace everywhere.
-function normalizeText(text: string): string {
+export function normalizeText(text: string): string {
   return text
     .replace(/[๐-๙]/g, digit => String(THAI_DIGITS.indexOf(digit)))
     .replace(/[​-‍﻿]/g, '')
@@ -59,10 +59,10 @@ function normalizeText(text: string): string {
 // "ราคากลาง" and "บาท" have no such marks, but "วงเงิน..." (ิ), "ค่าปรับ" (่)
 // and most other keywords here do, so every keyword is matched with optional
 // whitespace allowed between its characters.
-function spaced(word: string): string {
+export function spaced(word: string): string {
   return [...word].join('\\s*');
 }
-function anyOf(...words: string[]): string {
+export function anyOf(...words: string[]): string {
   return words.map(spaced).join('|');
 }
 

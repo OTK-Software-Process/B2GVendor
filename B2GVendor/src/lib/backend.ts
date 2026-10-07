@@ -104,6 +104,11 @@ export interface BackendWork {
   contractDate?: string;
   winnerName?: string;
   winnerTin?: string;
+  fiscalYear?: number;
+  fiscalYearSource?: 'document' | 'estimated';
+  deadlineAt?: string;
+  deadlineStartAt?: string;
+  deadlineHasTime?: boolean;
   tags: BackendTag[];
   createdAt: string;
   updatedAt: string;
@@ -122,9 +127,15 @@ export interface ListWorksParams {
   tag?: string; // comma-separated Tag ids
   q?: string;
   budgetMax?: number;
-  sort?: 'date' | 'budget-asc' | 'budget-desc';
+  fiscalYear?: number; // ปีงบประมาณ, Buddhist Era
+  sort?: 'date' | 'budget-asc' | 'budget-desc' | 'deadline';
   page?: number;
   pageSize?: number;
+}
+
+export interface FiscalYearOption {
+  year: number;
+  count: number;
 }
 
 function buildQuery(params: object): string {
@@ -142,6 +153,11 @@ export function fetchWorks(params: ListWorksParams = {}): Promise<ListWorksRespo
 
 export function fetchWorkById(id: string): Promise<BackendWork> {
   return api.get<BackendWork>(`/works/${id}`);
+}
+
+// The fiscal years that have works, newest first -- what the ปีงบประมาณ filter offers.
+export function fetchFiscalYears(): Promise<FiscalYearOption[]> {
+  return api.get<FiscalYearOption[]>('/works/fiscal-years');
 }
 
 export function fetchTags(params: { facet?: BackendTagFacet } = {}): Promise<BackendTag[]> {
@@ -236,18 +252,34 @@ function torFileName(file: BackendTorFile, index: number): string {
   return `เอกสาร ${index + 1} (${ANNOUNCE_TYPE_LABEL[file.announceType] ?? file.announceType})`;
 }
 
+// A link to show the user must be a plain web address. The TOR links come out of
+// an external feed, so anything else (javascript:, data:, a relative path) is
+// dropped instead of being rendered as a clickable href.
+export function safeHttpUrl(raw: string | undefined | null): string | undefined {
+  if (!raw) return undefined;
+  try {
+    const url = new URL(raw);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function toTORFile(workId: string, file: BackendTorFile, index: number): TORFile {
   const downloadable = Boolean(file.storageKey);
   return {
     id: `${workId}-${index}`,
     name: torFileName(file, index),
     size: '', // the backend doesn't track file size
-    url: downloadable ? torFileUrl(workId, index) : file.sourceUrl,
+    url: downloadable ? torFileUrl(workId, index) : (safeHttpUrl(file.sourceUrl) ?? '#'),
     // Only a file WE downloaded has a download date: an HTML announcement page
     // is read (its `downloadedAt` marks that) but stays a link to the source site.
     date: downloadable ? (file.downloadedAt ?? '').slice(0, 10) : '',
     type: file.linkType.toUpperCase(),
-    external: !downloadable
+    external: !downloadable,
+    // Every TOR links back to where the government published it -- including the
+    // ones we also host a copy of.
+    sourceUrl: safeHttpUrl(file.sourceUrl)
   };
 }
 
@@ -270,13 +302,21 @@ export function toWorkItem(work: BackendWork): WorkItem {
     agencyName: agencyTag?.name ?? work.siteId.name,
     category: categoryTag?.name ?? '',
     method: 'e-bidding',
-    methodLabel: methodTag?.name ?? ANNOUNCE_TYPE_LABEL[work.announceType] ?? work.announceType,
+    // The procurement method (วิธีการจัดซื้อจัดจ้าง) is its 'method' tag -- empty
+    // when the work has none, never the announce-type label ("ประกาศเชิญชวน"),
+    // which is a lifecycle stage and used to be shown here as if it were a method.
+    methodLabel: methodTag?.name ?? '',
     // No price is null, not 0 -- the UI shows why (budgetMissingReason).
     budget: work.budget && work.budget > 0 ? work.budget : null,
     budgetMissingReason: work.budgetMissingReason,
     budgetBasis: work.budgetBasis,
     publishDate: (work.pubDate ?? work.createdAt).slice(0, 10),
-    closingDate: '', // not tracked by the backend (no bid-closing-date field on Work)
+    closingDate: '', // unused -- the deadline is deadlineAt below, an instant shown in Thailand time (lib/deadline.ts)
+    fiscalYear: work.fiscalYear,
+    fiscalYearEstimated: work.fiscalYear ? work.fiscalYearSource === 'estimated' : undefined,
+    deadlineAt: work.deadlineAt,
+    deadlineStartAt: work.deadlineStartAt,
+    deadlineHasTime: work.deadlineHasTime,
     status: work.status as ProcurementStatus,
     statusLabel: statusLabel(work.status),
     description: work.description ?? '',

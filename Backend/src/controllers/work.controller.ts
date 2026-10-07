@@ -9,6 +9,10 @@ export async function list(req: Request, res: Response): Promise<void> {
   ok(res, result);
 }
 
+export async function fiscalYears(_req: Request, res: Response): Promise<void> {
+  ok(res, await workService.listFiscalYears());
+}
+
 export async function getById(req: Request, res: Response): Promise<void> {
   const work = await workService.getWorkById(req.params.id);
   ok(res, work);

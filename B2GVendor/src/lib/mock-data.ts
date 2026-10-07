@@ -75,6 +75,10 @@ export interface TORFile {
   // file downloaded by our own ingestion pipeline (e.g. an 'html'-type TOR
   // link -- see Backend/src/models/work.model.ts ITorFile).
   external?: boolean;
+  // Where this TOR was published on the government site (the e-GP link the
+  // feed gave) -- present for every file, including the ones we also host a
+  // copy of. Only ever an http(s) URL. Undefined when the feed gave none.
+  sourceUrl?: string;
 }
 
 export interface StatusHistoryItem {
@@ -100,6 +104,17 @@ export interface WorkItem {
   budgetBasis?: BudgetBasis;
   publishDate: string;
   closingDate: string;
+  // ปีงบประมาณ (Buddhist Era). `fiscalYearEstimated` = worked out from the
+  // e-GP project number rather than stated in the announcement (see
+  // Backend/src/models/work.model.ts FiscalYearSource), so the UI marks it.
+  fiscalYear?: number;
+  fiscalYearEstimated?: boolean;
+  // The bid-submission deadline, as ISO instants (UTC). `deadlineStartAt` is
+  // when the window opens, if the announcement gives one; `deadlineHasTime` is
+  // false when only a date was stated. All unset when there is no deadline.
+  deadlineAt?: string;
+  deadlineStartAt?: string;
+  deadlineHasTime?: boolean;
   status: ProcurementStatus;
   statusLabel: string;
   description: string;

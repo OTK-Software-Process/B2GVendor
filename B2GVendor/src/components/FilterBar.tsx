@@ -1,29 +1,48 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
 import { ProcurementStatus } from '@/lib/mock-data';
+import { fetchFiscalYears, FiscalYearOption } from '@/lib/backend';
 import { ChevronDown, RotateCcw, SlidersHorizontal } from 'lucide-react';
 
-type FilterKey = 'status' | 'site' | 'agency' | 'category' | 'method' | 'budget';
+type FilterKey = 'status' | 'site' | 'agency' | 'category' | 'method' | 'fiscalYear' | 'budget';
 
 function FilterBarContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { lang, tags, govSites } = useApp();
   const [openKey, setOpenKey] = useState<FilterKey | null>(null);
+  const [fiscalYears, setFiscalYears] = useState<FiscalYearOption[]>([]);
+
+  // Only the years that actually have works are offered. A failed load just
+  // leaves the dropdown empty -- it must never break the rest of the filters.
+  useEffect(() => {
+    let cancelled = false;
+    fetchFiscalYears()
+      .then(list => {
+        if (!cancelled) setFiscalYears(list);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const currentStatus = searchParams.get('status') || '';
   const currentSite = searchParams.get('site') || '';
   // Agency / category / method are all just different facets of the same
   // Tag taxonomy on the real backend (Backend/src/models/tag.model.ts), and
-  // the /works API filters by tag id(s) via a single `tags` param (matches
-  // any, comma-separated) -- there's no separate agency/category/method
-  // field on a Work. So all three dropdowns below toggle membership in this
-  // one shared list.
+  // the /works API filters by tag id(s) via a single `tags` param
+  // (comma-separated) -- there's no separate agency/category/method field on
+  // a Work. So all three dropdowns below toggle membership in this one shared
+  // list. The API reads it by facet: tags of the SAME facet match any of them
+  // (two categories = either), tags of DIFFERENT facets must all match (a
+  // method AND a category).
   const selectedTagIds = (searchParams.get('tags') || '').split(',').filter(Boolean);
   const currentBudgetMax = searchParams.get('budgetMax') || '';
+  const currentFiscalYear = searchParams.get('fiscalYear') || '';
 
   const updateParam = (key: string, value: string) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -50,8 +69,8 @@ function FilterBarContent() {
     setOpenKey(null);
   };
 
-  const hasActiveFilters = currentStatus || currentSite || selectedTagIds.length > 0 || currentBudgetMax;
-  const activeCount = [currentStatus, currentSite, currentBudgetMax].filter(Boolean).length + selectedTagIds.length;
+  const hasActiveFilters = currentStatus || currentSite || selectedTagIds.length > 0 || currentBudgetMax || currentFiscalYear;
+  const activeCount = [currentStatus, currentSite, currentBudgetMax, currentFiscalYear].filter(Boolean).length + selectedTagIds.length;
 
   const statusOptions: { value: ProcurementStatus; labelTh: string; labelEn: string }[] = [
     { value: 'PLANNED', labelTh: 'อยู่ระหว่างวางแผน', labelEn: 'Planned' },
@@ -93,8 +112,11 @@ function FilterBarContent() {
     ? `${lang === 'en' ? 'Category' : 'หมวดหมู่'} (${selectedCategoryCount})`
     : (lang === 'en' ? 'Category' : 'หมวดหมู่');
   const methodLabel = selectedMethodCount > 0
-    ? `${lang === 'en' ? 'Method' : 'วิธีจัดซื้อ'} (${selectedMethodCount})`
-    : (lang === 'en' ? 'Method' : 'วิธีจัดซื้อ');
+    ? `${lang === 'en' ? 'Method' : 'วิธีจัดซื้อจัดจ้าง'} (${selectedMethodCount})`
+    : (lang === 'en' ? 'Method' : 'วิธีจัดซื้อจัดจ้าง');
+  const fiscalYearLabel = currentFiscalYear
+    ? `${lang === 'en' ? 'FY' : 'ปีงบประมาณ'} ${currentFiscalYear}`
+    : (lang === 'en' ? 'Fiscal year' : 'ปีงบประมาณ');
   const budgetLabel = currentBudgetMax
     ? budgetOptions.find(b => b.value === currentBudgetMax)?.label
     : (lang === 'en' ? 'Budget' : 'งบประมาณ');
@@ -234,6 +256,9 @@ function FilterBarContent() {
           </button>
           {openKey === 'method' && (
             <div className={panelClass}>
+              {methodTags.length === 0 && (
+                <p className="px-3 py-2 text-xs text-slate-400">{lang === 'en' ? 'No procurement methods yet' : 'ยังไม่มีวิธีจัดซื้อจัดจ้าง'}</p>
+              )}
               {methodTags.map(tag => (
                 <button
                   key={tag.id}
@@ -243,6 +268,33 @@ function FilterBarContent() {
                   }`}
                 >
                   {tag.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Fiscal year (ปีงบประมาณ) */}
+        <div className="relative">
+          <button onClick={() => toggle('fiscalYear')} className={pillClass(!!currentFiscalYear)}>
+            <span className="truncate max-w-[140px]">{fiscalYearLabel}</span>
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-150 ${openKey === 'fiscalYear' ? 'rotate-180' : ''}`} />
+          </button>
+          {openKey === 'fiscalYear' && (
+            <div className={panelClass}>
+              {fiscalYears.length === 0 && (
+                <p className="px-3 py-2 text-xs text-slate-400">{lang === 'en' ? 'No fiscal years yet' : 'ยังไม่มีข้อมูลปีงบประมาณ'}</p>
+              )}
+              {fiscalYears.map(opt => (
+                <button
+                  key={opt.year}
+                  onClick={() => { updateParam('fiscalYear', currentFiscalYear === String(opt.year) ? '' : String(opt.year)); setOpenKey(null); }}
+                  className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center justify-between gap-2 transition-colors cursor-pointer ${
+                    currentFiscalYear === String(opt.year) ? 'bg-emerald-50 text-emerald-700 font-semibold' : 'text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  <span>{lang === 'en' ? `FY ${opt.year}` : `ปีงบประมาณ ${opt.year}`}</span>
+                  <span className="text-[10px] text-slate-400 shrink-0">{opt.count}</span>
                 </button>
               ))}
             </div>

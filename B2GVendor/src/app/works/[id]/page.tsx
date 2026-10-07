@@ -8,6 +8,8 @@ import { StatusBadge } from '@/components/StatusBadge';
 import { FollowTagButton } from '@/components/FollowTagButton';
 import { TORDownloadList } from '@/components/TORDownloadList';
 import { BudgetText, budgetLabel } from '@/components/BudgetText';
+import { DeadlineText } from '@/components/DeadlineText';
+import { fiscalYearHint } from '@/components/FiscalYearText';
 import { LoadingSkeleton } from '@/components/LoadingSkeleton';
 import { ErrorRetry } from '@/components/ErrorRetry';
 import { useApp } from '@/context/AppContext';
@@ -158,6 +160,35 @@ export default function WorkDetailPage() {
               )}
             </div>
           </div>
+
+          {/* Procurement facts: bid deadline, fiscal year, method -- each shown only when known */}
+          {(work.deadlineAt || work.fiscalYear || work.methodLabel) && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {work.deadlineAt && (
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/60">
+                  <DeadlineText work={work} variant="block" align="left" dateClassName="text-lg font-bold text-slate-900" />
+                </div>
+              )}
+              {work.fiscalYear && (
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/60">
+                  <span className="text-xs text-slate-400 font-medium block">{lang === 'en' ? 'Fiscal year' : 'ปีงบประมาณ'}</span>
+                  <span className="text-lg font-bold text-slate-900">
+                    {work.fiscalYear}
+                    {work.fiscalYearEstimated && <span className="text-slate-400" aria-label={lang === 'en' ? 'estimated' : 'โดยประมาณ'}> ≈</span>}
+                  </span>
+                  {work.fiscalYearEstimated && (
+                    <span className="block text-xs text-slate-400 mt-1 leading-snug">{fiscalYearHint(true, lang)}</span>
+                  )}
+                </div>
+              )}
+              {work.methodLabel && (
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/60">
+                  <span className="text-xs text-slate-400 font-medium block">{lang === 'en' ? 'Procurement method' : 'วิธีการจัดซื้อจัดจ้าง'}</span>
+                  <span className="text-sm font-bold text-slate-900 leading-snug">{work.methodLabel}</span>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Applied Tags Section */}
           <div className="pt-2">

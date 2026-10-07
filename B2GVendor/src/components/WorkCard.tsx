@@ -6,6 +6,8 @@ import { WorkItem } from '@/lib/mock-data';
 import { StatusBadge } from './StatusBadge';
 import { FollowTagButton } from './FollowTagButton';
 import { BudgetText, budgetLabel } from './BudgetText';
+import { DeadlineText } from './DeadlineText';
+import { FiscalYearText } from './FiscalYearText';
 import { useApp } from '@/context/AppContext';
 import { Building2, ChevronRight } from 'lucide-react';
 
@@ -53,6 +55,8 @@ export function WorkCard({ work, layout = 'row' }: WorkCardProps) {
           <span className="text-amber-700 font-medium">{work.publishDate}</span>
         </div>
 
+        <DeadlineText work={work} />
+
         <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
           {tagChips}
           <Link
@@ -99,7 +103,8 @@ export function WorkCard({ work, layout = 'row' }: WorkCardProps) {
                 <span className="truncate max-w-[220px]">{work.agencyName}</span>
               </span>
             )}
-            <span>{work.methodLabel}</span>
+            {work.methodLabel && <span>{work.methodLabel}</span>}
+            {work.fiscalYear && <FiscalYearText year={work.fiscalYear} estimated={work.fiscalYearEstimated} className="font-medium" />}
           </div>
 
           {tagChips}
@@ -115,6 +120,7 @@ export function WorkCard({ work, layout = 'row' }: WorkCardProps) {
             <span className="text-[11px] text-slate-400 block">{lang === 'en' ? 'Published' : 'ประกาศเมื่อ'}</span>
             <span className="text-xs sm:text-sm font-semibold text-amber-700">{work.publishDate}</span>
           </div>
+          <DeadlineText work={work} variant="block" />
           <Link
             href={`/works/${work.id}`}
             className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 hover:text-emerald-700 hover:underline shrink-0"

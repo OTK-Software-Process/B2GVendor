@@ -9,5 +9,7 @@ import { asyncHandler } from '../utils/asyncHandler';
 export const workRouter = Router();
 
 workRouter.get('/', validate(listWorksQuerySchema, 'query'), asyncHandler(workController.list));
+// Before '/:id', or "fiscal-years" would be read as a work id.
+workRouter.get('/fiscal-years', asyncHandler(workController.fiscalYears));
 workRouter.get('/:id', asyncHandler(workController.getById));
 workRouter.get('/:id/tor/:index', asyncHandler(workController.downloadTorFile));

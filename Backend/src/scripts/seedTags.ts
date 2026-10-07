@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { env } from '../config/env';
 import { Tag, TagFacet } from '../models/tag.model';
+import { PROCUREMENT_METHODS } from '../utils/procurementFacts';
 
 /**
  * Seeds the real category/method/keyword tag vocabulary -- 'site' facet
@@ -30,9 +31,11 @@ async function main(): Promise<void> {
       aliases: ['Software', 'App', 'ระบบสารสนเทศ', 'Cloud', 'ซอฟต์แวร์'],
       includeInIngestionFilter: true
     },
-    // --- method ---
-    { name: 'วิธีประกวดราคาอิเล็กทรอนิกส์ (e-bidding)', facet: 'method', aliases: ['e-bidding', 'อีบิดดิ้ง'] },
-    { name: 'วิธีตลาดอิเล็กทรอนิกส์ (e-market)', facet: 'method', aliases: ['e-market', 'อีมาร์เก็ต'] },
+    // --- method (วิธีการจัดซื้อจัดจ้าง) ---
+    // The catalog ingestion reads from titles/documents -- these are created on
+    // demand anyway (findOrCreateMethodTag), seeding just makes them show up in
+    // the filter and the admin tag list before the first work arrives.
+    ...PROCUREMENT_METHODS.map(m => ({ name: m.tagName, facet: 'method' as const, aliases: m.aliases })),
     // --- keyword ---
     { name: 'ระบบระบายน้ำและป้องกันน้ำท่วม', facet: 'keyword', aliases: ['น้ำท่วม', 'คลอง', 'เครื่องสูบน้ำ'] },
     { name: 'กล้องวงจรปิด CCTV', facet: 'keyword', aliases: ['CCTV', 'กล้องความปลอดภัย', 'Smart City'] }
