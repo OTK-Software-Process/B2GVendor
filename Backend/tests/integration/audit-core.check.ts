@@ -2,6 +2,7 @@ import cookieParser from 'cookie-parser';
 import express from 'express';
 import mongoose, { Types } from 'mongoose';
 import { createApp } from '../../src/app';
+import { AUDITED_MODELS } from '../../src/audit/registry';
 import { SESSION_COOKIE_NAME } from '../../src/config/cookie';
 import { auditContextMiddleware } from '../../src/middlewares/auditContext.middleware';
 import { requireAuth } from '../../src/middlewares/auth.middleware';
@@ -27,6 +28,11 @@ async function main(): Promise<void> {
   process.env.MONGODB_URI = MONGODB_URI;
   await mongoose.connect(MONGODB_URI);
   await mongoose.connection.dropDatabase();
+
+  // This check tests the MANUAL audit.log() API, so it starts from an empty registry:
+  // otherwise creating its fixture accounts would add automatic rows. The real
+  // registry is covered end to end by audit-registry.check.ts.
+  for (const name of Object.keys(AUDITED_MODELS)) delete AUDITED_MODELS[name];
 
   // ============================================================== diff (pure)
   const create = diffSnapshots(undefined, { name: 'Bridge', facet: 'keyword', aliases: ['a'] });

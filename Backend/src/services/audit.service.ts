@@ -1,3 +1,4 @@
+import { Document } from 'mongoose';
 import { AuditLog, IAuditLog } from '../models/auditLog.model';
 import { AuditActor, getAuditContext, runWithAuditContext } from '../utils/auditContext';
 import { diffSnapshots, sanitizeFreeform } from '../utils/auditDiff';
@@ -27,7 +28,7 @@ export interface AuditLogInput {
   /** Free string describing what happened, e.g. "account.suspend". */
   action: string;
   /** What it happened to: { type, id, label? } or a Mongoose document (type/id/label are inferred). */
-  entity: AuditEntityRef | { _id: unknown; constructor: { modelName?: string } };
+  entity: AuditEntityRef | Document;
   /** State before the change (document or plain object). Omit for a create. */
   before?: unknown;
   /** State after the change. Omit for a delete. */
@@ -51,8 +52,10 @@ export interface AuditLogInput {
 
 const MAX_ACTION_LENGTH = 100;
 
-function isDocument(entity: AuditLogInput['entity']): entity is { _id: unknown; constructor: { modelName?: string } } {
-  return typeof entity === 'object' && entity !== null && '_id' in entity && !('type' in entity);
+// A Mongoose document is recognised by its toObject(), NOT by lacking a "type"
+// property: an Account has its own field called "type" (individual/business).
+function isDocument(entity: AuditLogInput['entity']): entity is Document {
+  return typeof entity === 'object' && entity !== null && '_id' in entity && typeof (entity as { toObject?: unknown }).toObject === 'function';
 }
 
 function lowerFirst(value: string): string {

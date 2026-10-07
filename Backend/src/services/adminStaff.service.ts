@@ -4,6 +4,7 @@ import { Account, AccountRole, IAccount, Permission, adminPermissionProfile } fr
 import { Session } from '../models/session.model';
 import { AppError } from '../utils/AppError';
 import { deleteAccountAndData, SetupEmailResult, sendPasswordLink } from './adminAccount.service';
+import { audit } from './audit.service';
 import { revokeAllSessions } from './session.service';
 import { CreateAdminInput, UpdateAdminInput } from '../validators/adminStaff.validator';
 
@@ -220,7 +221,10 @@ export async function reactivateAdmin(id: string): Promise<StaffView> {
 // suspected compromise, where the person should simply have to sign in again.
 export async function signOutAdminEverywhere(id: string): Promise<{ revoked: number }> {
   const account = await findManageableAdmin(id);
-  return { revoked: await revokeAllSessions(account._id) };
+  const revoked = await revokeAllSessions(account._id);
+  // Sessions are not an audited model (they churn on every sign-in), so record the action by hand.
+  await audit.log({ action: 'account.sign_out_all', entity: account, metadata: { sessionsRevoked: revoked } });
+  return { revoked };
 }
 
 export async function sendAdminPasswordLink(id: string): Promise<SetupEmailResult> {
@@ -228,7 +232,9 @@ export async function sendAdminPasswordLink(id: string): Promise<SetupEmailResul
   if (account.status === 'suspended') {
     throw AppError.badRequest('This account is suspended. Reactivate it before sending a password link.');
   }
-  return sendPasswordLink(account);
+  const result = await sendPasswordLink(account);
+  await audit.log({ action: 'account.password_link_sent', entity: account, metadata: { emailSent: result.sent, reason: result.reason } });
+  return result;
 }
 
 // Permanent -- same cascade as deleting a vendor.

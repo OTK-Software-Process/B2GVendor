@@ -83,24 +83,53 @@ async function safely(what: string, work: () => Promise<void>): Promise<void> {
   }
 }
 
+function restrictToFields(snapshot: unknown, fields: readonly string[] | undefined): unknown {
+  if (!fields || snapshot === undefined || snapshot === null) return snapshot;
+  return pickTopLevel(snapshot, new Set(fields));
+}
+
 async function record(
   modelName: string,
   config: AuditRegistration,
   operation: AuditOperation,
   id: unknown,
-  before: unknown,
-  after: unknown,
-  labelSource: unknown = after ?? before
+  rawBefore: unknown,
+  rawAfter: unknown,
+  labelSource: unknown = rawAfter ?? rawBefore
 ): Promise<void> {
   const entityType = config.entityType ?? lowerFirst(modelName);
+  // A model registered with `fields` is audited on those fields only.
+  const before = restrictToFields(rawBefore, config.fields);
+  const after = restrictToFields(rawAfter, config.fields);
 
   let action = `${entityType}.${operation}`;
-  if (config.action) {
-    try {
-      const { changes } = diffSnapshots(before, after, { redact: config.redact, ignore: config.ignore });
-      action = config.action({ operation, entityType, changes: changes as AuditChange[], before: toPlain(before), after: toPlain(after) }) ?? action;
-    } catch {
-      /* a faulty action resolver falls back to the default name */
+  let extra: Record<string, unknown> | undefined;
+  if (config.action || config.metadata) {
+    const { changes } = diffSnapshots(before, after, { redact: config.redact, ignore: config.ignore });
+    // Nothing changed (so nothing will be logged): do not spend time on names or lookups.
+    const unchanged = before != null && after != null && changes.length === 0;
+    if (unchanged) return;
+    const context = {
+      operation,
+      entityType,
+      changes: changes as AuditChange[],
+      before: toPlain(before),
+      after: toPlain(after),
+      snapshot: (toPlain(labelSource) ?? {}) as Record<string, unknown>
+    };
+    if (config.action) {
+      try {
+        action = config.action(context) ?? action;
+      } catch {
+        /* a faulty action resolver falls back to the default name */
+      }
+    }
+    if (config.metadata) {
+      try {
+        extra = await config.metadata(context);
+      } catch {
+        /* faulty extras are dropped; the audit row itself is kept */
+      }
     }
   }
 
@@ -111,7 +140,7 @@ async function record(
     after,
     redact: config.redact,
     ignore: config.ignore,
-    metadata: { source: 'auto', operation, model: modelName }
+    metadata: { ...extra, source: 'auto', operation, model: modelName }
   });
 }
 
@@ -121,6 +150,15 @@ function pickTopLevel(snapshot: unknown, keys: Set<string>): Record<string, unkn
   const out: Record<string, unknown> = {};
   for (const key of keys) if (key in plain) out[key] = plain[key];
   return out;
+}
+
+// For a model audited on specific fields, read only those fields (plus whatever
+// is needed to label the row) instead of whole documents. Not done when the
+// label is a function, since we cannot know which fields it reads.
+function readProjection(config: AuditRegistration): string | undefined {
+  if (!config.fields || typeof config.label === 'function') return undefined;
+  const labelFields = config.label ? [config.label] : ['email', 'name', 'title'];
+  return [...new Set([...config.fields, ...labelFields])].join(' ');
 }
 
 export function auditPlugin(schema: Schema): void {
@@ -136,7 +174,10 @@ export function auditPlugin(schema: Schema): void {
     if (this.isNew) return;
 
     await safely(`${modelName} save: reading previous state`, async () => {
-      const touched = new Set<string>(this.modifiedPaths().map((p: string) => p.split('.')[0]));
+      let touched = new Set<string>(this.modifiedPaths().map((p: string) => p.split('.')[0]));
+      // A model watched on specific fields (e.g. Work) is saved very often by other
+      // code: skip the extra read unless one of those fields is among the changes.
+      if (config.fields) touched = new Set([...touched].filter(key => config.fields!.includes(key)));
       if (touched.size === 0) return;
       const Model = this.constructor as Model<any>;
       const sel = hiddenSelection(schema);
@@ -199,6 +240,8 @@ export function auditPlugin(schema: Schema): void {
       const single = SINGLE_DOC_OPS.has(op);
       let read = this.model.find(this.getFilter()).limit(single ? 1 : MAX_BULK + 1);
       const sel = hiddenSelection(this.model.schema);
+      const projection = readProjection(config);
+      if (projection) read = read.select(projection);
       if (sel) read = read.select(sel);
       const sort = this.getOptions?.().sort;
       if (single && sort) read = read.sort(sort);
@@ -228,6 +271,8 @@ export function auditPlugin(schema: Schema): void {
         }
       } else {
         let read = Model.find({ _id: { $in: ids } });
+        const projection = readProjection(config);
+        if (projection) read = read.select(projection);
         if (sel) read = read.select(sel);
         const afterById = new Map((await read.lean()).map((d: any) => [String(d._id), d]));
         if (wants(config, 'update')) {

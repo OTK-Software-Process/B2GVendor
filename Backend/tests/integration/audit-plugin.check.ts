@@ -35,7 +35,10 @@ async function main(): Promise<void> {
   await mongoose.connection.dropDatabase();
   await Promise.all([Tag.init(), Account.init(), AuditLog.init()]);
 
-  record(Object.keys(AUDITED_MODELS).length >= 0 && verifyAuditSetup().length === 0, 'startup check: nothing registered, nothing wrong');
+  // This check tests the plugin MECHANICS, so it starts from an empty registry: the
+  // real entries (Account, Tag, Work) are covered end to end by audit-registry.check.ts.
+  for (const name of Object.keys(AUDITED_MODELS)) delete AUDITED_MODELS[name];
+  record(verifyAuditSetup().length === 0, 'startup check: nothing registered, nothing wrong');
 
   // ============================================== not registered = not audited
   const quiet = await Tag.create({ name: 'Quiet', facet: 'keyword' });
@@ -246,6 +249,45 @@ async function main(): Promise<void> {
   await audit.log({ action: 'manual.test', entity: { type: 'x', id: '1' } });
   record((await AuditLog.countDocuments({})) === 1, 'even if "AuditLog" is put in the registry, it never audits itself (no feedback loop)');
   unregisterAuditedModel('AuditLog');
+
+  // ============================================ `fields` and `metadata` options
+  const Widget = mongoose.model('Widget', new Schema({ name: String, size: Number, note: String }, { timestamps: true }));
+  registerAuditedModel('Widget', {
+    label: 'name',
+    fields: ['size'],
+    metadata: async ({ changes, snapshot }) => ({ widgetName: snapshot.name, changed: changes.length, source: 'evil' })
+  });
+  const widget = await Widget.create({ name: 'W1', size: 1, note: 'a' });
+  await clearLog();
+  widget.note = 'b';
+  await widget.save();
+  await Widget.updateOne({ _id: widget._id }, { note: 'c' });
+  await Widget.updateMany({}, { $set: { note: 'd' } });
+  record((await AuditLog.countDocuments({})) === 0, '"fields": a change to an UNWATCHED field records nothing (save, updateOne, updateMany)');
+  widget.size = 2;
+  await widget.save();
+  r = await rows();
+  record(r.length === 1 && changePaths(r[0]) === 'size' && r[0].changes[0].before === 1 && r[0].changes[0].after === 2, '"fields": a change to a watched field is recorded, and ONLY that field is in the diff');
+  record(r[0].metadata?.widgetName === 'W1' && r[0].metadata?.changed === 1, '"metadata": the function receives the whole entity (name) and the diff, and its result is stored');
+  record(r[0].metadata?.source === 'auto', '"metadata": it cannot override the built-in "source" key');
+  record(r[0].entityLabel === 'W1', '"fields": the label still comes from the whole document (name is not a watched field)');
+  await clearLog();
+  await Widget.updateOne({ _id: widget._id }, { size: 3, note: 'e' });
+  r = await rows();
+  record(r.length === 1 && changePaths(r[0]) === 'size' && r[0].entityLabel === 'W1', '"fields" with updateOne: an update touching both watched and unwatched fields logs only the watched one, label intact');
+  await clearLog();
+  await Widget.deleteOne({ _id: widget._id });
+  r = await rows();
+  record(r.length === 1 && r[0].action === 'widget.delete' && changePaths(r[0]) === 'size', '"fields" with a delete: only the watched fields are kept');
+
+  registerAuditedModel('Widget', { fields: ['size'], metadata: () => { throw new Error('metadata blew up'); } });
+  const w2 = await Widget.create({ name: 'W2', size: 1 });
+  await clearLog();
+  w2.size = 9;
+  await w2.save();
+  r = await rows();
+  record(r.length === 1 && r[0].metadata?.source === 'auto' && r[0].changes[0].after === 9, 'a metadata function that throws drops only the extras: the audit row is still written');
+  unregisterAuditedModel('Widget');
 
   // ====================================== manual call + withoutAuto (custom action)
   registerAuditedModel('Tag');

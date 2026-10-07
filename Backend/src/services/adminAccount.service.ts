@@ -8,6 +8,7 @@ import { Token } from '../models/token.model';
 import { AppError } from '../utils/AppError';
 import { logger } from '../utils/logger';
 import { isEmailConfigured, sendPasswordResetEmail, sendPasswordSetupEmail } from './email.service';
+import { audit } from './audit.service';
 import { revokeAllSessions } from './session.service';
 import { issueToken } from './token.service';
 import { CreateVendorInput, UpdateVendorInput } from '../validators/adminAccount.validator';
@@ -228,7 +229,10 @@ export async function sendVendorPasswordLink(id: string): Promise<SetupEmailResu
   if (account.status === 'suspended') {
     throw AppError.badRequest('This account is suspended. Reactivate it before sending a password link.');
   }
-  return sendPasswordLink(account);
+  const result = await sendPasswordLink(account);
+  // Not a change to the account itself, so the automatic capture cannot see it.
+  await audit.log({ action: 'account.password_link_sent', entity: account, metadata: { emailSent: result.sent, reason: result.reason } });
+  return result;
 }
 
 // Shared by vendor and admin deletion. Dependents go first so a failure
