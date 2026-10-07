@@ -6,6 +6,7 @@ import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
 import { api } from '@/lib/api';
+import { useSearchHref } from '@/lib/useSearchHref';
 import type { AccountView } from '@/context/AppContext';
 import {
   Bell,
@@ -24,6 +25,7 @@ import {
 
 export function Navbar() {
   const pathname = usePathname();
+  const searchHref = useSearchHref(); // "/search" + the filters the user has left on
   const { role, lang, setLang, unreadCount, signOut, account, signIn } = useApp();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -85,7 +87,7 @@ export function Navbar() {
               {lang === 'en' ? 'Home' : 'หน้าแรก'}
             </Link>
             <Link
-              href="/search"
+              href={searchHref}
               className={`px-3 py-2 rounded-xl transition-colors duration-150 ${
                 pathname.startsWith('/search') ? 'text-emerald-700 bg-emerald-50' : 'text-slate-600 hover:text-emerald-700 hover:bg-slate-50'
               }`}
@@ -272,7 +274,7 @@ export function Navbar() {
             {lang === 'en' ? 'Home' : 'หน้าแรก'}
           </Link>
           <Link
-            href="/search"
+            href={searchHref}
             onClick={() => setMobileMenuOpen(false)}
             className="block px-3 py-2.5 text-base font-semibold text-slate-700 hover:bg-slate-50 hover:text-emerald-700 rounded-xl transition-colors"
           >

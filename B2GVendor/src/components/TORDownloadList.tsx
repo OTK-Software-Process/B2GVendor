@@ -2,11 +2,17 @@
 
 import React from 'react';
 import { TORFile } from '@/lib/mock-data';
+import { EgpPageLink } from '@/lib/egp';
+import { EgpPageLinks } from './EgpPageLinks';
 import { useApp } from '@/context/AppContext';
-import { FileText, Download, ExternalLink, ShieldCheck } from 'lucide-react';
+import { FileText, Download, ExternalLink } from 'lucide-react';
 
 interface TORDownloadListProps {
   files: TORFile[];
+  // The work's own page(s) on e-GP2 and its project number -- the "open on the
+  // government site" link sits at the top of the TOR section.
+  egpPages?: EgpPageLink[];
+  projectId?: string;
 }
 
 function hostOf(url: string): string {
@@ -17,7 +23,7 @@ function hostOf(url: string): string {
   }
 }
 
-export function TORDownloadList({ files }: TORDownloadListProps) {
+export function TORDownloadList({ files, egpPages = [], projectId }: TORDownloadListProps) {
   const { lang } = useApp();
 
   // Every TOR links back to where the government published it. A file we host a
@@ -40,11 +46,9 @@ export function TORDownloadList({ files }: TORDownloadListProps) {
             {lang === 'en' ? 'TOR Specifications & Attachments' : 'เอกสารประกวดราคาและข้อกำหนด TOR'}
           </h3>
         </div>
-        <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-100 px-2.5 py-1 rounded-full">
-          <ShieldCheck className="w-3.5 h-3.5" />
-          <span>HTTPS</span>
-        </span>
       </div>
+
+      <EgpPageLinks links={egpPages} projectId={projectId} />
 
       <div className="divide-y divide-slate-200">
         {files.map((file, index) => {

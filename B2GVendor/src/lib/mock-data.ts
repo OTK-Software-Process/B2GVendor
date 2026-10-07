@@ -1,3 +1,5 @@
+import type { EgpPageLink } from './egp';
+
 // Mock-era statuses (INVITATION/EVALUATION) stay for the still-mock admin +
 // notification pages; PLANNED/DRAFT_TOR/AMENDED are the real backend's
 // WorkStatus values (see Backend/src/models/work.model.ts) used by every
@@ -90,6 +92,12 @@ export interface StatusHistoryItem {
 
 export interface WorkItem {
   id: string;
+  // The e-GP project number (e.g. 69109082628) -- what a vendor types into e-GP
+  // to find the project, and what the e-GP2 page link is built from.
+  projectId?: string;
+  // The government's own e-GP2 page(s) for this work, best first. Empty when
+  // none is known (see lib/egp.ts for exactly when one is offered).
+  egpPages?: EgpPageLink[];
   title: string;
   siteId: string;
   siteName: string;

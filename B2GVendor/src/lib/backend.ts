@@ -10,6 +10,7 @@
 // account/user admin) are unaffected.
 
 import { api } from './api';
+import { egp2PageLinks } from './egp';
 import {
   WorkItem,
   TagItem,
@@ -295,6 +296,8 @@ export function toWorkItem(work: BackendWork): WorkItem {
 
   return {
     id: work._id,
+    projectId: work.projectId,
+    egpPages: egp2PageLinks(work),
     title: work.title,
     siteId: work.siteId._id,
     siteName: work.siteId.name,

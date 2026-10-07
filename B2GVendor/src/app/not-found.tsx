@@ -4,9 +4,11 @@ import Link from 'next/link';
 import { ArrowRight, Compass, House, Search } from 'lucide-react';
 import { PublicShell } from '@/components/PublicShell';
 import { useApp } from '@/context/AppContext';
+import { useSearchHref } from '@/lib/useSearchHref';
 
 export default function NotFound() {
   const { lang } = useApp();
+  const searchHref = useSearchHref();
   const isEnglish = lang === 'en';
 
   return (
@@ -59,7 +61,7 @@ export default function NotFound() {
                 <ArrowRight className="h-4 w-4" />
               </Link>
               <Link
-                href="/search"
+                href={searchHref}
                 className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-bold text-slate-700 transition-colors hover:border-sky-400 hover:text-sky-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-700"
               >
                 <Search className="h-4 w-4" />

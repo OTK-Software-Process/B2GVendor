@@ -4,9 +4,11 @@ import React from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useApp } from '@/context/AppContext';
+import { useSearchHref } from '@/lib/useSearchHref';
 
 export function Footer() {
   const { lang, ingestionRuns, role } = useApp();
+  const searchHref = useSearchHref();
   const isAdminRole = role === 'admin' || role === 'superadmin';
   const latestRun = ingestionRuns[0];
 
@@ -32,7 +34,7 @@ export function Footer() {
             <h4 className="font-bold text-slate-900 text-sm uppercase tracking-wider">{lang === 'en' ? 'Quick Navigation' : 'เมนูด่วน'}</h4>
             <ul className="space-y-1.5 font-medium">
               <li><Link href="/" className="text-slate-500 hover:text-emerald-700 transition-colors">{lang === 'en' ? 'Home' : 'หน้าแรก'}</Link></li>
-              <li><Link href="/search" className="text-slate-500 hover:text-emerald-700 transition-colors">{lang === 'en' ? 'Search Works' : 'ค้นหาโครงการ'}</Link></li>
+              <li><Link href={searchHref} className="text-slate-500 hover:text-emerald-700 transition-colors">{lang === 'en' ? 'Search Works' : 'ค้นหาโครงการ'}</Link></li>
               <li><Link href="/agencies" className="text-slate-500 hover:text-emerald-700 transition-colors">{lang === 'en' ? 'Government Sites' : 'หน่วยงานภาครัฐ'}</Link></li>
               <li><Link href="/account/interests" className="text-slate-500 hover:text-emerald-700 transition-colors">{lang === 'en' ? 'Tag Vocabulary' : 'แท็กที่ติดตาม'}</Link></li>
               {isAdminRole && (

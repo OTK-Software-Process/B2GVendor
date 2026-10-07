@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { ApiError } from '@/lib/api';
 import { SitePollInfo } from '@/components/SitePollInfo';
-import { Sliders, ShieldCheck, Globe, Lock, Plus, X, Power, Info, Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Sliders, ShieldCheck, Lock, Plus, X, Power, Info, Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
 
 export default function SourceConfigPage() {
   const {
@@ -156,18 +156,6 @@ export default function SourceConfigPage() {
           <span>{notice.text}</span>
         </div>
       )}
-
-      {/* How ingestion works */}
-      <div className="flex items-start gap-2.5 text-xs text-slate-600 bg-sky-50 border border-sky-100 rounded-2xl p-4">
-        <Globe className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
-        <p className="leading-relaxed">
-          {lang === 'en' ? (
-            <>Each site is polled from the official <strong>e-GP announcement RSS feed</strong> (draft TOR, invitation, winner…) using its e-GP department ID, then enriched from <strong>data.go.th</strong> after award — no scraping. Each site has its own rate limit and enabled toggle, so one site&apos;s outage or schema change can&apos;t block the others. Regular admins can see this list; only a <strong>super admin</strong> can add or disable a site.</>
-          ) : (
-            <>แต่ละหน่วยงานดึงข้อมูลจาก <strong>RSS ประกาศของ e-GP</strong> (ร่าง TOR ประกาศเชิญชวน ผู้ชนะ ฯลฯ) ด้วยรหัสหน่วยงานใน e-GP แล้วเสริมข้อมูลจาก <strong>data.go.th</strong> หลังประกาศผล — ไม่มีการ Scraping แต่ละหน่วยงานมีอัตราการดึงข้อมูลและสถานะเปิด/ปิดใช้งานแยกกัน หากหน่วยงานใดมีปัญหาจะไม่กระทบหน่วยงานอื่น ผู้ดูแลทั่วไปดูรายการนี้ได้ แต่มีเพียง<strong>ผู้ดูแลระบบสูงสุด</strong>เท่านั้นที่เพิ่มหรือปิดใช้งานหน่วยงานได้</>
-          )}
-        </p>
-      </div>
 
       {/* Government Sites List */}
       <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden">

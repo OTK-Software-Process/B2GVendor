@@ -9,12 +9,14 @@ import { FollowTagButton } from '@/components/FollowTagButton';
 import { TORDownloadList } from '@/components/TORDownloadList';
 import { BudgetText, budgetLabel } from '@/components/BudgetText';
 import { DeadlineText } from '@/components/DeadlineText';
+import { EgpPageLinks } from '@/components/EgpPageLinks';
 import { fiscalYearHint } from '@/components/FiscalYearText';
 import { LoadingSkeleton } from '@/components/LoadingSkeleton';
 import { ErrorRetry } from '@/components/ErrorRetry';
 import { useApp } from '@/context/AppContext';
 import { fetchWorkById, toWorkItem } from '@/lib/backend';
 import { canManageTags } from '@/lib/adminAccess';
+import { useSearchHref } from '@/lib/useSearchHref';
 import { WorkItem } from '@/lib/mock-data';
 import {
   FileText,
@@ -29,6 +31,7 @@ export default function WorkDetailPage() {
   const params = useParams();
   const { id } = params;
   const { lang, role, account } = useApp();
+  const searchHref = useSearchHref(); // back to the search results WITH the filters the user left on
 
   const [work, setWork] = useState<WorkItem | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -83,7 +86,7 @@ export default function WorkDetailPage() {
         {/* Back Link & Deep Link Indicator */}
         <div className="flex flex-wrap items-center justify-between gap-4">
           <Link
-            href="/search"
+            href={searchHref}
             className="inline-flex items-center gap-2 text-xs font-bold text-slate-600 hover:text-emerald-600 transition-colors"
           >
             <ArrowLeft className="w-4 h-4" />
@@ -210,11 +213,14 @@ export default function WorkDetailPage() {
 
         {/* TOR Downloads Component */}
         {work.torFiles.length > 0 ? (
-          <TORDownloadList files={work.torFiles} />
+          <TORDownloadList files={work.torFiles} egpPages={work.egpPages} projectId={work.projectId} />
         ) : (
-          <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200 flex items-center gap-3 text-sm text-slate-500">
-            <FileText className="w-5 h-5 text-slate-300 shrink-0" />
-            <span>{lang === 'en' ? 'No TOR document has been ingested for this work yet.' : 'ยังไม่มีเอกสาร TOR สำหรับรายการนี้'}</span>
+          <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200 space-y-3 text-sm text-slate-500">
+            <div className="flex items-center gap-3">
+              <FileText className="w-5 h-5 text-slate-300 shrink-0" />
+              <span>{lang === 'en' ? 'No TOR document has been ingested for this work yet.' : 'ยังไม่มีเอกสาร TOR สำหรับรายการนี้'}</span>
+            </div>
+            <EgpPageLinks links={work.egpPages ?? []} projectId={work.projectId} />
           </div>
         )}
 

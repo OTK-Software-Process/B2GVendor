@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { SearchBar } from '@/components/SearchBar';
 import { FilterBar } from '@/components/FilterBar';
@@ -14,6 +14,7 @@ import { FollowTagButton } from '@/components/FollowTagButton';
 import { useApp } from '@/context/AppContext';
 import { fetchWorks, toWorkItem, ListWorksParams } from '@/lib/backend';
 import { WorkItem } from '@/lib/mock-data';
+import { clearSavedFilterQuery, loadSavedFilterQuery, pickFilterQuery, saveFilterQuery } from '@/lib/savedSearchFilters';
 import { X, ArrowUpDown } from 'lucide-react';
 
 const PAGE_SIZE = 10;
@@ -27,6 +28,42 @@ export function SearchClient() {
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<WorkItem[]>([]);
   const [total, setTotal] = useState(0);
+
+  // Filters are remembered across pages (lib/savedSearchFilters.ts): arriving at
+  // a bare /search puts back the ones the user left with, and every change to
+  // the URL's filters is saved -- an emptied URL (the clear buttons, the last
+  // chip's cross) forgets them. (The unfiltered fetch the first render starts in
+  // the restore case is cancelled as soon as the URL is replaced.)
+  const arrivalChecked = useRef(false);
+  const restorePending = useRef(false);
+
+  useEffect(() => {
+    if (arrivalChecked.current) return;
+    arrivalChecked.current = true;
+
+    // Only a BARE /search is restored: a URL that carries anything (a link from
+    // the home page, a shared link, "?page=2") is what the user asked for.
+    if (searchParams.toString() === '') {
+      const saved = loadSavedFilterQuery();
+      if (saved) {
+        restorePending.current = true;
+        router.replace(`/search?${saved}`);
+      }
+    }
+  }, [router, searchParams]);
+
+  useEffect(() => {
+    if (restorePending.current) {
+      // Still on the bare URL: the restore hasn't landed yet, and "bare" must not
+      // be mistaken for "the user cleared everything" (that would wipe the very
+      // filters being restored).
+      if (searchParams.toString() === '') return;
+      restorePending.current = false;
+    }
+    const filters = pickFilterQuery(new URLSearchParams(searchParams.toString()));
+    if (filters) saveFilterQuery(filters);
+    else clearSavedFilterQuery();
+  }, [searchParams]);
 
   const q = searchParams.get('q') || '';
   const statusParam = searchParams.get('status') || '';

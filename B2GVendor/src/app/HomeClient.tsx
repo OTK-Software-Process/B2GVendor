@@ -8,10 +8,12 @@ import { WorkCard } from '@/components/WorkCard';
 import { useApp } from '@/context/AppContext';
 import { fetchWorks, toWorkItem } from '@/lib/backend';
 import { WorkItem } from '@/lib/mock-data';
+import { useSearchHref } from '@/lib/useSearchHref';
 import { ArrowRight, ArrowUpRight } from 'lucide-react';
 
 export function HomeClient() {
   const { lang, ingestionRuns, govSites } = useApp();
+  const searchHref = useSearchHref();
   const latestRun = ingestionRuns[0];
 
   const [recentWorks, setRecentWorks] = useState<WorkItem[]>([]);
@@ -100,7 +102,7 @@ export function HomeClient() {
             </div>
 
             <Link
-              href="/search"
+              href={searchHref}
               className="shrink-0 inline-flex items-center gap-1 text-sm font-bold text-emerald-600 hover:text-emerald-700"
             >
               <span>{lang === 'en' ? 'View all' : 'ดูทั้งหมด'}</span>
