@@ -231,7 +231,7 @@ export async function sendVendorPasswordLink(id: string): Promise<SetupEmailResu
   }
   const result = await sendPasswordLink(account);
   // Not a change to the account itself, so the automatic capture cannot see it.
-  await audit.log({ action: 'account.password_link_sent', entity: account, metadata: { emailSent: result.sent, reason: result.reason } });
+  await audit.log({ action: 'account.password_link_sent', entity: account, metadata: { role: account.role, emailSent: result.sent, reason: result.reason } });
   return result;
 }
 

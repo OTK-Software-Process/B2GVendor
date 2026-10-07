@@ -223,7 +223,7 @@ export async function signOutAdminEverywhere(id: string): Promise<{ revoked: num
   const account = await findManageableAdmin(id);
   const revoked = await revokeAllSessions(account._id);
   // Sessions are not an audited model (they churn on every sign-in), so record the action by hand.
-  await audit.log({ action: 'account.sign_out_all', entity: account, metadata: { sessionsRevoked: revoked } });
+  await audit.log({ action: 'account.sign_out_all', entity: account, metadata: { role: account.role, sessionsRevoked: revoked } });
   return { revoked };
 }
 
@@ -233,7 +233,7 @@ export async function sendAdminPasswordLink(id: string): Promise<SetupEmailResul
     throw AppError.badRequest('This account is suspended. Reactivate it before sending a password link.');
   }
   const result = await sendPasswordLink(account);
-  await audit.log({ action: 'account.password_link_sent', entity: account, metadata: { emailSent: result.sent, reason: result.reason } });
+  await audit.log({ action: 'account.password_link_sent', entity: account, metadata: { role: account.role, emailSent: result.sent, reason: result.reason } });
   return result;
 }
 
