@@ -119,47 +119,6 @@ export function HomeClient() {
             </div>
           )}
         </div>
-
-        {/* Browse by Government Site — open list, not a boxed card */}
-        <div className="space-y-6">
-          <div className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-100 pb-4">
-            <div>
-              <h2 className="text-2xl font-bold text-slate-900">
-                {lang === 'en' ? 'Browse by government site' : 'เรียกดูตามหน่วยงานภาครัฐ'}
-              </h2>
-              <p className="text-sm text-slate-500 mt-1">
-                {lang === 'en' ? 'BMA, Department of Highways, PEA, EGAT, MOPH, depa, DGA, and more' : 'กรุงเทพมหานคร กรมทางหลวง PEA EGAT สป.สธ. depa DGA และหน่วยงานอื่นๆ'}
-              </p>
-            </div>
-
-            <Link
-              href="/agencies"
-              className="shrink-0 text-sm font-bold text-sky-700 hover:underline"
-            >
-              {lang === 'en' ? 'All sites' : 'ดูหน่วยงานทั้งหมด'}
-            </Link>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-5">
-            {govSites.map(site => (
-              <Link
-                key={site.id}
-                href={`/agencies?site=${site.id}`}
-                className={`group flex items-start justify-between gap-3 py-3 border-b border-slate-100 transition-colors duration-200 ${site.enabled ? 'hover:border-sky-300' : 'opacity-50'}`}
-              >
-                <div className="min-w-0">
-                  <h3 className="font-bold text-sm text-slate-900 group-hover:text-sky-700 transition-colors truncate">
-                    {site.name}
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    {site.worksCount} {lang === 'en' ? 'active works' : 'โครงการ'}
-                  </p>
-                </div>
-                <ArrowUpRight className="w-4 h-4 text-slate-300 group-hover:text-sky-600 shrink-0 mt-0.5 transition-colors" />
-              </Link>
-            ))}
-          </div>
-        </div>
       </div>
     </PublicShell>
   );
