@@ -1,3 +1,5 @@
+// Must stay the FIRST import: the audit plugin only covers models compiled after it.
+import './audit/install';
 import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
@@ -7,6 +9,7 @@ import { healthRouter } from './routes/health.route';
 import { apiRouter } from './routes';
 import { errorHandler, notFoundHandler } from './middlewares/error.middleware';
 import { sanitizeInput } from './middlewares/sanitize.middleware';
+import { auditContextMiddleware } from './middlewares/auditContext.middleware';
 
 export function createApp() {
   const app = express();
@@ -25,6 +28,9 @@ export function createApp() {
   app.use(sanitizeInput);
   app.use(cookieParser());
   app.use(morgan(isProduction ? 'combined' : 'dev'));
+  // After the body/cookie parsers, before any route: opens the audit context
+  // (actor/IP/request id) that audit.log() reads for the rest of the request.
+  app.use(auditContextMiddleware);
 
   app.use('/health', healthRouter);
   app.use('/api/v1', apiRouter);

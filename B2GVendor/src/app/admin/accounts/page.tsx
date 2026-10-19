@@ -6,6 +6,7 @@ import { ApiError } from '@/lib/api';
 import { ConfirmModal } from '@/components/ConfirmModal';
 import { formatDate, setupEmailMessage, Translate } from '@/lib/adminUi';
 import { ErrorRetry } from '@/components/ErrorRetry';
+import { initialQueryParam } from '@/lib/auditUi';
 import {
   BackendAccountStatus,
   BackendAccountType,
@@ -265,8 +266,8 @@ export default function VendorAccountsPage() {
   const { lang } = useApp();
   const t: Translate = (th, en) => (lang === 'en' ? en : th);
 
-  const [searchInput, setSearchInput] = useState('');
-  const [q, setQ] = useState('');
+  const [searchInput, setSearchInput] = useState(() => initialQueryParam('q'));
+  const [q, setQ] = useState(() => initialQueryParam('q'));
   const [status, setStatus] = useState<'' | BackendAccountStatus>('');
   const [type, setType] = useState<'' | BackendAccountType>('');
   const [sort, setSort] = useState<'newest' | 'oldest' | 'name'>('newest');

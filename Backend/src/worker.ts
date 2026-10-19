@@ -1,9 +1,12 @@
+// Must stay the FIRST import: the audit plugin only covers models compiled after it.
+import { verifyAuditSetup } from './audit/install';
 import cron from 'node-cron';
 import { connectDb } from './config/db';
 import { env } from './config/env';
 import { claimNextPollJob, executePollJob, reapStalePollJobs } from './services/pollJob.service';
 import { enqueueDueSitePolls } from './services/scheduler.service';
 import { sendDailyDigests } from './services/notification.service';
+import { audit } from './services/audit.service';
 import { logger } from './utils/logger';
 
 /**
@@ -35,7 +38,9 @@ async function claimLoop(): Promise<void> {
     const job = await claimNextPollJob();
     if (job) {
       logger.info('worker', `Claimed poll job ${job._id.toString()} (scope=${job.scope}, source=${job.source})`);
-      await executePollJob(job);
+      // Anything the poll changes that is audited (AI-proposed tags, tags added to works)
+      // is then attributed to the worker instead of a bare "system".
+      await audit.asSystem('ingestion-worker', () => executePollJob(job));
       logger.info('worker', `Finished poll job ${job._id.toString()} (status=${job.status})`);
     }
   } catch (err) {
@@ -59,6 +64,7 @@ async function schedulerTick(): Promise<void> {
 
 async function main(): Promise<void> {
   await connectDb();
+  for (const problem of verifyAuditSetup()) logger.error('audit', problem);
   logger.info('worker', 'ingestion-worker started');
 
   setInterval(() => {

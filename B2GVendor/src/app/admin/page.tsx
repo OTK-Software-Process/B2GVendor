@@ -11,6 +11,7 @@ import {
   BackendIngestionRunStatus
 } from '@/lib/backend';
 import { describeInterval } from '@/lib/datetime';
+import { RecentActivity } from '@/components/RecentActivity';
 import { adminRoleName, canManagePolling, canManageTags, permissionProfile } from '@/lib/adminAccess';
 import {
   RefreshCw,
@@ -395,6 +396,9 @@ export default function AdminDashboardPage() {
 
             </>
           )}
+
+          {/* Newest audit-log entries (the same API as the Audit Log page) */}
+          <RecentActivity />
 
           {/* Quick Admin Actions Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
