@@ -173,6 +173,14 @@ export interface SiteRunBreakdown {
   failedCount: number;
 }
 
+export interface IngestionRunItem {
+  title: string;
+  projectId?: string;
+  announceType?: string;
+  status: 'new' | 'updated' | 'skipped' | 'failed';
+  message?: string;
+}
+
 export interface IngestionRun {
   runId: string;
   startTime: string;
@@ -186,6 +194,10 @@ export interface IngestionRun {
   failedCount: number;
   siteBreakdown: SiteRunBreakdown[];
   logs: LogEntry[];
+  // Per-TOR/announcement breakdown -- which specific item was new/updated/
+  // failed, not just the aggregate counts above. Optional: absent on the
+  // legacy mock rows below, always present on a real backend run.
+  itemResults?: IngestionRunItem[];
 }
 
 

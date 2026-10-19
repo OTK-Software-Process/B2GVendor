@@ -41,3 +41,18 @@ export const pollSiteSchema = z
     source: z.enum(['rss', 'data_go_th', 'both']).default('both')
   })
   .strict();
+
+// Live probe of a candidate deptId against the real e-GP RSS feed, BEFORE a
+// new site is saved -- there is no published deptId directory anywhere (see
+// seedGovSites.ts's header comment), so "does this code actually return real
+// announcements?" has always had to be checked by hand, one admin, one
+// request, outside the app. This just brings that same check into the Add
+// Government Site form.
+export const verifyDeptIdSchema = z
+  .object({
+    deptId: z.string().trim().min(1, 'deptId is required'),
+    announceTypes: z.array(announceTypeSchema).min(1).max(3).optional()
+  })
+  .strict();
+
+export type VerifyDeptIdInput = z.infer<typeof verifyDeptIdSchema>;

@@ -6,6 +6,7 @@ import { IngestionRun, IngestionRunStatus, IngestionSource } from '../models/ing
 import { AppError } from '../utils/AppError';
 import { effectivePollIntervalMinutes } from '../config/polling';
 import { getIngestionSettings, effectiveNextPollAt } from './ingestionSettings.service';
+import { fetchEgpRssFeed } from '../integrations/egpRss.client';
 
 export interface CreateGovSiteInput {
   name: string;
@@ -179,4 +180,65 @@ export async function updateGovSite(id: string, input: UpdateGovSiteInput): Prom
   const site = await GovSite.findByIdAndUpdate(id, update, { new: true, runValidators: true });
   if (!site) throw AppError.notFound('Government site not found.');
   return site;
+}
+
+export interface DeptIdCheckResult {
+  announceType: AnnounceType;
+  itemCount: number;
+  // Up to 3 real titles, so an admin can eyeball "yes, this is the right agency" --
+  // not just a count, which a wrong-but-still-populated deptId could also produce.
+  sample: string[];
+  error?: string;
+}
+
+export interface DeptIdVerification {
+  deptId: string;
+  checkedAt: Date;
+  totalItems: number;
+  // At least one announce type returned at least one real item.
+  verified: boolean;
+  results: DeptIdCheckResult[];
+}
+
+// e-GP's own RSS client (fetchEgpRssFeed) sets no fetch timeout -- fine for
+// the worker, which has nowhere more useful to be. This is a synchronous
+// admin waiting on a button, so a feed that hangs (confirmed live: the BigIP
+// front door at process3.gprocurement.go.th redirects to
+// process.gprocurement.go.th, which can simply never answer from some
+// networks) must not spin forever with no feedback.
+const DEPT_ID_CHECK_TIMEOUT_MS = 15_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Timed out after ${ms / 1000}s waiting for the e-GP feed.`)), ms);
+    promise.then(
+      value => { clearTimeout(timer); resolve(value); },
+      err => { clearTimeout(timer); reject(err); }
+    );
+  });
+}
+
+// Live probe against the real e-GP RSS feed -- NOT a lookup (no directory
+// maps a name to a deptId anywhere; see this file's header and
+// seedGovSites.ts). Lets an admin confirm a candidate code actually returns
+// real announcements BEFORE saving a new site, instead of saving it blind and
+// finding out on the next scheduled poll. Read-only: no GovSite/Work/
+// IngestionRun is touched.
+export async function verifyDeptIdLive(deptId: string, announceTypes: AnnounceType[]): Promise<DeptIdVerification> {
+  // In parallel -- these are independent reads of the same (small) feed, and
+  // an admin waiting on this button should not pay for each type's timeout
+  // in series (worst case: ~1 timeout, not announceTypes.length of them).
+  const results = await Promise.all(
+    announceTypes.map(async (announceType): Promise<DeptIdCheckResult> => {
+      try {
+        const items = await withTimeout(fetchEgpRssFeed(deptId, announceType), DEPT_ID_CHECK_TIMEOUT_MS);
+        return { announceType, itemCount: items.length, sample: items.slice(0, 3).map(i => i.title) };
+      } catch (err) {
+        return { announceType, itemCount: 0, sample: [], error: err instanceof Error ? err.message : String(err) };
+      }
+    })
+  );
+
+  const totalItems = results.reduce((sum, r) => sum + r.itemCount, 0);
+  return { deptId, checkedAt: new Date(), totalItems, verified: totalItems > 0, results };
 }

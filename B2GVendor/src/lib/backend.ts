@@ -192,6 +192,30 @@ export function createGovSite(body: CreateGovSiteBody): Promise<BackendGovSite> 
   return api.post<BackendGovSite>('/admin/gov-sites', body);
 }
 
+export interface DeptIdCheckResult {
+  announceType: BackendAnnounceType;
+  itemCount: number;
+  sample: string[];
+  error?: string;
+}
+
+export interface DeptIdVerification {
+  deptId: string;
+  checkedAt: string;
+  totalItems: number;
+  verified: boolean;
+  results: DeptIdCheckResult[];
+}
+
+// Live probe against the real e-GP RSS feed (no DB write) -- lets the "Add
+// Government Site" form confirm a candidate deptId before it's saved. There
+// is no published directory mapping an agency name to its deptId anywhere
+// (not in data.go.th, not in e-GP itself), so this is the closest thing to
+// "autocomplete" that's honestly possible: verify, don't guess.
+export function verifyDeptId(deptId: string, announceTypes?: BackendAnnounceType[]): Promise<DeptIdVerification> {
+  return api.post<DeptIdVerification>('/admin/gov-sites/verify-dept-id', { deptId, announceTypes });
+}
+
 export function torFileUrl(workId: string, index: number): string {
   return `${API_BASE}/works/${workId}/tor/${index}`;
 }
@@ -353,6 +377,16 @@ export type BackendIngestionSource = 'rss' | 'data_go_th';
 export type BackendIngestionRunStatus = 'running' | 'success' | 'partial' | 'failed';
 export type BackendPollJobStatus = 'queued' | 'running' | 'done' | 'failed';
 
+export type BackendIngestionItemStatus = 'new' | 'updated' | 'skipped' | 'failed';
+
+export interface BackendIngestionRunItemResult {
+  title: string;
+  projectId?: string;
+  announceType?: string;
+  status: BackendIngestionItemStatus;
+  message?: string;
+}
+
 export interface BackendIngestionRun {
   _id: string;
   siteId: BackendGovSiteRef;
@@ -364,6 +398,7 @@ export interface BackendIngestionRun {
   updatedCount: number;
   failedCount: number;
   errorLog: string[];
+  itemResults: BackendIngestionRunItemResult[];
   startedAt: string;
   finishedAt?: string;
   createdAt: string;
@@ -388,6 +423,9 @@ export interface ListIngestionRunsParams {
   siteId?: string;
   source?: BackendIngestionSource;
   status?: BackendIngestionRunStatus;
+  /** Inclusive range over startedAt, as YYYY-MM-DD. */
+  startDate?: string;
+  endDate?: string;
   page?: number;
   pageSize?: number;
 }
@@ -555,7 +593,8 @@ export function toIngestionRun(run: BackendIngestionRun): IngestionRun {
         failedCount: run.failedCount
       }
     ],
-    logs: buildRunLogs(run)
+    logs: buildRunLogs(run),
+    itemResults: run.itemResults
   };
 }
 

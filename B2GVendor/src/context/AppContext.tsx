@@ -25,6 +25,7 @@ import {
   updateSchedule,
   BackendPollStatus,
   BackendScheduleOverview,
+  BackendIngestionRunStatus,
   CreateGovSiteBody
 } from '@/lib/backend';
 
@@ -71,7 +72,7 @@ interface AppContextType {
   markAllNotificationsAsRead: () => Promise<void>;
   tags: TagItem[];
   ingestionRuns: IngestionRun[];
-  refreshIngestionRuns: (filters?: { siteId?: string }) => Promise<void>;
+  refreshIngestionRuns: (filters?: { siteId?: string; status?: BackendIngestionRunStatus; startDate?: string; endDate?: string }) => Promise<void>;
   // True while a poll is queued/running ANYWHERE -- decided by the server, so
   // it is the same for every admin account and survives a page refresh.
   isPolling: boolean;
@@ -322,8 +323,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
   };
 
-  const refreshIngestionRuns = useCallback(async (filters?: { siteId?: string }) => {
-    const result = await fetchIngestionRuns({ siteId: filters?.siteId, pageSize: 50 });
+  const refreshIngestionRuns = useCallback(async (filters?: { siteId?: string; status?: BackendIngestionRunStatus; startDate?: string; endDate?: string }) => {
+    const result = await fetchIngestionRuns({
+      siteId: filters?.siteId,
+      status: filters?.status,
+      startDate: filters?.startDate,
+      endDate: filters?.endDate,
+      pageSize: 50
+    });
     setIngestionRuns(result.items.map(toIngestionRun));
   }, []);
 

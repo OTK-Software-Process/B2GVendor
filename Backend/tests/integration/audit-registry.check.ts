@@ -11,6 +11,7 @@ import { env } from '../../src/config/env';
 import { Account, AccountRole } from '../../src/models/account.model';
 import { AuditLog } from '../../src/models/auditLog.model';
 import { GovSite } from '../../src/models/govSite.model';
+import { PollJob } from '../../src/models/pollJob.model';
 import { Tag } from '../../src/models/tag.model';
 import { Work } from '../../src/models/work.model';
 import { audit } from '../../src/services/audit.service';
@@ -40,7 +41,7 @@ async function main(): Promise<void> {
   await Promise.all([Tag.init(), Account.init(), AuditLog.init(), Work.init()]);
 
   // ------------------------------------------------------------- registry wiring
-  record(Object.keys(AUDITED_MODELS).sort().join() === 'Account,Tag,Work', 'the registry audits exactly Account, Tag and Work', Object.keys(AUDITED_MODELS).join());
+  record(Object.keys(AUDITED_MODELS).sort().join() === 'Account,GovSite,IngestionSettings,Tag,Work', 'the registry audits exactly Account, GovSite, IngestionSettings, Tag and Work', Object.keys(AUDITED_MODELS).join());
   record(verifyAuditSetup().length === 0, 'startup check: every registered model is really covered by the plugin (installed before the models loaded)', verifyAuditSetup().join(' | '));
 
   const app = createApp();
@@ -231,7 +232,68 @@ async function main(): Promise<void> {
   await clearLog();
   await call('POST', '/admin/gov-sites', superCookie, { name: 'Test Site', shortCode: 'TST', deptId: '9999' });
   r = await rows();
-  record(r.length === 1 && r[0].action === 'tag.create' && r[0].entityLabel === 'Test Site' && r[0].changes.some(c => c.path === 'facet' && c.after === 'site'), 'adding a government site records the site tag that comes with it (the site itself is not audited)', r.map(x => x.action + ':' + x.entityLabel).join());
+  record(
+    r.length === 2
+      && r.some(x => x.action === 'gov_site.create' && x.entityLabel === 'Test Site')
+      && r.some(x => x.action === 'tag.create' && x.entityLabel === 'Test Site' && x.changes.some(c => c.path === 'facet' && c.after === 'site')),
+    'adding a government site records both the site itself and the site tag that comes with it',
+    r.map(x => x.action + ':' + x.entityLabel).join()
+  );
+
+  // ===================================================== SOURCE CONFIGURATION (GovSite)
+  const tstSite = (await GovSite.findOne({ shortCode: 'TST' }))!;
+  const tstSiteId = tstSite._id.toString();
+
+  await clearLog();
+  await call('PATCH', `/admin/gov-sites/${tstSiteId}`, superCookie, { enabled: false });
+  r = await rows();
+  record(r.length === 1 && r[0].action === 'gov_site.disable' && changePaths(r[0]) === 'enabled', 'disabling a site -> "gov_site.disable" (not a generic update)', r.map(x => x.action).join());
+
+  await clearLog();
+  await call('PATCH', `/admin/gov-sites/${tstSiteId}`, superCookie, { enabled: true });
+  r = await rows();
+  record(r.length === 1 && r[0].action === 'gov_site.enable', 'and back on -> "gov_site.enable"', r.map(x => x.action).join());
+
+  await clearLog();
+  await call('PATCH', `/admin/gov-sites/${tstSiteId}`, superCookie, { deptId: '8888' });
+  r = await rows();
+  record(r.length === 1 && r[0].action === 'gov_site.dept_id_change' && r[0].changes[0].before === '9999' && r[0].changes[0].after === '8888', 'changing the e-GP deptId -> "gov_site.dept_id_change" (which real-world feed this site polls)', r.map(x => x.action).join());
+
+  await clearLog();
+  const nextPollTouch = await GovSite.updateOne({ _id: tstSite._id }, { $set: { nextPollAt: new Date() } });
+  record(nextPollTouch.acknowledged && (await AuditLog.countDocuments({ entityType: 'gov_site' })) === 0, 'the scheduler rewriting nextPollAt every cycle is NOT an admin edit, so it records nothing');
+
+  await clearLog();
+  const pollRes = await call('POST', `/admin/gov-sites/${tstSiteId}/poll`, adminCookie, { source: 'rss' });
+  r = await rows();
+  record(r.length === 1 && r[0].action === 'gov_site.poll' && r[0].entityLabel === 'Test Site' && r[0].metadata?.source === 'rss', 'clicking "Poll Now" on one site -> "gov_site.poll" (not a model change, logged by hand)', r.map(x => x.action).join());
+  // No worker is running in this check to claim/finish the job -- mark it done
+  // by hand so it doesn't trip the "a poll is already in progress" guard below.
+  await PollJob.updateOne({ _id: pollRes.json.data._id }, { $set: { status: 'done', finishedAt: new Date() } });
+
+  await clearLog();
+  await call('POST', '/admin/gov-sites/poll-all', adminCookie, {});
+  r = await rows();
+  record(r.some(x => x.action === 'gov_site.poll_all' && x.metadata?.scope === 'all'), '"Poll All" -> "gov_site.poll_all"', r.map(x => x.action).join());
+
+  // ===================================================== AUTOMATIC SCHEDULE (IngestionSettings)
+  // First touch creates the singleton (see getIngestionSettings) -- get that
+  // out of the way before clearing the log, so the PATCH below is a clean update.
+  await call('GET', '/admin/ingestion/settings', adminCookie);
+  await clearLog();
+  await call('PATCH', '/admin/ingestion/settings', adminCookie, { pollIntervalMinutes: 180 });
+  r = await rows();
+  record(r.length === 1 && r[0].action === 'ingestion_settings.interval_change' && r[0].changes[0].path === 'pollIntervalMinutes', 'changing the polling interval -> "ingestion_settings.interval_change"', r.map(x => x.action).join());
+
+  await clearLog();
+  await call('PATCH', '/admin/ingestion/settings', adminCookie, { scheduleEnabled: false });
+  r = await rows();
+  record(r.length === 1 && r[0].action === 'ingestion_settings.pause', 'pausing the automatic schedule -> "ingestion_settings.pause"', r.map(x => x.action).join());
+
+  await clearLog();
+  await call('PATCH', '/admin/ingestion/settings', adminCookie, { scheduleEnabled: true });
+  r = await rows();
+  record(r.length === 1 && r[0].action === 'ingestion_settings.resume', '...and resuming it -> "ingestion_settings.resume"', r.map(x => x.action).join());
 
   // ======================================================= PROJECT-TAG ASSIGNMENT
   const site = (await GovSite.findOne({ shortCode: 'TST' }))!;

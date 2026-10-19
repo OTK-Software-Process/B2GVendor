@@ -1,17 +1,33 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useApp } from '@/context/AppContext';
-import { ArrowLeft, RefreshCw, FileText, Loader2 } from 'lucide-react';
+import { ArrowLeft, RefreshCw, FileText, Loader2, Search, FileSearch } from 'lucide-react';
 import { fetchIngestionRunById, toIngestionRun } from '@/lib/backend';
-import { IngestionRun } from '@/lib/mock-data';
+import { IngestionRun, IngestionRunItem } from '@/lib/mock-data';
+
+const ITEM_STATUS_STYLE: Record<IngestionRunItem['status'], string> = {
+  new: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  updated: 'bg-amber-50 text-amber-700 border-amber-200',
+  skipped: 'bg-slate-100 text-slate-500 border-slate-200',
+  failed: 'bg-rose-50 text-rose-700 border-rose-200'
+};
+
+const ITEM_STATUS_LABEL: Record<IngestionRunItem['status'], { th: string; en: string }> = {
+  new: { th: 'ใหม่', en: 'New' },
+  updated: { th: 'อัปเดต', en: 'Updated' },
+  skipped: { th: 'ไม่มีการเปลี่ยนแปลง', en: 'Unchanged' },
+  failed: { th: 'ล้มเหลว', en: 'Failed' }
+};
 
 export default function IngestionRunDetailPage() {
   const params = useParams();
   const runId = Array.isArray(params.runId) ? params.runId[0] : params.runId;
   const { lang, ingestionRuns } = useApp();
+  const [itemQuery, setItemQuery] = useState('');
+  const [itemStatusFilter, setItemStatusFilter] = useState<'ALL' | IngestionRunItem['status']>('ALL');
 
   // Prefer whatever's already in context (came from the list page, so it's
   // already fresh) -- only hit the API directly when this page was opened
@@ -21,6 +37,16 @@ export default function IngestionRunDetailPage() {
   const [fetched, setFetched] = useState<IngestionRun | null>(null);
   const [notFound, setNotFound] = useState(false);
   const run = fromContext ?? fetched;
+
+  const filteredItems = useMemo(() => {
+    const items = run?.itemResults ?? [];
+    const q = itemQuery.trim().toLowerCase();
+    return items.filter(item => {
+      if (itemStatusFilter !== 'ALL' && item.status !== itemStatusFilter) return false;
+      if (!q) return true;
+      return item.title.toLowerCase().includes(q) || (item.projectId ?? '').toLowerCase().includes(q);
+    });
+  }, [run?.itemResults, itemQuery, itemStatusFilter]);
 
   useEffect(() => {
     if (fromContext || !runId) return;
@@ -143,6 +169,85 @@ export default function IngestionRunDetailPage() {
             </tbody>
           </table>
         </div>
+      </div>
+
+      {/* Per-item (TOR/announcement) breakdown -- which specific item was new/updated/failed */}
+      <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden">
+        <div className="p-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
+            <FileSearch className="w-4 h-4 text-sky-600" />
+            <span>{lang === 'en' ? 'Items Processed' : 'รายการที่ประมวลผล'}</span>
+            <span className="text-xs font-normal text-slate-400">({(run.itemResults ?? []).length})</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="relative flex items-center bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 focus-within:border-sky-400 transition-colors">
+              <Search className="w-3.5 h-3.5 text-slate-400 mr-2" />
+              <input
+                type="text"
+                value={itemQuery}
+                onChange={(e) => setItemQuery(e.target.value)}
+                placeholder={lang === 'en' ? 'Search TOR title or project id…' : 'ค้นหาชื่อ TOR หรือเลขที่โครงการ…'}
+                className="bg-transparent outline-hidden text-xs text-slate-900 w-56"
+              />
+            </div>
+            <select
+              value={itemStatusFilter}
+              onChange={(e) => setItemStatusFilter(e.target.value as 'ALL' | IngestionRunItem['status'])}
+              className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-700 outline-hidden focus:border-sky-400"
+            >
+              <option value="ALL">{lang === 'en' ? 'All statuses' : 'ทุกสถานะ'}</option>
+              <option value="new">{lang === 'en' ? 'New' : 'ใหม่'}</option>
+              <option value="updated">{lang === 'en' ? 'Updated' : 'อัปเดต'}</option>
+              <option value="skipped">{lang === 'en' ? 'Unchanged' : 'ไม่มีการเปลี่ยนแปลง'}</option>
+              <option value="failed">{lang === 'en' ? 'Failed' : 'ล้มเหลว'}</option>
+            </select>
+          </div>
+        </div>
+
+        {(run.itemResults ?? []).length === 0 ? (
+          <p className="p-8 text-center text-xs text-slate-400">
+            {lang === 'en'
+              ? 'No per-item detail recorded for this run (runs started before this feature shipped only have the aggregate counts above).'
+              : 'ไม่มีรายละเอียดรายการย่อยสำหรับรอบนี้ (รอบที่เริ่มก่อนฟีเจอร์นี้จะมีเพียงตัวเลขสรุปด้านบน)'}
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 text-slate-500 font-bold uppercase border-b border-slate-200">
+                <tr>
+                  <th className="p-4">{lang === 'en' ? 'TOR / Announcement' : 'TOR / ประกาศ'}</th>
+                  <th className="p-4">{lang === 'en' ? 'Project ID' : 'เลขที่โครงการ'}</th>
+                  <th className="p-4">{lang === 'en' ? 'Type' : 'ประเภท'}</th>
+                  <th className="p-4 text-center">{lang === 'en' ? 'Status' : 'สถานะ'}</th>
+                  <th className="p-4">{lang === 'en' ? 'Note' : 'หมายเหตุ'}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 font-medium">
+                {filteredItems.map((item, idx) => (
+                  <tr key={`${item.projectId ?? item.title}-${idx}`} className="hover:bg-slate-50 transition-colors">
+                    <td className="p-4 max-w-xs truncate text-slate-900" title={item.title}>{item.title}</td>
+                    <td className="p-4 font-mono text-slate-500">{item.projectId ?? '—'}</td>
+                    <td className="p-4 font-mono text-slate-500">{item.announceType ?? '—'}</td>
+                    <td className="p-4 text-center">
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full font-bold text-[11px] border ${ITEM_STATUS_STYLE[item.status]}`}>
+                        {lang === 'en' ? ITEM_STATUS_LABEL[item.status].en : ITEM_STATUS_LABEL[item.status].th}
+                      </span>
+                    </td>
+                    <td className="p-4 max-w-sm truncate text-slate-500" title={item.message}>{item.message ?? '—'}</td>
+                  </tr>
+                ))}
+                {filteredItems.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="p-8 text-center text-slate-400">
+                      {lang === 'en' ? 'No items match your search/filter.' : 'ไม่พบรายการที่ตรงกับการค้นหา/ตัวกรอง'}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Realtime Execution Log Console */}

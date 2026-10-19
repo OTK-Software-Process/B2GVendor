@@ -2,6 +2,23 @@ import mongoose, { Schema, Document, Model, Types } from 'mongoose';
 
 export type IngestionSource = 'rss' | 'data_go_th';
 export type IngestionRunStatus = 'running' | 'success' | 'partial' | 'failed';
+// Per-item outcome, same vocabulary as upsertWorkFromRssItem's return value
+// (plus 'failed', recorded from the catch around that call) and
+// enrichWorkFromContractRecord's boolean (true -> 'updated', false -> 'skipped').
+export type IngestionItemStatus = 'new' | 'updated' | 'skipped' | 'failed';
+
+// One row per TOR/announcement actually looked at during a run -- what an
+// admin needs to answer "which item had the problem?" instead of just a
+// pass/fail count. Kept small and un-indexed: a run's item count is bounded
+// by the feed itself (e-GP returns at most ~20 items per announce type per
+// poll), so this never grows unbounded.
+export interface IIngestionRunItemResult {
+  title: string;
+  projectId?: string;
+  announceType?: string;
+  status: IngestionItemStatus;
+  message?: string;
+}
 
 export interface IIngestionRun extends Document {
   siteId: Types.ObjectId;
@@ -20,6 +37,8 @@ export interface IIngestionRun extends Document {
   updatedCount: number;
   failedCount: number;
   errorLog: string[];
+  // Per-item breakdown -- see IIngestionRunItemResult above.
+  itemResults: IIngestionRunItemResult[];
 
   startedAt: Date;
   finishedAt?: Date;
@@ -27,6 +46,17 @@ export interface IIngestionRun extends Document {
   createdAt: Date;
   updatedAt: Date;
 }
+
+const IngestionRunItemResultSchema = new Schema<IIngestionRunItemResult>(
+  {
+    title: { type: String, required: true },
+    projectId: { type: String },
+    announceType: { type: String },
+    status: { type: String, enum: ['new', 'updated', 'skipped', 'failed'], required: true },
+    message: { type: String }
+  },
+  { _id: false }
+);
 
 const IngestionRunSchema = new Schema<IIngestionRun>(
   {
@@ -41,6 +71,7 @@ const IngestionRunSchema = new Schema<IIngestionRun>(
     updatedCount: { type: Number, default: 0 },
     failedCount: { type: Number, default: 0 },
     errorLog: { type: [String], default: [] },
+    itemResults: { type: [IngestionRunItemResultSchema], default: [] },
 
     startedAt: { type: Date, required: true, default: Date.now },
     finishedAt: { type: Date }

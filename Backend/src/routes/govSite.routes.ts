@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as govSiteController from '../controllers/govSite.controller';
 import { validate } from '../middlewares/validate.middleware';
-import { createGovSiteSchema, updateGovSiteSchema, pollSiteSchema } from '../validators/govSite.validator';
+import { createGovSiteSchema, updateGovSiteSchema, pollSiteSchema, verifyDeptIdSchema } from '../validators/govSite.validator';
 import { requireSuperAdmin } from '../middlewares/requireRole';
 import { requirePollAccess } from '../middlewares/requirePermission';
 import { asyncHandler } from '../utils/asyncHandler';
@@ -21,6 +21,10 @@ export const adminGovSiteRouter = Router();
 adminGovSiteRouter.get('/', asyncHandler(govSiteController.listAdmin));
 adminGovSiteRouter.post('/', requireSuperAdmin, validate(createGovSiteSchema), asyncHandler(govSiteController.create));
 adminGovSiteRouter.patch('/:id', requireSuperAdmin, validate(updateGovSiteSchema), asyncHandler(govSiteController.update));
+
+// Live deptId probe for the Add Site form -- Super Admin only, same as
+// create/edit (this is part of source configuration, not polling control).
+adminGovSiteRouter.post('/verify-dept-id', requireSuperAdmin, validate(verifyDeptIdSchema), asyncHandler(govSiteController.verifyDeptId));
 
 adminGovSiteRouter.post('/poll-all', requirePollAccess, asyncHandler(govSiteController.pollAll));
 adminGovSiteRouter.post('/:id/poll', requirePollAccess, validate(pollSiteSchema), asyncHandler(govSiteController.pollOne));

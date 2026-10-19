@@ -5,24 +5,46 @@ import Link from 'next/link';
 import { useApp } from '@/context/AppContext';
 import { History, ChevronRight, CheckCircle2, AlertTriangle, XCircle, Loader2 } from 'lucide-react';
 import { IngestionTabs } from '@/components/IngestionTabs';
+import { BackendIngestionRunStatus } from '@/lib/backend';
+
+// UI status labels (SUCCESS/WARNING/FAILED) -> the backend's own vocabulary
+// (success/partial/failed), since filtering now happens server-side.
+const STATUS_TO_BACKEND: Record<string, BackendIngestionRunStatus | undefined> = {
+  ALL: undefined,
+  SUCCESS: 'success',
+  WARNING: 'partial',
+  FAILED: 'failed'
+};
 
 export default function IngestionRunHistoryPage() {
   const { lang, ingestionRuns, refreshIngestionRuns, govSites } = useApp();
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [filterSite, setFilterSite] = useState<string>('ALL');
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: show the loading state for the refetch this effect triggers on every filter change.
     setLoading(true);
-    refreshIngestionRuns()
+    refreshIngestionRuns({
+      siteId: filterSite === 'ALL' ? undefined : filterSite,
+      status: STATUS_TO_BACKEND[filterStatus],
+      startDate: startDate || undefined,
+      endDate: endDate || undefined
+    })
       .catch(() => {})
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [filterSite, filterStatus, startDate, endDate]);
 
-  const filteredRuns = ingestionRuns
-    .filter(r => filterStatus === 'ALL' || r.status === filterStatus)
-    .filter(r => filterSite === 'ALL' || r.siteBreakdown.some(s => s.siteId === filterSite));
+  const filteredRuns = ingestionRuns;
 
   return (
     <div className="space-y-6">
@@ -71,6 +93,33 @@ export default function IngestionRunHistoryPage() {
             <option value="WARNING">WARNING</option>
             <option value="FAILED">FAILED</option>
           </select>
+
+          {/* Date range filter -- inclusive, over startedAt */}
+          <input
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            max={endDate || undefined}
+            aria-label={lang === 'en' ? 'From date' : 'ตั้งแต่วันที่'}
+            className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-700 outline-hidden focus:border-sky-400"
+          />
+          <span className="text-xs text-slate-400">{lang === 'en' ? 'to' : 'ถึง'}</span>
+          <input
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            min={startDate || undefined}
+            aria-label={lang === 'en' ? 'To date' : 'ถึงวันที่'}
+            className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-700 outline-hidden focus:border-sky-400"
+          />
+          {(startDate || endDate) && (
+            <button
+              onClick={() => { setStartDate(''); setEndDate(''); }}
+              className="text-xs font-bold text-slate-400 hover:text-sky-700 transition-colors"
+            >
+              {lang === 'en' ? 'Clear dates' : 'ล้างวันที่'}
+            </button>
+          )}
         </div>
       </div>
 

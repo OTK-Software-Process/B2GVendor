@@ -29,7 +29,19 @@ const ACTION_LABELS: Record<string, Labels> = {
   'tag.ingestion_filter_update': { th: 'เปลี่ยนตัวกรองการดึงข้อมูล', en: 'Ingestion filter changed' },
   'tag.delete': { th: 'ลบแท็ก', en: 'Tag deleted' },
   'work.tags_update': { th: 'แก้ไขแท็กของโครงการ', en: 'Work tags edited' },
-  'work.visibility_update': { th: 'เปลี่ยนการแสดงผลของโครงการ', en: 'Work visibility changed' }
+  'work.visibility_update': { th: 'เปลี่ยนการแสดงผลของโครงการ', en: 'Work visibility changed' },
+  'gov_site.create': { th: 'เพิ่มหน่วยงานภาครัฐ', en: 'Government site added' },
+  'gov_site.update': { th: 'แก้ไขหน่วยงานภาครัฐ', en: 'Government site edited' },
+  'gov_site.enable': { th: 'เปิดใช้งานหน่วยงาน', en: 'Government site enabled' },
+  'gov_site.disable': { th: 'ปิดใช้งานหน่วยงาน', en: 'Government site disabled' },
+  'gov_site.dept_id_change': { th: 'เปลี่ยนรหัสหน่วยงาน (deptId)', en: 'Department ID (deptId) changed' },
+  'gov_site.poll': { th: 'สั่งดึงข้อมูล (รายหน่วยงาน)', en: 'Poll triggered (one site)' },
+  'gov_site.poll_all': { th: 'สั่งดึงข้อมูลทุกหน่วยงาน', en: 'Poll triggered (all sites)' },
+  'gov_site.delete': { th: 'ลบหน่วยงานภาครัฐ', en: 'Government site deleted' },
+  'ingestion_settings.interval_change': { th: 'เปลี่ยนรอบเวลาดึงข้อมูลอัตโนมัติ', en: 'Automatic polling interval changed' },
+  'ingestion_settings.pause': { th: 'หยุดการดึงข้อมูลอัตโนมัติชั่วคราว', en: 'Automatic polling paused' },
+  'ingestion_settings.resume': { th: 'เปิดการดึงข้อมูลอัตโนมัติอีกครั้ง', en: 'Automatic polling resumed' },
+  'ingestion_settings.update': { th: 'แก้ไขการตั้งค่าการดึงข้อมูล', en: 'Ingestion settings edited' }
 };
 
 function titleCase(value: string): string {
@@ -117,6 +129,12 @@ export function entityLink(entry: Pick<BackendAuditEntry, 'action' | 'entityType
       const staff = entry.metadata?.role === 'admin' || entry.metadata?.role === 'superadmin';
       return label ? { href: `${staff ? '/admin/users' : '/admin/accounts'}?q=${label}`, fullPage: true } : null;
     }
+    // No per-row search on these two pages (small, fixed lists) -- link to
+    // the page itself rather than a query string that would just be ignored.
+    case 'gov_site':
+      return { href: '/admin/source-config', fullPage: false };
+    case 'ingestion_settings':
+      return { href: '/admin/ingestion', fullPage: false };
     default:
       return null;
   }

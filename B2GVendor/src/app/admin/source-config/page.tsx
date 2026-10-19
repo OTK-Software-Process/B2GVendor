@@ -4,7 +4,8 @@ import React, { useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { ApiError } from '@/lib/api';
 import { SitePollInfo } from '@/components/SitePollInfo';
-import { Sliders, ShieldCheck, Lock, Plus, X, Power, Info, Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
+import { verifyDeptId, DeptIdVerification } from '@/lib/backend';
+import { Sliders, ShieldCheck, Lock, Plus, X, Power, Info, Loader2, AlertTriangle, RefreshCw, SearchCheck, CheckCircle2 } from 'lucide-react';
 
 export default function SourceConfigPage() {
   const {
@@ -27,6 +28,9 @@ export default function SourceConfigPage() {
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
   const [addFieldErrors, setAddFieldErrors] = useState<Record<string, string>>({});
+  const [verifying, setVerifying] = useState(false);
+  const [verifyResult, setVerifyResult] = useState<DeptIdVerification | null>(null);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
 
   if (role !== 'superadmin') {
     return (
@@ -64,6 +68,22 @@ export default function SourceConfigPage() {
     setNewRpm(60);
     setAddError(null);
     setAddFieldErrors({});
+    setVerifyResult(null);
+    setVerifyError(null);
+  };
+
+  const handleVerifyDeptId = async () => {
+    if (!newDeptId.trim() || verifying) return;
+    setVerifying(true);
+    setVerifyError(null);
+    setVerifyResult(null);
+    try {
+      setVerifyResult(await verifyDeptId(newDeptId.trim()));
+    } catch (err) {
+      setVerifyError(err instanceof ApiError ? err.message : lang === 'en' ? 'Could not reach the e-GP feed. Try again.' : 'เชื่อมต่อฟีด e-GP ไม่สำเร็จ กรุณาลองใหม่');
+    } finally {
+      setVerifying(false);
+    }
   };
 
   const handleAddSite = async () => {
@@ -341,19 +361,73 @@ export default function SourceConfigPage() {
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-500 uppercase">{lang === 'en' ? 'e-GP Department ID (deptId)' : 'รหัสหน่วยงานใน e-GP (deptId)'}</label>
-                <input
-                  type="text"
-                  value={newDeptId}
-                  onChange={(e) => setNewDeptId(e.target.value)}
-                  placeholder="2102"
-                  className={`${inputClass('deptId')} font-mono`}
-                />
+                <div className="flex gap-2 mt-1">
+                  <input
+                    type="text"
+                    value={newDeptId}
+                    onChange={(e) => {
+                      setNewDeptId(e.target.value);
+                      setVerifyResult(null);
+                      setVerifyError(null);
+                    }}
+                    placeholder="2102"
+                    className={`${inputClass('deptId')} font-mono mt-0 flex-1`}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleVerifyDeptId}
+                    disabled={!newDeptId.trim() || verifying}
+                    title={lang === 'en' ? 'There is no published directory mapping an agency name to a deptId -- this checks the real e-GP feed directly instead of guessing.' : 'ไม่มีทะเบียนรายชื่อที่จับคู่ชื่อหน่วยงานกับ deptId ปุ่มนี้จะตรวจสอบกับฟีด e-GP จริงโดยตรงแทนการเดา'}
+                    className="shrink-0 px-3 py-2.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed text-slate-600 font-bold text-xs flex items-center gap-1.5 transition-colors"
+                  >
+                    {verifying ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <SearchCheck className="w-3.5 h-3.5" />}
+                    <span>{lang === 'en' ? 'Verify live' : 'ตรวจสอบจริง'}</span>
+                  </button>
+                </div>
                 {addFieldErrors.deptId && <p className="text-[11px] text-rose-600 mt-1">{addFieldErrors.deptId}</p>}
                 <p className="text-[11px] text-slate-400 mt-1">
                   {lang === 'en'
-                    ? 'The department code used by the e-GP announcement feed (e.g. 2102 for MOPH).'
-                    : 'รหัสหน่วยงานที่ใช้กับ RSS ประกาศของ e-GP (เช่น 2102 สำหรับ สป.สธ.)'}
+                    ? 'The department code used by the e-GP announcement feed (e.g. 2102 for MOPH). There is no published list mapping agency names to this code -- "Verify live" checks the real feed instead of guessing.'
+                    : 'รหัสหน่วยงานที่ใช้กับ RSS ประกาศของ e-GP (เช่น 2102 สำหรับ สป.สธ.) ไม่มีทะเบียนที่จับคู่ชื่อหน่วยงานกับรหัสนี้ -- ปุ่ม "ตรวจสอบจริง" จะตรวจกับฟีดจริงแทนการเดา'}
                 </p>
+
+                {verifyError && (
+                  <p role="alert" className="mt-2 flex items-center gap-1.5 text-[11px] text-rose-600 font-semibold">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                    <span>{verifyError}</span>
+                  </p>
+                )}
+
+                {verifyResult && (
+                  <div className={`mt-2 p-3 rounded-xl border text-[11px] space-y-1.5 ${
+                    verifyResult.verified ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-amber-50 border-amber-200 text-amber-800'
+                  }`}>
+                    <div className="flex items-center gap-1.5 font-bold">
+                      {verifyResult.verified ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <AlertTriangle className="w-3.5 h-3.5 shrink-0" />}
+                      <span>
+                        {verifyResult.verified
+                          ? (lang === 'en'
+                              ? `Looks real -- ${verifyResult.totalItems} live announcement(s) found.`
+                              : `ดูเหมือนถูกต้อง -- พบประกาศจริง ${verifyResult.totalItems} รายการ`)
+                          : (lang === 'en'
+                              ? 'Zero items found. This code may be wrong, or there may simply be nothing announced right now.'
+                              : 'ไม่พบรายการใดเลย รหัสนี้อาจผิด หรืออาจยังไม่มีประกาศในช่วงนี้ก็ได้')}
+                      </span>
+                    </div>
+                    <ul className="space-y-1 pl-5">
+                      {verifyResult.results.map(r => (
+                        <li key={r.announceType} className="font-mono">
+                          [{r.announceType}] {r.error ? `${lang === 'en' ? 'error' : 'ข้อผิดพลาด'}: ${r.error}` : `${r.itemCount} ${lang === 'en' ? 'item(s)' : 'รายการ'}`}
+                          {r.sample.length > 0 && (
+                            <ul className="list-disc pl-4 font-sans opacity-80">
+                              {r.sample.map((title, i) => <li key={i} className="truncate" title={title}>{title}</li>)}
+                            </ul>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
             </div>
 

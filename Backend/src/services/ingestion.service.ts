@@ -2,7 +2,7 @@ import { Types } from 'mongoose';
 import { GovSite, IGovSite, AnnounceType } from '../models/govSite.model';
 import { Work, IWork, ITorFile, BudgetMissingReason, STATUS_BY_ANNOUNCE_TYPE } from '../models/work.model';
 import { Tag } from '../models/tag.model';
-import { IngestionRun, IIngestionRun } from '../models/ingestionRun.model';
+import { IngestionRun, IIngestionRun, IIngestionRunItemResult } from '../models/ingestionRun.model';
 import { fetchEgpRssFeed, downloadTorFile, fetchHtmlDocument, EgpRssItem } from '../integrations/egpRss.client';
 import { datastoreSearch } from '../integrations/dataGoTh.client';
 import { resolveDataGoThResourceId, hasDataGoThConfig } from './dataGoThResource.service';
@@ -130,6 +130,7 @@ export async function runRssPoll(site: IGovSite, triggeredBy: TriggeredBy): Prom
   let updatedCount = 0;
   let failedCount = 0;
   const errorLog: string[] = [];
+  const itemResults: IIngestionRunItemResult[] = [];
   const candidateTags = await getCandidateTags();
   const inScopeTagIds = await getInScopeTagIds();
 
@@ -164,11 +165,13 @@ export async function runRssPoll(site: IGovSite, triggeredBy: TriggeredBy): Prom
         const result = await upsertWorkFromRssItem(site, announceType, item, candidateTags, siteTag?._id, inScopeTagIds);
         if (result === 'new') newCount += 1;
         if (result === 'updated') updatedCount += 1;
+        itemResults.push({ title: item.title, projectId: item.projectId ?? undefined, announceType, status: result });
       } catch (err) {
         failedCount += 1;
         const message = err instanceof Error ? err.message : String(err);
         errorLog.push(`[${announceType}] item "${item.projectId ?? item.title.slice(0, 40)}" failed: ${message}`);
         logger.warn('ingestion', `Failed to upsert work for ${site.shortCode}`, err);
+        itemResults.push({ title: item.title, projectId: item.projectId ?? undefined, announceType, status: 'failed', message });
       }
     }
   }
@@ -185,6 +188,7 @@ export async function runRssPoll(site: IGovSite, triggeredBy: TriggeredBy): Prom
   run.updatedCount = updatedCount;
   run.failedCount = failedCount;
   run.errorLog = errorLog;
+  run.itemResults = itemResults;
   run.status = failedCount === 0 ? 'success' : newCount + updatedCount > 0 ? 'partial' : 'failed';
   run.finishedAt = new Date();
   await run.save();
@@ -849,18 +853,24 @@ export async function runDataGoThEnrichment(site: IGovSite, triggeredBy: Trigger
   let updatedCount = 0;
   let failedCount = 0;
   const errorLog: string[] = [];
+  const itemResults: IIngestionRunItemResult[] = [];
 
   try {
     const { records } = await withRetry(() => datastoreSearch(resourceId, { limit: 200 }));
     fetchedCount = records.length;
 
     for (const record of records) {
+      const projectId = record.proj_no != null ? String(record.proj_no) : undefined;
+      const title = (record.proj_name != null ? String(record.proj_name) : projectId) ?? '(no project number)';
       try {
         const updated = await enrichWorkFromContractRecord(site, record);
         if (updated) updatedCount += 1;
+        itemResults.push({ title, projectId, status: updated ? 'updated' : 'skipped' });
       } catch (err) {
         failedCount += 1;
-        errorLog.push(err instanceof Error ? err.message : String(err));
+        const message = err instanceof Error ? err.message : String(err);
+        errorLog.push(message);
+        itemResults.push({ title, projectId, status: 'failed', message });
       }
     }
   } catch (err) {
@@ -874,6 +884,7 @@ export async function runDataGoThEnrichment(site: IGovSite, triggeredBy: Trigger
   run.updatedCount = updatedCount;
   run.failedCount = failedCount;
   run.errorLog = errorLog;
+  run.itemResults = itemResults;
   run.status = failedCount === 0 ? 'success' : updatedCount > 0 ? 'partial' : 'failed';
   run.finishedAt = new Date();
   await run.save();

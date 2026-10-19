@@ -93,6 +93,22 @@ function workAction({ changes }: AuditActionContext): string | undefined {
   return undefined;
 }
 
+function govSiteAction({ operation, changes }: AuditActionContext): string | undefined {
+  if (operation !== 'update') return undefined; // create / delete keep "gov_site.create" / "gov_site.delete"
+  const enabled = changes.find(c => c.path === 'enabled');
+  if (enabled && onlyPaths(changes, ['enabled'])) return enabled.after === true ? 'gov_site.enable' : 'gov_site.disable';
+  if (changes.some(c => c.path === 'deptId')) return 'gov_site.dept_id_change'; // changes which real-world feed this site polls
+  return undefined;
+}
+
+function ingestionSettingsAction({ operation, changes }: AuditActionContext): string | undefined {
+  if (operation !== 'update') return undefined;
+  const paused = changes.find(c => c.path === 'scheduleEnabled');
+  if (paused && onlyPaths(changes, ['scheduleEnabled'])) return paused.after === false ? 'ingestion_settings.pause' : 'ingestion_settings.resume';
+  if (onlyPaths(changes, ['pollIntervalMinutes'])) return 'ingestion_settings.interval_change';
+  return undefined;
+}
+
 // A work's tags are stored as ids, which mean nothing once a tag is renamed or
 // retired. Record the NAMES of the tags added/removed as they were at that moment.
 async function workTagNames({ changes }: AuditActionContext): Promise<Record<string, unknown> | undefined> {
@@ -142,6 +158,37 @@ export const AUDITED_MODELS: Record<string, AuditRegistration> = {
     fields: ['tags', 'ingestionRelevance'],
     action: workAction,
     metadata: workTagNames
+  },
+
+  // Source configuration -- which government sites/departments this platform
+  // polls (admin > Source Configuration, Super Admin only to create/edit).
+  // `nextPollAt` is rewritten by the scheduler every cycle (see
+  // scheduler.service.ts) and is NOT an admin's edit, so only the
+  // admin-editable fields are watched -- the exact set govSite.service.ts's
+  // CreateGovSiteInput/UpdateGovSiteInput accept.
+  GovSite: {
+    entityType: 'gov_site',
+    label: 'name',
+    fields: [
+      'name', 'nameEn', 'shortCode', 'deptId', 'announceTypes',
+      'dataGoThOrgSlug', 'dataGoThResourceId', 'dataGoThPackageId', 'dataGoThSearchQuery',
+      'requestsPerMinute', 'pollIntervalMinutes', 'enabled'
+    ],
+    action: govSiteAction,
+    metadata: ({ snapshot }) => ({ shortCode: snapshot.shortCode, deptId: snapshot.deptId })
+  },
+
+  // The automatic polling schedule (admin > Data Ingestion > Automatic
+  // Schedule) -- a singleton document, so every row in the log is the same
+  // entity updated over time.
+  IngestionSettings: {
+    entityType: 'ingestion_settings',
+    label: () => 'Automatic polling schedule',
+    // `updatedBy` is set on every save (see ingestionSettings.service.ts) --
+    // bookkeeping already covered by the row's own actor, not itself a
+    // meaningful change to show in the diff.
+    ignore: ['updatedBy'],
+    action: ingestionSettingsAction
   }
 };
 
