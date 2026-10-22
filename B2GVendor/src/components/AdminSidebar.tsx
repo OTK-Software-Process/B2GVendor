@@ -176,7 +176,7 @@ export function AdminSidebar() {
       )}
 
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex w-64 bg-white text-slate-700 min-h-screen border-r border-slate-200 flex-col shrink-0">
+      <aside className="fixed inset-y-0 left-0 hidden md:flex w-64 bg-white text-slate-700 border-r border-slate-200 flex-col shrink-0">
         {sidebarInner}
       </aside>
     </>
