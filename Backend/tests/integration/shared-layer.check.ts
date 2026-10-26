@@ -214,18 +214,17 @@ async function main(): Promise<void> {
   record(views.every(v => !v.ipAddress || v.ipAddress.includes('xx')), 'no full IP address leaves the service');
   record(views.some(v => v.browser === 'Safari' && v.os === 'macOS'), 'session stores the parsed browser and os');
 
-  // Q4: DELETE /account/sessions ("log out other devices") still uses
-  // revokeOtherSessions -- distinct from change-password below, which now
-  // revokes everything including the current session.
+  // DELETE /account/sessions ("log out other devices") uses
+  // revokeOtherSessions. Password-change behavior is exercised through the
+  // account API integration check.
   const revokedOthers = await revokeOtherSessions(sessionUserId, second.session._id as mongoose.Types.ObjectId);
   record(revokedOthers === 2, 'revokeOtherSessions revokes all but the current one', String(revokedOthers));
   record((await call('/me', second.rawToken)).status === 200, 'the kept session still works after revokeOtherSessions');
   record((await call('/me', first.rawToken)).status === 401, 'a revoked sibling session is dead');
   record((await call('/me', third.rawToken)).status === 401, 'the other revoked sibling is dead too');
 
-  // Q4 decided: change-password (and reset-password) revoke ALL sessions,
-  // including the one making the request. The frontend must treat this as a
-  // forced logout and redirect to /login, not stay on the settings page.
+  // revokeAllSessions revokes every remaining session. Password-reset
+  // behavior is exercised through the account API integration check.
   const revokedAll = await revokeAllSessions(sessionUserId);
   record(revokedAll === 1, 'revokeAllSessions revokes what is left, including the current session', String(revokedAll));
   record((await call('/me', second.rawToken)).status === 401, 'no session survives revokeAllSessions, not even the current one');

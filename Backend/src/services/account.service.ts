@@ -1,7 +1,11 @@
 import { Account, IAccount, NotificationFrequency } from "../models/account.model";
 import { AppError } from "../utils/AppError";
 import { Session } from "../models/session.model";
-import { toSessionView } from "./session.service";
+import {
+  revokeAllSessions,
+  revokeOtherSessions,
+  toSessionView,
+} from "./session.service";
 import { consumeToken, invalidateTokens, issueToken } from "./token.service";
 import { sendPasswordResetEmail } from "./email.service";
 
@@ -34,6 +38,7 @@ export async function changePassword(
   accountId: string,
   currentPassword: string,
   newPassword: string,
+  currentSessionId: string,
 ): Promise<void> {
   const account = await Account.findById(accountId).select('+passwordHash');
 
@@ -48,6 +53,7 @@ export async function changePassword(
 
   account.passwordHash = newPassword;
   await account.save();
+  await revokeOtherSessions(accountId, currentSessionId);
 }
 
 export async function forgotPassword(email: string): Promise<void> {
@@ -86,6 +92,7 @@ export async function resetPassword(
 
   account.passwordHash = newPassword;
   await account.save();
+  await revokeAllSessions(accountId);
 }
 
 export interface NotificationSettingsUpdate {
