@@ -2,6 +2,7 @@ import { Request } from 'express';
 import { Account, IAccount } from '../models/account.model';
 import { createSession, SessionContext } from './session.service';
 import { AppError } from '../utils/AppError';
+import { clearFailedLogins, reserveLoginAttempt } from './loginLockout.service';
 
 export interface AuthResult {
   account: IAccount;
@@ -51,10 +52,18 @@ export async function loginWithPassword(
     throw AppError.accountSuspended();
   }
 
+  // Counted per account (the IP limiter alone is beaten by rotating IPs). A
+  // locked account is refused without checking the password at all.
+  const attempt = await reserveLoginAttempt(account._id);
+  if (!attempt.allowed) {
+    throw AppError.accountLocked(attempt.retryAfterSeconds);
+  }
+
   const passwordMatches = await account.comparePassword(input.password);
   if (!passwordMatches) {
     throw AppError.invalidCredentials();
   }
+  await clearFailedLogins(account._id);
 
   const { rawToken } = await createSession(account._id, sessionContextFromRequest(req));
 

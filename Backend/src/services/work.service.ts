@@ -23,7 +23,7 @@ export interface ListWorksFilter {
   q?: string; // free-text query over title + description (name search)
   budgetMax?: number;
   fiscalYear?: number; // ปีงบประมาณ, Buddhist Era (e.g. 2569)
-  sort?: 'date' | 'budget-asc' | 'budget-desc' | 'deadline';
+  sort?: 'date' | 'budget-asc' | 'budget-desc' | 'deadline' | 'deadline-desc';
   page?: number;
   pageSize?: number;
 }
@@ -39,7 +39,8 @@ const SORTS: Record<NonNullable<ListWorksFilter['sort']>, Record<string, 1 | -1>
   date: { pubDate: -1, createdAt: -1 },
   'budget-desc': { budget: -1 },
   'budget-asc': { budget: 1 },
-  deadline: { deadlineAt: 1 }
+  deadline: { deadlineAt: 1 },
+  'deadline-desc': { deadlineAt: -1 }
 };
 
 const POPULATE_SITE = { path: 'siteId', select: 'name shortCode' };
@@ -112,16 +113,17 @@ function listWorksPricedFirst(query: Record<string, unknown>, page: number, page
   );
 }
 
-// Works can still be bid on are listed first, the one closing soonest at the
-// top; everything else -- no deadline stated, or already closed -- follows,
-// newest first. A cancelled or awarded work is never "upcoming" even if the
-// date it once had is still ahead (unless the user filtered to that status).
-function listWorksByDeadline(query: Record<string, unknown>, page: number, pageSize: number): Promise<ListWorksResult> {
+// Works can still be bid on are listed first -- the one closing soonest at the
+// top (direction 1), or the one closing furthest away (-1); everything else --
+// no deadline stated, or already closed -- follows, newest first. A cancelled or
+// awarded work is never "upcoming" even if the date it once had is still ahead
+// (unless the user filtered to that status).
+function listWorksByDeadline(query: Record<string, unknown>, page: number, pageSize: number, direction: 1 | -1): Promise<ListWorksResult> {
   const now = new Date();
   const stillOpen = query.status ? {} : { status: { $nin: ['CANCELLED', 'AWARDED'] } };
   return listWorksInTwoGroups(
     query,
-    { filter: { deadlineAt: { $gte: now }, ...stillOpen }, sort: { deadlineAt: 1, _id: 1 } },
+    { filter: { deadlineAt: { $gte: now }, ...stillOpen }, sort: { deadlineAt: direction, _id: direction } },
     // $not/$gte also matches a missing deadline, and an open-date one that is excluded above.
     { filter: { $or: [{ deadlineAt: { $not: { $gte: now } } }, ...(query.status ? [] : [{ status: { $in: ['CANCELLED', 'AWARDED'] } }])] }, sort: SORTS.date },
     page,
@@ -197,8 +199,8 @@ export async function listWorks(filter: ListWorksFilter = {}): Promise<ListWorks
   if (filter.sort === 'budget-asc' && filter.budgetMax === undefined) {
     return listWorksPricedFirst(query, page, pageSize);
   }
-  if (filter.sort === 'deadline') {
-    return listWorksByDeadline(query, page, pageSize);
+  if (filter.sort === 'deadline' || filter.sort === 'deadline-desc') {
+    return listWorksByDeadline(query, page, pageSize, filter.sort === 'deadline' ? 1 : -1);
   }
 
   const [items, total] = await Promise.all([

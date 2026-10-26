@@ -248,6 +248,17 @@ async function main(): Promise<void> {
     `${names(page1.json)} | ${names(page2.json)} | ${names(page3.json)}`
   );
 
+  // --- sort by deadline, furthest first ---
+  const byDeadlineDesc = await getJson('/works?sort=deadline-desc&pageSize=50');
+  record(names(byDeadlineDesc.json).join() === 'W1,W3,W2,W8,W4,W5,W6,W7', 'sort=deadline-desc: furthest-closing open works first, then the same newest-first rest', names(byDeadlineDesc.json).join());
+  const descPage1 = await getJson('/works?sort=deadline-desc&pageSize=3&page=1');
+  const descPage2 = await getJson('/works?sort=deadline-desc&pageSize=3&page=2');
+  record(
+    [...names(descPage1.json), '|', ...names(descPage2.json)].join() === 'W1,W3,W2,|,W8,W4,W5',
+    'sort=deadline-desc paginates across the open / not-open boundary',
+    `${names(descPage1.json)} | ${names(descPage2.json)}`
+  );
+
   const deadlineWithSearch = await getJson(`/works?sort=deadline&q=${encodeURIComponent('ถนน')}&pageSize=50`);
   record(names(deadlineWithSearch.json).join() === 'W2,W1,W4,W5,W6,W7', 'sort=deadline keeps the free-text search (q) in BOTH groups', names(deadlineWithSearch.json).join());
 
@@ -280,6 +291,7 @@ async function main(): Promise<void> {
 
   // --- validator ---
   record(listWorksQuerySchema.safeParse({ sort: 'deadline', fiscalYear: '2569' }).success, 'validator accepts sort=deadline + fiscalYear');
+  record(listWorksQuerySchema.safeParse({ sort: 'deadline-desc' }).success, 'validator accepts sort=deadline-desc');
   record(!listWorksQuerySchema.safeParse({ sort: 'closing' }).success, 'validator still rejects an unknown sort');
   record(!listWorksQuerySchema.safeParse({ fiscalyear: '2569' }).success, 'validator is still strict about unknown parameters');
 

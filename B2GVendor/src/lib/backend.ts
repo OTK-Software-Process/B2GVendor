@@ -129,7 +129,7 @@ export interface ListWorksParams {
   q?: string;
   budgetMax?: number;
   fiscalYear?: number; // ปีงบประมาณ, Buddhist Era
-  sort?: 'date' | 'budget-asc' | 'budget-desc' | 'deadline';
+  sort?: 'date' | 'budget-asc' | 'budget-desc' | 'deadline' | 'deadline-desc';
   page?: number;
   pageSize?: number;
 }

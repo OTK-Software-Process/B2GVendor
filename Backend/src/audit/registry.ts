@@ -137,7 +137,7 @@ export const AUDITED_MODELS: Record<string, AuditRegistration> = {
   Account: {
     label: 'email',
     redact: ['phone'],
-    ignore: ['lockedUntil', 'passwordChangedAt'], // bookkeeping that changes with every password write
+    ignore: ['lockedUntil', 'failedLoginCount', 'lastFailedLoginAt', 'passwordChangedAt'], // sign-in / password bookkeeping
     action: accountAction,
     metadata: ({ snapshot }) => ({ role: snapshot.role, accountType: snapshot.type })
   },

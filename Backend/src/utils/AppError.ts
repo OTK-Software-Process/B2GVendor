@@ -53,6 +53,17 @@ export class AppError extends Error {
     return new AppError(403, 'ACCOUNT_SUSPENDED', 'This account has been suspended.');
   }
 
+  static accountLocked(retryAfterSeconds: number): AppError {
+    const minutes = Math.max(1, Math.ceil(retryAfterSeconds / 60));
+    return new AppError(
+      423,
+      'ACCOUNT_LOCKED',
+      `Too many failed sign-in attempts. Please try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`,
+      undefined,
+      { retryAfterSeconds }
+    );
+  }
+
   static notAuthenticated(): AppError {
     return new AppError(401, 'NOT_AUTHENTICATED', 'You are not signed in.');
   }

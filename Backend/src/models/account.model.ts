@@ -34,7 +34,10 @@ export interface IAccount extends Document {
   emailNotificationsEnabled: boolean;
   notificationFrequency: NotificationFrequency;
 
+  // Per-account sign-in lockout -- see services/loginLockout.service.ts.
   lockedUntil?: Date;
+  failedLoginCount?: number;
+  lastFailedLoginAt?: Date;
   passwordChangedAt?: Date;
 
   createdAt: Date;
@@ -176,6 +179,8 @@ const AccountSchema = new Schema<IAccount>(
     },
 
     lockedUntil: { type: Date, select: false },
+    failedLoginCount: { type: Number, default: 0, select: false },
+    lastFailedLoginAt: { type: Date, select: false },
     passwordChangedAt: { type: Date, select: false },
   },
   {
@@ -185,6 +190,8 @@ const AccountSchema = new Schema<IAccount>(
       transform(_doc, ret: Record<string, unknown>) {
         delete ret.passwordHash;
         delete ret.lockedUntil;
+        delete ret.failedLoginCount;
+        delete ret.lastFailedLoginAt;
         delete ret._id;
         delete ret.__v;
         return ret;

@@ -266,6 +266,7 @@ export function SearchClient() {
             >
               <option value="date">{lang === 'en' ? 'Newest Ingested' : 'วันที่ประกาศล่าสุด'}</option>
               <option value="deadline">{lang === 'en' ? 'Bid deadline: soonest first' : 'กำหนดยื่นข้อเสนอ (ใกล้ถึงก่อน)'}</option>
+              <option value="deadline-desc">{lang === 'en' ? 'Bid deadline: furthest first' : 'กำหนดยื่นข้อเสนอ (ไกลสุดก่อน)'}</option>
               <option value="budget-desc">{lang === 'en' ? 'Budget: High to Low' : 'งบประมาณ (สูงไปต่ำ)'}</option>
               <option value="budget-asc">{lang === 'en' ? 'Budget: Low to High' : 'งบประมาณ (ต่ำไปสูง)'}</option>
             </select>

@@ -4,6 +4,7 @@ import { Session } from "../models/session.model";
 import { toSessionView } from "./session.service";
 import { consumeToken, issueToken } from "./token.service";
 import { sendPasswordResetEmail } from "./email.service";
+import { clearFailedLogins } from "./loginLockout.service";
 
 export async function getProfile(accountId: string): Promise<IAccount> {
   const account = await Account.findById(accountId);
@@ -81,6 +82,8 @@ export async function resetPassword(
 
   account.passwordHash = newPassword;
   await account.save();
+  // Proving control of the mailbox lifts a sign-in lockout.
+  await clearFailedLogins(account._id);
 }
 
 export interface NotificationSettingsUpdate {
