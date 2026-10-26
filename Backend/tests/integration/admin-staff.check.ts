@@ -9,14 +9,14 @@ import { Tag } from '../../src/models/tag.model';
 import { Token } from '../../src/models/token.model';
 import { SESSION_COOKIE_NAME } from '../../src/config/cookie';
 import { createSession } from '../../src/services/session.service';
+import { issueToken } from '../../src/services/token.service';
 
 // Uses its own throwaway database (dropped at the start and end) -- never
 // touches the dev database.
 const MONGODB_URI = process.env.CHECK_MONGODB_URI ?? 'mongodb://127.0.0.1:27017/b2gvendor-admin-staff-check';
 
 // Backend/.env may hold REAL SMTP credentials. This check must never send mail:
-// force "not configured" (send() then only logs) and capture what would have
-// been sent.
+// force "not configured" so password-link attempts fail without sending.
 (env as { SMTP_HOST?: string }).SMTP_HOST = undefined;
 
 const PASSWORD = 'Password123';
@@ -165,11 +165,11 @@ async function main(): Promise<void> {
   record(!(await newDb!.comparePassword(PASSWORD)), 'nobody sets the password: it is random and unknown');
   record(created.json.data.setupEmail.sent === false && created.json.data.setupEmail.reason === 'smtp_not_configured', 'the response says honestly that no email was sent', JSON.stringify(created.json.data.setupEmail));
   record(!created.text.includes('passwordHash'), 'the create response leaks no password data');
-  const token1 = lastResetToken();
-  record(!!token1, 'a set-password link was issued');
+  record(!lastResetToken() && (await Token.countDocuments({ accountId: newId, purpose: 'password_reset' })) === 0, 'no set-password link or reset token is exposed when email is not sent');
   record((await tryLogin('new.admin@example.com', 'guess12345')).res.status === 401, 'the new admin cannot sign in before setting a password');
+  const token1 = await issueToken(newId, 'password_reset');
   const setPw = await call('POST', '/auth/reset-password', undefined, { token: token1, newPassword: 'BrandNew123', confirmNewPassword: 'BrandNew123' });
-  record(setPw.status === 200, 'the new admin sets their own password through the emailed link');
+  record(setPw.status === 200, 'a valid reset token lets the new admin set their password');
   const newCookie = (await tryLogin('new.admin@example.com', 'BrandNew123')).cookie;
   record(newCookie !== '', '...and can sign in');
   record((await call('GET', '/admin/dashboard', newCookie)).status === 200, '...and has admin access');
@@ -252,9 +252,9 @@ async function main(): Promise<void> {
   capturedLogs.length = 0;
   const link = await call('POST', `/admin/staff/${bId}/password-link`, superCookie);
   record(link.status === 200 && link.json.data.sent === false && link.json.data.reason === 'smtp_not_configured', 'sending a password link reports mail is not configured');
-  record(!!lastResetToken(), '...but a fresh reset link was still issued');
+  record(!lastResetToken(), 'no reset link is written to the log');
   await call('POST', `/admin/staff/${bId}/password-link`, superCookie);
-  record((await Token.countDocuments({ accountId: bId, purpose: 'password_reset' })) === 1, 'a new link replaces the previous one');
+  record((await Token.countDocuments({ accountId: bId, purpose: 'password_reset' })) === 0, 'a failed email attempt does not leave a reset token');
 
   // ------------------------------------------------------------------ delete
   await Follow.create({ accountId: adminB._id, tagId: (await Tag.create({ name: 'T', facet: 'keyword' }))._id });

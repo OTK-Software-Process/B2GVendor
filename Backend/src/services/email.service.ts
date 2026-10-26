@@ -19,7 +19,7 @@ function getTransporter(): Transporter | null {
   return transporter;
 }
 
-/** Whether outgoing mail is actually configured -- when it is not, send() only logs. */
+/** Whether outgoing mail is configured. */
 export function isEmailConfigured(): boolean {
   return !!env.SMTP_HOST;
 }
@@ -35,11 +35,7 @@ async function send(mail: Mail): Promise<void> {
   const activeTransporter = getTransporter();
 
   if (!activeTransporter) {
-    logger.warn('email', `SMTP not configured, email not sent to ${mail.to}`, {
-      subject: mail.subject,
-      text: mail.text
-    });
-    return;
+    throw new Error('SMTP is not configured; email could not be sent.');
   }
 
   await activeTransporter.sendMail({ from: env.MAIL_FROM, ...mail });

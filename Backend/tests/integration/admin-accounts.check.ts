@@ -8,14 +8,14 @@ import { Session } from '../../src/models/session.model';
 import { Tag } from '../../src/models/tag.model';
 import { Token } from '../../src/models/token.model';
 import { SESSION_COOKIE_NAME } from '../../src/config/cookie';
+import { issueToken } from '../../src/services/token.service';
 
 // Uses its own throwaway database (dropped at the start and end) -- never
 // touches the dev database.
 const MONGODB_URI = process.env.CHECK_MONGODB_URI ?? 'mongodb://127.0.0.1:27017/b2gvendor-admin-accounts-check';
 
 // Backend/.env may hold REAL SMTP credentials. This check must never send mail:
-// force "not configured" (send() then only logs) and capture what would have
-// been sent.
+// force "not configured" so password-link attempts fail without sending.
 (env as { SMTP_HOST?: string }).SMTP_HOST = undefined;
 
 const PASSWORD = 'Password123';
@@ -24,7 +24,7 @@ function record(pass: boolean, label: string, detail = ''): void {
   results.push(`${pass ? 'PASS' : 'FAIL'}  ${label}${detail ? '  -> ' + detail : ''}`);
 }
 
-// Would-be emails, captured from the logger instead of being sent.
+// Captured logs are checked to ensure no reset link is written to them.
 const capturedLogs: string[] = [];
 const realWarn = console.warn;
 console.warn = (...args: unknown[]) => {
@@ -166,11 +166,11 @@ async function main(): Promise<void> {
   record(napatDb!.passwordHash !== undefined && !(await napatDb!.comparePassword(PASSWORD)), 'the admin sets no password: it is random and unknown');
   record(created.json.data.setupEmail.sent === false && created.json.data.setupEmail.reason === 'smtp_not_configured', 'the response says honestly that no email was sent (mail not configured)', JSON.stringify(created.json.data.setupEmail));
   record(!created.text.includes('passwordHash'), 'the create response leaks no password data');
-  const token1 = lastResetToken();
-  record(!!token1 && (await Token.countDocuments({ accountId: napatId, purpose: 'password_reset' })) === 1, 'a set-password link was issued for the vendor');
+  record(!lastResetToken() && (await Token.countDocuments({ accountId: napatId, purpose: 'password_reset' })) === 0, 'no setup link or reset token is exposed when email is not sent');
   record((await tryLogin('napat@example.com', 'anything123')).res.status === 401, 'the vendor cannot log in before setting a password');
+  const token1 = await issueToken(napatId, 'password_reset');
   const setPw = await call('POST', '/auth/reset-password', undefined, { token: token1, newPassword: 'BrandNew123', confirmNewPassword: 'BrandNew123' });
-  record(setPw.status === 200, 'the vendor sets their own password through the emailed link', String(setPw.status));
+  record(setPw.status === 200, 'a valid reset token lets the vendor set their password', String(setPw.status));
   record((await tryLogin('napat@example.com', 'BrandNew123')).cookie !== '', '...and can then sign in');
   record((await call('POST', '/auth/reset-password', undefined, { token: token1, newPassword: 'Another123', confirmNewPassword: 'Another123' })).status === 400, 'the link is single-use');
 
@@ -232,12 +232,15 @@ async function main(): Promise<void> {
 
   // ------------------------------------------------------------- password link
   capturedLogs.length = 0;
+  const forgot = await call('POST', '/auth/forgot-password', undefined, { email: 'wipa@example.com' });
+  record(forgot.status === 500, 'forgot-password fails when SMTP is not configured', String(forgot.status));
+  record(!forgot.text.includes('/reset-password/'), 'the failed response does not expose a reset link');
+  record(await Token.countDocuments({ accountId: v2Id, purpose: 'password_reset' }) === 0, 'a reset token is not left behind when email fails');
+
   const link = await call('POST', `/admin/accounts/${v2Id}/password-link`, adminCookie);
   record(link.status === 200 && link.json.data.sent === false && link.json.data.reason === 'smtp_not_configured', 'sending a password link reports that mail is not configured', JSON.stringify(link.json?.data));
-  record(!!lastResetToken(), 'a fresh reset link was still issued (visible in the log for local development)');
-  const linkOnce = await Token.countDocuments({ accountId: v2Id, purpose: 'password_reset' });
-  await call('POST', `/admin/accounts/${v2Id}/password-link`, adminCookie);
-  record(linkOnce === 1 && (await Token.countDocuments({ accountId: v2Id, purpose: 'password_reset' })) === 1, 'a new link replaces the previous one');
+  record(!lastResetToken(), 'a reset link is never written to the log');
+  record(await Token.countDocuments({ accountId: v2Id, purpose: 'password_reset' }) === 0, 'no reset token is left behind when admin email fails');
 
   // ------------------------------------------------------------------ delete
   await loginCookie('kamon@example.com').catch(() => null); // suspended: no session, expected

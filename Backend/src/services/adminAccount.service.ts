@@ -10,7 +10,7 @@ import { logger } from '../utils/logger';
 import { isEmailConfigured, sendPasswordResetEmail, sendPasswordSetupEmail } from './email.service';
 import { audit } from './audit.service';
 import { revokeAllSessions } from './session.service';
-import { issueToken } from './token.service';
+import { invalidateTokens, issueToken } from './token.service';
 import { CreateVendorInput, UpdateVendorInput } from '../validators/adminAccount.validator';
 
 // Vendor (role "user") account management for admins -- SRS 4.1 FR-1.5.
@@ -151,21 +151,18 @@ export interface SetupEmailResult {
 // Issues a fresh one-time link and emails it. A vendor who has never signed in
 // gets the "your account was created" wording; anyone else gets a plain reset.
 export async function sendPasswordLink(account: IAccount): Promise<SetupEmailResult> {
-  if (!isEmailConfigured()) {
-    // Still issue the token so the logged link works in local development.
-    const raw = await issueToken(account._id, 'password_reset');
-    await sendPasswordSetupEmail(account.email, account.name, raw).catch(() => undefined);
-    return { sent: false, reason: 'smtp_not_configured' };
-  }
+  let tokenIssued = false;
   try {
     const raw = await issueToken(account._id, 'password_reset');
+    tokenIssued = true;
     const everSignedIn = await Session.exists({ accountId: account._id });
     if (everSignedIn) await sendPasswordResetEmail(account.email, account.name, raw);
     else await sendPasswordSetupEmail(account.email, account.name, raw);
     return { sent: true };
   } catch (err) {
+    if (tokenIssued) await invalidateTokens(account._id, 'password_reset');
     logger.warn('admin-accounts', `Failed to send password link to ${account.email}`, err);
-    return { sent: false, reason: 'send_failed' };
+    return { sent: false, reason: isEmailConfigured() ? 'send_failed' : 'smtp_not_configured' };
   }
 }
 

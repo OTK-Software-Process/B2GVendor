@@ -2,7 +2,7 @@ import { Account, IAccount, NotificationFrequency } from "../models/account.mode
 import { AppError } from "../utils/AppError";
 import { Session } from "../models/session.model";
 import { toSessionView } from "./session.service";
-import { consumeToken, issueToken } from "./token.service";
+import { consumeToken, invalidateTokens, issueToken } from "./token.service";
 import { sendPasswordResetEmail } from "./email.service";
 
 export async function getProfile(accountId: string): Promise<IAccount> {
@@ -59,7 +59,12 @@ export async function forgotPassword(email: string): Promise<void> {
     }
 
     const rawToken = await issueToken(account._id, "password_reset");
-    await sendPasswordResetEmail(account.email, account.name, rawToken);
+    try {
+      await sendPasswordResetEmail(account.email, account.name, rawToken);
+    } catch (error) {
+      await invalidateTokens(account._id, "password_reset");
+      throw error;
+    }
   } catch (error) {
     console.error("Error in forgotPassword:", error);
     throw AppError.internalError(
