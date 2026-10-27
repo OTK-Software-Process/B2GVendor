@@ -26,11 +26,11 @@ export interface IAccount extends Document {
   status: AccountStatus;
   role: AccountRole;
   permissions: Permission[];
+  emailVerified: boolean;
 
-  // Notification preferences (account/notifications/settings in the
-  // frontend). In-app notifications are always created regardless of these
-  // -- they only affect whether/when an email is sent. See
-  // notification.service.ts's notifyNewWorkMatches and sendDailyDigests.
+  // Email verification and notification preferences. In-app notifications
+  // are always created regardless of these; verification and preferences
+  // only affect email delivery in notification.service.ts.
   emailNotificationsEnabled: boolean;
   notificationFrequency: NotificationFrequency;
 
@@ -168,6 +168,8 @@ const AccountSchema = new Schema<IAccount>(
       index: true,
     },
     permissions: { type: [{ type: String, enum: PERMISSIONS }], default: [] },
+    // Keep existing/provisioned accounts working; self-registration explicitly starts false.
+    emailVerified: { type: Boolean, default: true },
     emailNotificationsEnabled: { type: Boolean, default: true },
     notificationFrequency: {
       type: String,

@@ -2,11 +2,10 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { PublicShell } from '@/components/PublicShell';
-import { useApp, AccountView } from '@/context/AppContext';
+import { useApp } from '@/context/AppContext';
 import { api, ApiError } from '@/lib/api';
-import { Building, ArrowRight, Eye, EyeOff } from 'lucide-react';
+import { Building, ArrowRight, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 
 function sanitizeName(raw: string): string {
   const noBadChars = raw.replace(/[^\p{L}\p{M}\s'-]/gu, '');
@@ -17,8 +16,7 @@ function sanitizeName(raw: string): string {
 }
 
 export default function RegisterPage() {
-  const router = useRouter();
-  const { lang, signIn } = useApp();
+  const { lang } = useApp();
   const [includeBusinessProfile, setIncludeBusinessProfile] = useState(true);
 
   const [name, setName] = useState('');
@@ -31,6 +29,8 @@ export default function RegisterPage() {
   const [taxId, setTaxId] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
+  const [verificationSent, setVerificationSent] = useState(false);
+  const [registeredEmail, setRegisteredEmail] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
@@ -41,7 +41,7 @@ export default function RegisterPage() {
     setSubmitting(true);
 
     try {
-      const account = await api.post<AccountView>('/auth/register', {
+      await api.post<{ emailVerificationRequired: boolean }>('/auth/register', {
         name: name.trim(),
         email: email.trim(),
         password,
@@ -49,8 +49,8 @@ export default function RegisterPage() {
         type: includeBusinessProfile ? 'business' : 'individual',
         ...(includeBusinessProfile ? { businessProfile: { companyName: companyName.trim(), taxId: taxId.trim() } } : {})
       });
-      signIn(account);
-      router.push('/account');
+      setRegisteredEmail(email.trim());
+      setVerificationSent(true);
     } catch (err) {
       if (err instanceof ApiError) {
         setFormError(err.message);
@@ -67,6 +67,24 @@ export default function RegisterPage() {
     <PublicShell>
       <div className="max-w-xl mx-auto py-8 space-y-6">
         <div className="bg-white border border-slate-200 rounded-3xl p-8 shadow-xs space-y-6">
+          {verificationSent ? (
+            <div className="space-y-4 py-4 text-center">
+              <CheckCircle2 className="w-16 h-16 text-emerald-600 mx-auto" />
+              <h1 className="text-2xl font-extrabold text-slate-900">
+                {lang === 'en' ? 'Check your email' : 'กรุณาตรวจสอบอีเมลของคุณ'}
+              </h1>
+              <p className="text-sm text-slate-600">
+                {lang === 'en'
+                  ? `We sent a verification link to ${registeredEmail}. The link expires in 24 hours.`
+                  : `เราส่งลิงก์ยืนยันไปที่ ${registeredEmail} แล้ว ลิงก์จะหมดอายุภายใน 24 ชั่วโมง`}
+              </p>
+              <Link href="/login" className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition-colors">
+                <span>{lang === 'en' ? 'Go to Log In' : 'ไปที่หน้าเข้าสู่ระบบ'}</span>
+                <ArrowRight className="w-4 h-4" />
+              </Link>
+            </div>
+          ) : (
+            <>
           <div className="text-center space-y-2">
             <h1 className="text-2xl font-extrabold text-slate-900">
               {lang === 'en' ? 'Unified Account Registration' : 'ลงทะเบียนบัญชี B2G Vendor'}
@@ -266,6 +284,8 @@ export default function RegisterPage() {
               {lang === 'en' ? 'Log In' : 'เข้าสู่ระบบที่นี่'}
             </Link>
           </div>
+            </>
+          )}
         </div>
       </div>
     </PublicShell>

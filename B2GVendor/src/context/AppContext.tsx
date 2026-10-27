@@ -42,6 +42,7 @@ export interface AccountView {
   id: string;
   name: string;
   email: string;
+  emailVerified: boolean;
   phone?: string;
   type: 'individual' | 'business';
   businessProfile?: AccountBusinessProfile;

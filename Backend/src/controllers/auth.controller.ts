@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { registerAccount, loginWithPassword } from '../services/auth.service';
+import { registerAccount, loginWithPassword, verifyEmailAddress } from '../services/auth.service';
 import { revokeSessionByRawToken } from '../services/session.service';
 import { created, ok } from '../utils/apiResponse';
 import { SESSION_COOKIE_NAME, sessionCookieOptions, clearSessionCookieOptions } from '../config/cookie';
@@ -9,19 +9,22 @@ import { IAccount } from '../models/account.model';
 export async function register(req: Request, res: Response): Promise<void> {
   const input = req.body as RegisterInput;
 
-  const { account, rawToken } = await registerAccount(
+  await registerAccount(
     {
       name: input.name,
       email: input.email,
       password: input.password,
       type: input.type,
       businessProfile: input.businessProfile
-    },
-    req
+    }
   );
 
-  res.cookie(SESSION_COOKIE_NAME, rawToken, sessionCookieOptions);
-  created(res, account.toJSON());
+  created(res, { emailVerificationRequired: true });
+}
+
+export async function verifyEmail(req: Request, res: Response): Promise<void> {
+  await verifyEmailAddress(req.body.token as string);
+  ok(res, { emailVerified: true });
 }
 
 export async function login(req: Request, res: Response): Promise<void> {

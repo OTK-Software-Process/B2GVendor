@@ -2,6 +2,7 @@ export type ErrorCode =
   | 'VALIDATION_ERROR'
   | 'EMAIL_ALREADY_REGISTERED'
   | 'INVALID_CREDENTIALS'
+  | 'EMAIL_NOT_VERIFIED'
   | 'ACCOUNT_SUSPENDED'
   | 'ACCOUNT_LOCKED'
   | 'NOT_AUTHENTICATED'
@@ -48,6 +49,10 @@ export class AppError extends Error {
 
   static invalidCredentials(): AppError {
     return new AppError(401, 'INVALID_CREDENTIALS', 'Email or password is incorrect.');
+  }
+
+  static emailNotVerified(): AppError {
+    return new AppError(403, 'EMAIL_NOT_VERIFIED', 'Please verify your email address before signing in.');
   }
 
   static accountSuspended(): AppError {

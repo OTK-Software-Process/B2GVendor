@@ -153,6 +153,7 @@ export async function notifyNewWorkMatches(work: IWork, tagIds: Types.ObjectId[]
       // sent here if the account is on 'daily' frequency. The Notification
       // doc's includedInDigest stays false either way it's later picked up
       // for 'daily', and is simply never looked at for 'instant'.
+      if (!account.emailVerified) continue;
       if (!account.emailNotificationsEnabled) continue;
       if (account.notificationFrequency === 'daily') continue;
 
@@ -177,7 +178,12 @@ export async function notifyNewWorkMatches(work: IWork, tagIds: Types.ObjectId[]
 // underlying Notification docs are only marked included after a successful
 // send).
 export async function sendDailyDigests(): Promise<number> {
-  const accounts = await Account.find({ notificationFrequency: 'daily', emailNotificationsEnabled: true, status: 'active' });
+  const accounts = await Account.find({
+    notificationFrequency: 'daily',
+    emailNotificationsEnabled: true,
+    emailVerified: { $ne: false },
+    status: 'active'
+  });
   let sent = 0;
 
   for (const account of accounts) {

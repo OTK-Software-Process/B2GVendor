@@ -34,7 +34,11 @@ export default function LoginPage() {
       router.push(next ?? '/account');
     } catch (err) {
       if (err instanceof ApiError) {
-        setFormError(err.message);
+        setFormError(err.code === 'EMAIL_NOT_VERIFIED'
+          ? lang === 'en'
+            ? 'Please verify your email address using the link we sent before signing in.'
+            : 'กรุณายืนยันอีเมลจากลิงก์ที่เราส่งให้ก่อนเข้าสู่ระบบ'
+          : err.message);
         setFieldErrors(err.fields ?? {});
       } else {
         setFormError(lang === 'en' ? 'Something went wrong. Please try again.' : 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง');

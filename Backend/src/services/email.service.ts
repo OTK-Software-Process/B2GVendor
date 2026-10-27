@@ -109,6 +109,26 @@ export async function sendPasswordSetupEmail(
   });
 }
 
+export async function sendEmailVerificationEmail(
+  to: string,
+  name: string,
+  rawToken: string
+): Promise<void> {
+  const url = `${env.APP_URL}/verify-email/${encodeURIComponent(rawToken)}`;
+
+  await send({
+    to,
+    subject: 'ยืนยันอีเมลบัญชี B2G Vendor | Verify your B2G Vendor email',
+    text: `สวัสดีคุณ ${name}\n\nยืนยันอีเมลของคุณภายใน 24 ชั่วโมง:\n${url}\n\nIf you did not create this account, you can ignore this email.`,
+    html: layout(
+      'ยืนยันอีเมลบัญชี B2G Vendor',
+      `สวัสดีคุณ ${name} — กดปุ่มด้านล่างเพื่อยืนยันอีเมลของคุณ ลิงก์นี้มีอายุ 24 ชั่วโมง หากคุณไม่ได้สร้างบัญชีนี้ กรุณาเพิกเฉยต่ออีเมลฉบับนี้`,
+      'ยืนยันอีเมล',
+      url
+    )
+  });
+}
+
 export async function sendNewWorkMatchEmail(
   to: string,
   name: string,
