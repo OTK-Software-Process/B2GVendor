@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { PublicShell } from '@/components/PublicShell';
 import { useApp } from '@/context/AppContext';
 import { api, ApiError } from '@/lib/api';
-import { Lock, CheckCircle2, Loader2 } from 'lucide-react';
+import { Lock, CheckCircle2, Eye, EyeOff, Loader2 } from 'lucide-react';
 
 export default function ResetPasswordPage() {
   const router = useRouter();
@@ -17,6 +17,8 @@ export default function ResetPasswordPage() {
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const token = decodeURIComponent(params?.token ?? '');
 
@@ -90,12 +92,23 @@ export default function ResetPasswordPage() {
                 <div className="relative">
                   <Lock className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
                   <input
-                    type="password"
+                    type={showNewPassword ? 'text' : 'password'}
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     required
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-sm text-slate-900 outline-hidden"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-10 py-2 text-sm text-slate-900 outline-hidden"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword((show) => !show)}
+                    aria-label={lang === 'en'
+                      ? showNewPassword ? 'Hide new password' : 'Show new password'
+                      : showNewPassword ? 'ซ่อนรหัสผ่านใหม่' : 'แสดงรหัสผ่านใหม่'}
+                    aria-pressed={showNewPassword}
+                    className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-700"
+                  >
+                    {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
                 </div>
               </div>
 
@@ -106,12 +119,23 @@ export default function ResetPasswordPage() {
                 <div className="relative">
                   <Lock className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
                   <input
-                    type="password"
+                    type={showConfirmPassword ? 'text' : 'password'}
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     required
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-sm text-slate-900 outline-hidden"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-10 py-2 text-sm text-slate-900 outline-hidden"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword((show) => !show)}
+                    aria-label={lang === 'en'
+                      ? showConfirmPassword ? 'Hide confirmation password' : 'Show confirmation password'
+                      : showConfirmPassword ? 'ซ่อนรหัสผ่านที่ยืนยัน' : 'แสดงรหัสผ่านที่ยืนยัน'}
+                    aria-pressed={showConfirmPassword}
+                    className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-700"
+                  >
+                    {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
                 </div>
                 {fieldError && <p className="mt-1 text-xs text-rose-600">{fieldError}</p>}
               </div>

@@ -31,6 +31,19 @@ interface Mail {
   html: string;
 }
 
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, character => {
+    switch (character) {
+      case '&': return '&amp;';
+      case '<': return '&lt;';
+      case '>': return '&gt;';
+      case '"': return '&quot;';
+      case "'": return '&#39;';
+      default: return character;
+    }
+  });
+}
+
 async function send(mail: Mail): Promise<void> {
   const activeTransporter = getTransporter();
 
@@ -47,10 +60,10 @@ function layout(heading: string, body: string, buttonLabel: string, url: string)
 <html lang="th">
   <body style="margin:0;padding:24px;background:#f1f5f9;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;color:#0f172a;">
     <div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:12px;padding:32px;">
-      <h1 style="margin:0 0 16px;font-size:20px;">${heading}</h1>
-      <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#334155;">${body}</p>
-      <a href="${url}" style="display:inline-block;background:#0284c7;color:#ffffff;text-decoration:none;padding:12px 20px;border-radius:8px;font-size:14px;font-weight:600;">${buttonLabel}</a>
-      <p style="margin:24px 0 0;font-size:12px;line-height:1.6;color:#64748b;word-break:break-all;">${url}</p>
+      <h1 style="margin:0 0 16px;font-size:20px;">${escapeHtml(heading)}</h1>
+      <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#334155;">${escapeHtml(body)}</p>
+      <a href="${escapeHtml(url)}" style="display:inline-block;background:#0284c7;color:#ffffff;text-decoration:none;padding:12px 20px;border-radius:8px;font-size:14px;font-weight:600;">${escapeHtml(buttonLabel)}</a>
+      <p style="margin:24px 0 0;font-size:12px;line-height:1.6;color:#64748b;word-break:break-all;">${escapeHtml(url)}</p>
     </div>
   </body>
 </html>`;
@@ -134,8 +147,8 @@ export async function sendDailyDigestEmail(to: string, name: string, items: Dail
     .map(item => {
       const url = `${env.APP_URL}/works/${encodeURIComponent(item.workId)}`;
       return `<li style="margin:0 0 16px;">
-        <a href="${url}" style="color:#0284c7;text-decoration:none;font-weight:600;font-size:14px;">${item.workTitle}</a>
-        <div style="font-size:12px;color:#64748b;margin-top:2px;">${item.agencyName} — ${item.matchedTags.join(', ')}</div>
+        <a href="${escapeHtml(url)}" style="color:#0284c7;text-decoration:none;font-weight:600;font-size:14px;">${escapeHtml(item.workTitle)}</a>
+        <div style="font-size:12px;color:#64748b;margin-top:2px;">${escapeHtml(item.agencyName)} — ${escapeHtml(item.matchedTags.join(', '))}</div>
       </li>`;
     })
     .join('');
@@ -151,7 +164,7 @@ export async function sendDailyDigestEmail(to: string, name: string, items: Dail
   <body style="margin:0;padding:24px;background:#f1f5f9;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;color:#0f172a;">
     <div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:12px;padding:32px;">
       <h1 style="margin:0 0 16px;font-size:20px;">สรุปงานใหม่ประจำวัน</h1>
-      <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#334155;">สวัสดีคุณ ${name} — มีงานใหม่ที่ตรงกับแท็กที่คุณติดตาม ${items.length} รายการในวันนี้:</p>
+      <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#334155;">สวัสดีคุณ ${escapeHtml(name)} — มีงานใหม่ที่ตรงกับแท็กที่คุณติดตาม ${items.length} รายการในวันนี้:</p>
       <ul style="margin:0;padding:0;list-style:none;">${rows}</ul>
     </div>
   </body>

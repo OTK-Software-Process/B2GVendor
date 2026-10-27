@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { PublicShell } from '@/components/PublicShell';
 import { useApp, AccountView } from '@/context/AppContext';
 import { api, ApiError } from '@/lib/api';
-import { Building, ArrowRight } from 'lucide-react';
+import { Building, ArrowRight, Eye, EyeOff } from 'lucide-react';
 
 function sanitizeName(raw: string): string {
   const noBadChars = raw.replace(/[^\p{L}\p{M}\s'-]/gu, '');
@@ -25,6 +25,8 @@ export default function RegisterPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [companyName, setCompanyName] = useState('');
   const [taxId, setTaxId] = useState('');
 
@@ -125,13 +127,26 @@ export default function RegisterPage() {
                   <label className="block text-xs font-bold text-slate-700 mb-1">
                     {lang === 'en' ? 'Password' : 'กำหนดรหัสผ่าน'}
                   </label>
-                  <input
-                    type="password"
-                    required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-900 outline-hidden focus:ring-2 focus:ring-emerald-500"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      required
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 pr-10 text-sm text-slate-900 outline-hidden focus:ring-2 focus:ring-emerald-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((show) => !show)}
+                      aria-label={lang === 'en'
+                        ? showPassword ? 'Hide password' : 'Show password'
+                        : showPassword ? 'ซ่อนรหัสผ่าน' : 'แสดงรหัสผ่าน'}
+                      aria-pressed={showPassword}
+                      className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-700"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                   {fieldErrors.password && <p className="mt-1 text-xs text-rose-600">{fieldErrors.password}</p>}
                 </div>
 
@@ -139,13 +154,26 @@ export default function RegisterPage() {
                   <label className="block text-xs font-bold text-slate-700 mb-1">
                     {lang === 'en' ? 'Confirm Password' : 'ยืนยันรหัสผ่าน'}
                   </label>
-                  <input
-                    type="password"
-                    required
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-900 outline-hidden focus:ring-2 focus:ring-emerald-500"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      required
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 pr-10 text-sm text-slate-900 outline-hidden focus:ring-2 focus:ring-emerald-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword((show) => !show)}
+                      aria-label={lang === 'en'
+                        ? showConfirmPassword ? 'Hide confirmation password' : 'Show confirmation password'
+                        : showConfirmPassword ? 'ซ่อนรหัสผ่านที่ยืนยัน' : 'แสดงรหัสผ่านที่ยืนยัน'}
+                      aria-pressed={showConfirmPassword}
+                      className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-700"
+                    >
+                      {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                   {fieldErrors.confirmPassword && <p className="mt-1 text-xs text-rose-600">{fieldErrors.confirmPassword}</p>}
                 </div>
               </div>

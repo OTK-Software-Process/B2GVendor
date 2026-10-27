@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { PublicShell } from '@/components/PublicShell';
 import { useApp } from '@/context/AppContext';
 import { api, ApiError } from '@/lib/api';
-import { ArrowLeft, CheckCircle2, KeyRound, Loader2, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Eye, EyeOff, KeyRound, Loader2, ShieldCheck } from 'lucide-react';
 
 export default function ChangePasswordPage() {
   const router = useRouter();
@@ -16,6 +16,9 @@ export default function ChangePasswordPage() {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -120,14 +123,27 @@ export default function ChangePasswordPage() {
                     <label htmlFor="currentPassword" className="mb-1.5 block text-xs font-bold text-slate-700">
                       {lang === 'en' ? 'Current Password' : 'รหัสผ่านปัจจุบัน'}
                     </label>
-                    <input
-                      id="currentPassword"
-                      type="password"
-                      value={currentPassword}
-                      onChange={(e) => setCurrentPassword(e.target.value)}
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
-                      required
-                    />
+                    <div className="relative">
+                      <input
+                        id="currentPassword"
+                        type={showCurrentPassword ? 'text' : 'password'}
+                        value={currentPassword}
+                        onChange={(e) => setCurrentPassword(e.target.value)}
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 pr-10 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                        required
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowCurrentPassword((show) => !show)}
+                        aria-label={lang === 'en'
+                          ? showCurrentPassword ? 'Hide current password' : 'Show current password'
+                          : showCurrentPassword ? 'ซ่อนรหัสผ่านปัจจุบัน' : 'แสดงรหัสผ่านปัจจุบัน'}
+                        aria-pressed={showCurrentPassword}
+                        className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-700"
+                      >
+                        {showCurrentPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
                     {fieldErrors.currentPassword && (
                       <p className="mt-1 text-xs text-rose-600">{fieldErrors.currentPassword}</p>
                     )}
@@ -137,14 +153,27 @@ export default function ChangePasswordPage() {
                     <label htmlFor="newPassword" className="mb-1.5 block text-xs font-bold text-slate-700">
                       {lang === 'en' ? 'New Password' : 'รหัสผ่านใหม่'}
                     </label>
-                    <input
-                      id="newPassword"
-                      type="password"
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
-                      required
-                    />
+                    <div className="relative">
+                      <input
+                        id="newPassword"
+                        type={showNewPassword ? 'text' : 'password'}
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 pr-10 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                        required
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewPassword((show) => !show)}
+                        aria-label={lang === 'en'
+                          ? showNewPassword ? 'Hide new password' : 'Show new password'
+                          : showNewPassword ? 'ซ่อนรหัสผ่านใหม่' : 'แสดงรหัสผ่านใหม่'}
+                        aria-pressed={showNewPassword}
+                        className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-700"
+                      >
+                        {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
                     {fieldErrors.newPassword && (
                       <p className="mt-1 text-xs text-rose-600">{fieldErrors.newPassword}</p>
                     )}
@@ -154,14 +183,27 @@ export default function ChangePasswordPage() {
                     <label htmlFor="confirmPassword" className="mb-1.5 block text-xs font-bold text-slate-700">
                       {lang === 'en' ? 'Confirm New Password' : 'ยืนยันรหัสผ่านใหม่'}
                     </label>
-                    <input
-                      id="confirmPassword"
-                      type="password"
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
-                      required
-                    />
+                    <div className="relative">
+                      <input
+                        id="confirmPassword"
+                        type={showConfirmPassword ? 'text' : 'password'}
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 pr-10 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                        required
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword((show) => !show)}
+                        aria-label={lang === 'en'
+                          ? showConfirmPassword ? 'Hide confirmation password' : 'Show confirmation password'
+                          : showConfirmPassword ? 'ซ่อนรหัสผ่านที่ยืนยัน' : 'แสดงรหัสผ่านที่ยืนยัน'}
+                        aria-pressed={showConfirmPassword}
+                        className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-700"
+                      >
+                        {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
                     {fieldErrors.confirmNewPassword && (
                       <p className="mt-1 text-xs text-rose-600">{fieldErrors.confirmNewPassword}</p>
                     )}

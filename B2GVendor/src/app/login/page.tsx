@@ -8,13 +8,14 @@ import { PublicShell } from '@/components/PublicShell';
 import { useApp, AccountView } from '@/context/AppContext';
 import { api, ApiError } from '@/lib/api';
 import { safeNextPath } from '@/lib/adminAccess';
-import { Lock, Mail, ArrowRight } from 'lucide-react';
+import { Lock, Mail, ArrowRight, Eye, EyeOff } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
   const { lang, signIn } = useApp();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -105,13 +106,24 @@ export default function LoginPage() {
                 <input
                   id="password"
                   name="password"
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3 py-2.5 text-sm text-slate-900 outline-hidden focus:ring-2 focus:ring-emerald-500"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-10 py-2.5 text-sm text-slate-900 outline-hidden focus:ring-2 focus:ring-emerald-500"
                   required
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((show) => !show)}
+                  aria-label={lang === 'en'
+                    ? showPassword ? 'Hide password' : 'Show password'
+                    : showPassword ? 'ซ่อนรหัสผ่าน' : 'แสดงรหัสผ่าน'}
+                  aria-pressed={showPassword}
+                  className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-700"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
               </div>
               <div className="mt-2 flex justify-end">
                 <Link href="/forgot-password" className="text-xs text-emerald-600 hover:underline">

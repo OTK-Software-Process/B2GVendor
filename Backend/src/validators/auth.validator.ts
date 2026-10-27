@@ -25,7 +25,11 @@ export const registerSchema = z
       .string()
       .min(8, 'Password must be at least 8 characters')
       .regex(/[A-Za-z]/, 'Password must contain at least one letter')
-      .regex(/\d/, 'Password must contain at least one number'),
+      .regex(/\d/, 'Password must contain at least one number')
+      .refine(
+        password => Buffer.byteLength(password, 'utf8') <= 72,
+        'Password must be at most 72 bytes'
+      ),
     confirmPassword: z.string(),
     type: z.enum(['individual', 'business']).default('individual'),
     businessProfile: businessProfileSchema.optional()
