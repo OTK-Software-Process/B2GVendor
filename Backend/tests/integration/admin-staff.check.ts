@@ -10,10 +10,13 @@ import { Token } from '../../src/models/token.model';
 import { SESSION_COOKIE_NAME } from '../../src/config/cookie';
 import { createSession } from '../../src/services/session.service';
 import { issueToken } from '../../src/services/token.service';
+import { mockPwnedPasswords } from '../helpers/mockPwnedPasswords';
 
 // Uses its own throwaway database (dropped at the start and end) -- never
 // touches the dev database.
 const MONGODB_URI = process.env.CHECK_MONGODB_URI ?? 'mongodb://127.0.0.1:27017/b2gvendor-admin-staff-check';
+
+mockPwnedPasswords();
 
 // Backend/.env may hold REAL SMTP credentials. This check must never send mail:
 // force "not configured" so password-link attempts fail without sending.

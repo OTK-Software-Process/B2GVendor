@@ -6,8 +6,14 @@ import {
   revokeOtherSessions,
   toSessionView,
 } from "./session.service";
-import { consumeToken, invalidateTokens, issueToken } from "./token.service";
+import {
+  consumeToken,
+  invalidateTokens,
+  issueToken,
+  validateToken,
+} from "./token.service";
 import { sendPasswordResetEmail } from "./email.service";
+import { assertPasswordNotPwned } from "../integrations/haveIBeenPwned.client";
 
 export async function getProfile(accountId: string): Promise<IAccount> {
   const account = await Account.findById(accountId);
@@ -51,6 +57,7 @@ export async function changePassword(
     throw AppError.invalidCredentials();
   }
 
+  await assertPasswordNotPwned(newPassword);
   account.passwordHash = newPassword;
   await account.save();
   await revokeOtherSessions(accountId, currentSessionId);
@@ -83,6 +90,8 @@ export async function resetPassword(
   token: string,
   newPassword: string,
 ): Promise<void> {
+  await validateToken(token, "password_reset");
+  await assertPasswordNotPwned(newPassword);
   const accountId = await consumeToken(token, "password_reset");
 
   const account = await Account.findById(accountId).select('+passwordHash');

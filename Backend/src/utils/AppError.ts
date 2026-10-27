@@ -8,6 +8,7 @@ export type ErrorCode =
   | 'FORBIDDEN'
   | 'TOKEN_INVALID'
   | 'BAD_REQUEST'
+  | 'SERVICE_UNAVAILABLE'
   | 'RATE_LIMITED'
   | 'NOT_FOUND'
   | 'CONFLICT'
@@ -75,6 +76,10 @@ export class AppError extends Error {
 
   static badRequest(message = 'Bad request.'): AppError {
     return new AppError(400, 'BAD_REQUEST', message);
+  }
+
+  static serviceUnavailable(message = 'Service temporarily unavailable.'): AppError {
+    return new AppError(503, 'SERVICE_UNAVAILABLE', message);
   }
 
   static conflict(message = 'This action conflicts with the current state.'): AppError {

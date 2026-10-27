@@ -3,9 +3,12 @@ import { createApp } from '../../src/app';
 import { Account } from '../../src/models/account.model';
 import { Session } from '../../src/models/session.model';
 import { SESSION_COOKIE_NAME } from '../../src/config/cookie';
+import { mockPwnedPasswords } from '../helpers/mockPwnedPasswords';
 
 const MONGODB_URI =
   process.env.CHECK_MONGODB_URI ?? 'mongodb://127.0.0.1:27017/b2gvendor-auth-flow-check';
+
+mockPwnedPasswords();
 
 const results: string[] = [];
 

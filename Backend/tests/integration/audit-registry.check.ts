@@ -17,11 +17,14 @@ import { Work } from '../../src/models/work.model';
 import { audit } from '../../src/services/audit.service';
 import { createSession } from '../../src/services/session.service';
 import { issueToken } from '../../src/services/token.service';
+import { mockPwnedPasswords } from '../helpers/mockPwnedPasswords';
 
 // Drives every Sprint 3 admin edit through the REAL HTTP API with the REAL
 // registry, and checks what lands in the audit log. Uses its own throwaway
 // database -- never touches the dev database.
 const MONGODB_URI = process.env.CHECK_MONGODB_URI ?? 'mongodb://127.0.0.1:27017/b2gvendor-audit-registry-check';
+
+mockPwnedPasswords();
 
 // Backend/.env may hold REAL SMTP credentials: this check must never send mail.
 (env as { SMTP_HOST?: string }).SMTP_HOST = undefined;

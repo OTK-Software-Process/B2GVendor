@@ -2,6 +2,7 @@ import { Request } from 'express';
 import { Account, IAccount } from '../models/account.model';
 import { createSession, SessionContext } from './session.service';
 import { AppError } from '../utils/AppError';
+import { assertPasswordNotPwned } from '../integrations/haveIBeenPwned.client';
 
 export interface AuthResult {
   account: IAccount;
@@ -25,6 +26,8 @@ export async function registerAccount(
   },
   req: Request
 ): Promise<AuthResult> {
+  await assertPasswordNotPwned(input.password);
+
   const account = await Account.create({
     name: input.name,
     email: input.email,
