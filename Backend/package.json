@@ -14,6 +14,7 @@
     "check:auth": "tsx tests/integration/auth-flow.check.ts",
     "check:login-lockout": "tsx tests/integration/login-lockout.check.ts",
     "check:security-headers": "tsx tests/integration/security-headers.check.ts",
+    "check:csrf": "tsx tests/integration/csrf.check.ts",
     "check:admin-guard": "tsx tests/integration/admin-guard.check.ts",
     "check:admin-dashboard": "tsx tests/integration/admin-dashboard.check.ts",
     "check:admin-tags": "tsx tests/integration/admin-tags.check.ts",

@@ -6,6 +6,8 @@ export type ErrorCode =
   | 'ACCOUNT_LOCKED'
   | 'NOT_AUTHENTICATED'
   | 'FORBIDDEN'
+  | 'CSRF_BLOCKED'
+  | 'UNSUPPORTED_MEDIA_TYPE'
   | 'TOKEN_INVALID'
   | 'BAD_REQUEST'
   | 'RATE_LIMITED'
@@ -70,6 +72,14 @@ export class AppError extends Error {
 
   static forbidden(message = 'You do not have permission to do that.'): AppError {
     return new AppError(403, 'FORBIDDEN', message);
+  }
+
+  static csrfBlocked(): AppError {
+    return new AppError(403, 'CSRF_BLOCKED', 'This request was blocked: it did not come from the application.');
+  }
+
+  static unsupportedMediaType(): AppError {
+    return new AppError(415, 'UNSUPPORTED_MEDIA_TYPE', 'Requests that change data must be sent as application/json.');
   }
 
   static tokenInvalid(): AppError {
