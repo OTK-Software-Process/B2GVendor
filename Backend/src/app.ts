@@ -9,14 +9,21 @@ import { healthRouter } from './routes/health.route';
 import { apiRouter } from './routes';
 import { errorHandler, notFoundHandler } from './middlewares/error.middleware';
 import { sanitizeInput } from './middlewares/sanitize.middleware';
+import { securityHeaders } from './middlewares/securityHeaders.middleware';
 import { auditContextMiddleware } from './middlewares/auditContext.middleware';
 
 export function createApp() {
   const app = express();
 
+  // Stop Express announcing itself ("X-Powered-By: Express") at all, rather than relying on removing it later.
+  app.disable('x-powered-by');
+
   if (isProduction) {
     app.set('trust proxy', 1);
   }
+
+  // First, so EVERY response carries the headers: success, errors, 404s and CORS preflights alike.
+  app.use(securityHeaders(isProduction));
 
   app.use(
     cors({
