@@ -12,7 +12,7 @@ import {
   issueToken,
   validateToken,
 } from "./token.service";
-import { sendPasswordResetEmail } from "./email.service";
+import { isEmailConfigured, sendPasswordResetEmail } from "./email.service";
 import { assertPasswordNotPwned } from "../integrations/haveIBeenPwned.client";
 
 export async function getProfile(accountId: string): Promise<IAccount> {
@@ -65,6 +65,10 @@ export async function changePassword(
 
 export async function forgotPassword(email: string): Promise<void> {
   try {
+    if (!isEmailConfigured()) {
+      throw new Error("SMTP is not configured; email could not be sent.");
+    }
+
     const account = await Account.findOne({ email: email.trim().toLowerCase() });
 
     if (!account) {

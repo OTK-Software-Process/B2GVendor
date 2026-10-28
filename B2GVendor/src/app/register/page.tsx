@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { PublicShell } from '@/components/PublicShell';
 import { useApp } from '@/context/AppContext';
 import { api, ApiError } from '@/lib/api';
+import { localizeAuthError } from '@/lib/authMessages';
 import { Building, ArrowRight, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 
 function sanitizeName(raw: string): string {
@@ -53,7 +54,7 @@ export default function RegisterPage() {
       setVerificationSent(true);
     } catch (err) {
       if (err instanceof ApiError) {
-        setFormError(err.message);
+        setFormError(localizeAuthError(err.message, lang));
         setFieldErrors(err.fields ?? {});
       } else {
         setFormError(lang === 'en' ? 'Something went wrong. Please try again.' : 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง');

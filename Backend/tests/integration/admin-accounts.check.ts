@@ -240,6 +240,15 @@ async function main(): Promise<void> {
   record(!forgot.text.includes('/reset-password/'), 'the failed response does not expose a reset link');
   record(await Token.countDocuments({ accountId: v2Id, purpose: 'password_reset' }) === 0, 'a reset token is not left behind when email fails');
 
+  const forgotUnknown = await call('POST', '/auth/forgot-password', undefined, { email: 'unknown@example.com' });
+  record(
+    forgotUnknown.status === forgot.status &&
+      forgotUnknown.json?.error?.code === forgot.json?.error?.code &&
+      forgotUnknown.json?.error?.message === forgot.json?.error?.message,
+    'forgot-password returns the same SMTP-disabled error for an unregistered email',
+    JSON.stringify(forgotUnknown.json?.error)
+  );
+
   const link = await call('POST', `/admin/accounts/${v2Id}/password-link`, adminCookie);
   record(link.status === 200 && link.json.data.sent === false && link.json.data.reason === 'smtp_not_configured', 'sending a password link reports that mail is not configured', JSON.stringify(link.json?.data));
   record(!lastResetToken(), 'a reset link is never written to the log');

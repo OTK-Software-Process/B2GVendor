@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { PublicShell } from '@/components/PublicShell';
 import { useApp } from '@/context/AppContext';
 import { api, ApiError } from '@/lib/api';
+import { localizeAuthError } from '@/lib/authMessages';
 import { Lock, CheckCircle2, Eye, EyeOff, Loader2 } from 'lucide-react';
 
 export default function ResetPasswordPage() {
@@ -54,8 +55,9 @@ export default function ResetPasswordPage() {
       setTimeout(() => router.push('/login'), 2000);
     } catch (error) {
       if (error instanceof ApiError) {
-        setFieldError(error.fields?.newPassword ?? error.fields?.confirmNewPassword ?? error.message);
-        setFormError(error.message);
+        const message = localizeAuthError(error.message, lang);
+        setFieldError(error.fields?.newPassword ?? error.fields?.confirmNewPassword ?? message);
+        setFormError(message);
       } else {
         setFormError(lang === 'en' ? 'Something went wrong. Please try again.' : 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง');
       }

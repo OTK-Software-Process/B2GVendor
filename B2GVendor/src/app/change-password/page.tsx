@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { PublicShell } from '@/components/PublicShell';
 import { useApp } from '@/context/AppContext';
 import { api, ApiError } from '@/lib/api';
+import { localizeAuthError } from '@/lib/authMessages';
 import { ArrowLeft, CheckCircle2, Eye, EyeOff, KeyRound, Loader2, ShieldCheck } from 'lucide-react';
 
 export default function ChangePasswordPage() {
@@ -46,7 +47,7 @@ export default function ChangePasswordPage() {
       setDone(true);
     } catch (err) {
       if (err instanceof ApiError) {
-        setError(err.message);
+        setError(localizeAuthError(err.message, lang));
         setFieldErrors(err.fields ?? {});
       } else {
         setError(lang === 'en' ? 'Unable to update your password.' : 'ไม่สามารถเปลี่ยนรหัสผ่านได้');
