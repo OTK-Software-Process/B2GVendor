@@ -11,9 +11,11 @@ import { AppError } from '../utils/AppError';
  * dataGoThResource.service.ts), instead of needing a separate script.
  *
  * This is about the data.go.th enrichment side ONLY (post-award budget/
- * winner facts) -- deptId (the live RSS feed's site key) is unrelated and is
- * NOT resolvable through data.go.th at all: confirmed live that its
- * datasets carry no deptId/agency-code field (see dataGoTh.client.ts).
+ * winner facts) -- deptId (the live RSS feed's site key) is unrelated: the
+ * contract datasets carry no deptId/agency-code field (see dataGoTh.client.ts).
+ * The one data.go.th source that helps with deptIds is the Ministry of
+ * Finance department list, used by the Add Site form's suggestions (see
+ * integrations/govAgencyDirectory.client.ts), not by this passthrough.
  */
 
 export async function showPackage(req: Request, res: Response): Promise<void> {
