@@ -92,8 +92,8 @@ async function main(): Promise<void> {
   // --- Duplicate email ---
   const dupe = await post('/auth/register', registerBody);
   record(
-    dupe.status === 409 && dupe.json?.error?.code === 'EMAIL_ALREADY_REGISTERED',
-    'registering the same email twice is rejected',
+    dupe.status === 409 && dupe.json?.error?.code === 'REGISTRATION_FAILED' && !dupe.json?.error?.fields,
+    'registering the same email twice is rejected, without saying the email is the reason (no enumeration)',
     JSON.stringify(dupe.json)
   );
 

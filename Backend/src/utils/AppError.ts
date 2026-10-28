@@ -1,6 +1,7 @@
 export type ErrorCode =
   | 'VALIDATION_ERROR'
   | 'EMAIL_ALREADY_REGISTERED'
+  | 'REGISTRATION_FAILED'
   | 'INVALID_CREDENTIALS'
   | 'ACCOUNT_SUSPENDED'
   | 'ACCOUNT_LOCKED'
@@ -45,6 +46,16 @@ export class AppError extends Error {
     return new AppError(409, 'EMAIL_ALREADY_REGISTERED', 'This email is already in use.', {
       email: 'Already registered'
     });
+  }
+
+  // The public sign-up's answer to a taken email: deliberately says nothing about
+  // WHY (EMAIL_ALREADY_REGISTERED is for signed-in admins, who may know).
+  static registrationFailed(): AppError {
+    return new AppError(
+      409,
+      'REGISTRATION_FAILED',
+      'We could not create your account with these details. Please check them and try again, or sign in if you already have an account.'
+    );
   }
 
   static invalidCredentials(): AppError {
