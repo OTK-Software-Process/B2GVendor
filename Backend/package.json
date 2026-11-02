@@ -28,6 +28,7 @@
     "check:ingestion": "tsx tests/integration/ingestion-flow.check.ts",
     "check:price": "tsx tests/integration/price-extraction.check.ts",
     "check:html-tor": "tsx tests/integration/html-tor.check.ts",
+    "check:tor-files": "tsx tests/integration/tor-file-safety.check.ts",
     "check:facts": "tsx tests/integration/procurement-facts.check.ts",
     "check:facts-db": "tsx tests/integration/work-facts-db.check.ts",
     "check:facts-ingestion": "tsx tests/integration/ingestion-facts.check.ts",
@@ -46,7 +47,7 @@
   },
   "dependencies": {
     "@google-cloud/vertexai": "^1.9.3",
-    "adm-zip": "^0.6.0",
+    "adm-zip": "^0.6.1",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",

@@ -2,7 +2,8 @@ import { Request, Response } from 'express';
 import * as workService from '../services/work.service';
 import { ok } from '../utils/apiResponse';
 import { AppError } from '../utils/AppError';
-import { resolveTorFilePath, torFileExists } from '../services/fileStorage.service';
+import { isStoredPdf, resolveTorFilePath, torFileExists } from '../services/fileStorage.service';
+import { safePdfFilename } from '../utils/pdfFile';
 
 export async function list(req: Request, res: Response): Promise<void> {
   const result = await workService.listWorks(req.query as workService.ListWorksFilter);
@@ -37,6 +38,13 @@ export async function downloadTorFile(req: Request, res: Response): Promise<void
   if (!(await torFileExists(file.storageKey))) {
     throw AppError.notFound('TOR file is missing from storage.');
   }
+  // Only ever a PDF goes out, as a PDF: never typed from the (remote) file name.
+  if (!(await isStoredPdf(file.storageKey))) {
+    throw AppError.notFound('TOR file is not available.');
+  }
 
-  res.download(resolveTorFilePath(file.storageKey), file.filename ?? 'document.pdf');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.download(resolveTorFilePath(file.storageKey), safePdfFilename(file.filename), {
+    headers: { 'Content-Type': 'application/pdf' }
+  });
 }

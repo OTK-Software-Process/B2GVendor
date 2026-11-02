@@ -110,19 +110,30 @@ export interface DownloadedFile {
 // For linkType === 'pdf' | 'zip' items. (An 'html' link is read by
 // fetchHtmlDocument below instead -- it is text to read, not a file to store.)
 // Generic over both since the download step itself (fetch +
-// content-disposition filename parse) doesn't care what's inside.
-export async function downloadTorFile(url: string, extensionFallback: 'pdf' | 'zip' = 'pdf'): Promise<DownloadedFile> {
-  const res = await fetch(url);
+// content-disposition filename parse) doesn't care what's inside. The
+// filename is the server's say-so: a display name only (see utils/pdfFile.ts).
+// Size- and time-capped: the body is never buffered past TOR_MAX_BYTES, which
+// also bounds how big a zip archive can be before it is opened.
+const TOR_TIMEOUT_MS = 120_000;
+export const TOR_MAX_BYTES = 100 * 1024 * 1024;
+
+export async function downloadTorFile(url: string, extensionFallback: 'pdf' | 'zip' = 'pdf', maxBytes = TOR_MAX_BYTES): Promise<DownloadedFile> {
+  const res = await fetch(url, { signal: AbortSignal.timeout(TOR_TIMEOUT_MS) });
   if (!res.ok) {
     throw new Error(`Failed to download TOR file (HTTP ${res.status}) from ${url}`);
+  }
+
+  const declaredLength = Number(res.headers.get('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    await res.body?.cancel().catch(() => undefined);
+    throw new Error(`TOR file is larger than ${maxBytes} bytes: ${url}`);
   }
 
   const contentDisposition = res.headers.get('content-disposition') ?? '';
   const filenameMatch = contentDisposition.match(/filename=("?)([^";]+)\1/);
   const filename = filenameMatch ? filenameMatch[2] : `tor-${Date.now()}.${extensionFallback}`;
 
-  const arrayBuffer = await res.arrayBuffer();
-  return { buffer: Buffer.from(arrayBuffer), filename };
+  return { buffer: await readBodyCapped(res, maxBytes), filename };
 }
 
 // --- HTML announcement pages ------------------------------------------------
@@ -209,7 +220,7 @@ async function readBodyCapped(res: Response, maxBytes: number): Promise<Buffer> 
     total += value.length;
     if (total > maxBytes) {
       await reader.cancel().catch(() => undefined);
-      throw new Error(`HTML page is larger than ${maxBytes} bytes`);
+      throw new Error(`Response body is larger than ${maxBytes} bytes`);
     }
     chunks.push(value);
   }
