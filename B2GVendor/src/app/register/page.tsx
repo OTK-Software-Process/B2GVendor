@@ -2,11 +2,11 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { PublicShell } from '@/components/PublicShell';
-import { useApp, AccountView } from '@/context/AppContext';
+import { useApp } from '@/context/AppContext';
 import { api, ApiError } from '@/lib/api';
-import { Building, ArrowRight } from 'lucide-react';
+import { localizeAuthError } from '@/lib/authMessages';
+import { Building, ArrowRight, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 
 function sanitizeName(raw: string): string {
   const noBadChars = raw.replace(/[^\p{L}\p{M}\s'-]/gu, '');
@@ -17,18 +17,21 @@ function sanitizeName(raw: string): string {
 }
 
 export default function RegisterPage() {
-  const router = useRouter();
-  const { lang, signIn } = useApp();
+  const { lang } = useApp();
   const [includeBusinessProfile, setIncludeBusinessProfile] = useState(true);
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [companyName, setCompanyName] = useState('');
   const [taxId, setTaxId] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
+  const [verificationSent, setVerificationSent] = useState(false);
+  const [registeredEmail, setRegisteredEmail] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
@@ -39,7 +42,7 @@ export default function RegisterPage() {
     setSubmitting(true);
 
     try {
-      const account = await api.post<AccountView>('/auth/register', {
+      await api.post<{ emailVerificationRequired: boolean }>('/auth/register', {
         name: name.trim(),
         email: email.trim(),
         password,
@@ -47,11 +50,11 @@ export default function RegisterPage() {
         type: includeBusinessProfile ? 'business' : 'individual',
         ...(includeBusinessProfile ? { businessProfile: { companyName: companyName.trim(), taxId: taxId.trim() } } : {})
       });
-      signIn(account);
-      router.push('/account');
+      setRegisteredEmail(email.trim());
+      setVerificationSent(true);
     } catch (err) {
       if (err instanceof ApiError) {
-        setFormError(err.message);
+        setFormError(localizeAuthError(err.message, lang));
         setFieldErrors(err.fields ?? {});
       } else {
         setFormError(lang === 'en' ? 'Something went wrong. Please try again.' : 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง');
@@ -65,6 +68,24 @@ export default function RegisterPage() {
     <PublicShell>
       <div className="max-w-xl mx-auto py-8 space-y-6">
         <div className="bg-white border border-slate-200 rounded-3xl p-8 shadow-xs space-y-6">
+          {verificationSent ? (
+            <div className="space-y-4 py-4 text-center">
+              <CheckCircle2 className="w-16 h-16 text-emerald-600 mx-auto" />
+              <h1 className="text-2xl font-extrabold text-slate-900">
+                {lang === 'en' ? 'Check your email' : 'กรุณาตรวจสอบอีเมลของคุณ'}
+              </h1>
+              <p className="text-sm text-slate-600">
+                {lang === 'en'
+                  ? `We sent a verification link to ${registeredEmail}. The link expires in 24 hours.`
+                  : `เราส่งลิงก์ยืนยันไปที่ ${registeredEmail} แล้ว ลิงก์จะหมดอายุภายใน 24 ชั่วโมง`}
+              </p>
+              <Link href="/login" className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition-colors">
+                <span>{lang === 'en' ? 'Go to Log In' : 'ไปที่หน้าเข้าสู่ระบบ'}</span>
+                <ArrowRight className="w-4 h-4" />
+              </Link>
+            </div>
+          ) : (
+            <>
           <div className="text-center space-y-2">
             <h1 className="text-2xl font-extrabold text-slate-900">
               {lang === 'en' ? 'Unified Account Registration' : 'ลงทะเบียนบัญชี B2G Vendor'}
@@ -125,13 +146,26 @@ export default function RegisterPage() {
                   <label className="block text-xs font-bold text-slate-700 mb-1">
                     {lang === 'en' ? 'Password' : 'กำหนดรหัสผ่าน'}
                   </label>
-                  <input
-                    type="password"
-                    required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-900 outline-hidden focus:ring-2 focus:ring-emerald-500"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      required
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 pr-10 text-sm text-slate-900 outline-hidden focus:ring-2 focus:ring-emerald-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((show) => !show)}
+                      aria-label={lang === 'en'
+                        ? showPassword ? 'Hide password' : 'Show password'
+                        : showPassword ? 'ซ่อนรหัสผ่าน' : 'แสดงรหัสผ่าน'}
+                      aria-pressed={showPassword}
+                      className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-700"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                   {fieldErrors.password && <p className="mt-1 text-xs text-rose-600">{fieldErrors.password}</p>}
                 </div>
 
@@ -139,13 +173,26 @@ export default function RegisterPage() {
                   <label className="block text-xs font-bold text-slate-700 mb-1">
                     {lang === 'en' ? 'Confirm Password' : 'ยืนยันรหัสผ่าน'}
                   </label>
-                  <input
-                    type="password"
-                    required
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-900 outline-hidden focus:ring-2 focus:ring-emerald-500"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      required
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 pr-10 text-sm text-slate-900 outline-hidden focus:ring-2 focus:ring-emerald-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword((show) => !show)}
+                      aria-label={lang === 'en'
+                        ? showConfirmPassword ? 'Hide confirmation password' : 'Show confirmation password'
+                        : showConfirmPassword ? 'ซ่อนรหัสผ่านที่ยืนยัน' : 'แสดงรหัสผ่านที่ยืนยัน'}
+                      aria-pressed={showConfirmPassword}
+                      className="absolute inset-y-0 right-3 flex items-center text-slate-500 hover:text-slate-700"
+                    >
+                      {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                   {fieldErrors.confirmPassword && <p className="mt-1 text-xs text-rose-600">{fieldErrors.confirmPassword}</p>}
                 </div>
               </div>
@@ -238,6 +285,8 @@ export default function RegisterPage() {
               {lang === 'en' ? 'Log In' : 'เข้าสู่ระบบที่นี่'}
             </Link>
           </div>
+            </>
+          )}
         </div>
       </div>
     </PublicShell>

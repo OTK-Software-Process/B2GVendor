@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as govSiteController from '../controllers/govSite.controller';
 import { validate } from '../middlewares/validate.middleware';
-import { createGovSiteSchema, updateGovSiteSchema, pollSiteSchema, verifyDeptIdSchema } from '../validators/govSite.validator';
+import { createGovSiteSchema, updateGovSiteSchema, pollSiteSchema, verifyDeptIdSchema, suggestDeptIdQuerySchema } from '../validators/govSite.validator';
 import { requireSuperAdmin } from '../middlewares/requireRole';
 import { requirePollAccess } from '../middlewares/requirePermission';
 import { asyncHandler } from '../utils/asyncHandler';
@@ -21,6 +21,10 @@ export const adminGovSiteRouter = Router();
 adminGovSiteRouter.get('/', asyncHandler(govSiteController.listAdmin));
 adminGovSiteRouter.post('/', requireSuperAdmin, validate(createGovSiteSchema), asyncHandler(govSiteController.create));
 adminGovSiteRouter.patch('/:id', requireSuperAdmin, validate(updateGovSiteSchema), asyncHandler(govSiteController.update));
+
+// Autocomplete for the deptId field of the Add Site form -- Super Admin only,
+// like the form it serves.
+adminGovSiteRouter.get('/dept-id-suggestions', requireSuperAdmin, validate(suggestDeptIdQuerySchema, 'query'), asyncHandler(govSiteController.suggestDeptId));
 
 // Live deptId probe for the Add Site form -- Super Admin only, same as
 // create/edit (this is part of source configuration, not polling control).

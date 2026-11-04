@@ -208,12 +208,40 @@ export interface DeptIdVerification {
 }
 
 // Live probe against the real e-GP RSS feed (no DB write) -- lets the "Add
-// Government Site" form confirm a candidate deptId before it's saved. There
-// is no published directory mapping an agency name to its deptId anywhere
-// (not in data.go.th, not in e-GP itself), so this is the closest thing to
-// "autocomplete" that's honestly possible: verify, don't guess.
+// Government Site" form confirm a candidate deptId before it's saved. Whatever
+// suggestDeptIds() offered, this is what actually proves a code.
 export function verifyDeptId(deptId: string, announceTypes?: BackendAnnounceType[]): Promise<DeptIdVerification> {
   return api.post<DeptIdVerification>('/admin/gov-sites/verify-dept-id', { deptId, announceTypes });
+}
+
+export interface DeptIdSuggestion {
+  deptId: string;
+  name: string;
+  nameEn?: string;
+  shortCode?: string;
+  ministry?: string;
+  // confirmed: checked live by the team. derived: converted from the Ministry
+  // of Finance agency list on data.go.th -- probably right, "Verify live" proves it.
+  confidence: 'confirmed' | 'derived';
+  // A government site already uses this deptId.
+  alreadyAdded?: { siteId: string; name: string; shortCode: string };
+}
+
+export interface DeptIdSuggestionResult {
+  query: string;
+  suggestions: DeptIdSuggestion[];
+  directory: {
+    // unavailable: the agency list could not be loaded -- only the verified agencies are offered.
+    status: 'ok' | 'stale' | 'unavailable';
+    loadedAt: string | null;
+    agencies: number;
+    error?: string;
+  };
+}
+
+// Autocomplete for the deptId field of the "Add Government Site" form (Super Admin).
+export function suggestDeptIds(query: string): Promise<DeptIdSuggestionResult> {
+  return api.get<DeptIdSuggestionResult>(`/admin/gov-sites/dept-id-suggestions?q=${encodeURIComponent(query)}&limit=8`);
 }
 
 export function torFileUrl(workId: string, index: number): string {

@@ -78,6 +78,8 @@ export interface DatastoreSearchOptions {
   filters?: Record<string, string>;
   limit?: number;
   offset?: number;
+  // Only these columns are returned (keeps a big table's pages small).
+  fields?: string[];
 }
 
 export async function datastoreSearch(
@@ -88,6 +90,7 @@ export async function datastoreSearch(
   if (options.filters) params.filters = JSON.stringify(options.filters);
   if (options.limit) params.limit = String(options.limit);
   if (options.offset) params.offset = String(options.offset);
+  if (options.fields?.length) params.fields = options.fields.join(',');
 
   return ckanAction<CkanDatastoreResult>('datastore_search', params);
 }

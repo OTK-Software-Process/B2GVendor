@@ -2,10 +2,21 @@ import mongoose from 'mongoose';
 import { createApp } from '../../src/app';
 import { Account } from '../../src/models/account.model';
 import { Session } from '../../src/models/session.model';
+import { Token } from '../../src/models/token.model';
+import { issueToken } from '../../src/services/token.service';
+import { env } from '../../src/config/env';
 import { SESSION_COOKIE_NAME } from '../../src/config/cookie';
+import { mockPwnedPasswords } from '../helpers/mockPwnedPasswords';
+import { startFakeSmtp } from '../helpers/fakeSmtp';
 
 const MONGODB_URI =
   process.env.CHECK_MONGODB_URI ?? 'mongodb://127.0.0.1:27017/b2gvendor-auth-flow-check';
+
+mockPwnedPasswords();
+
+// Backend/.env may hold REAL SMTP credentials: this check must never send mail.
+// Sign-ups that need email go to a local fake SMTP server (startFakeSmtp) instead.
+(env as { SMTP_HOST?: string }).SMTP_HOST = undefined;
 
 const results: string[] = [];
 
@@ -65,37 +76,85 @@ async function main(): Promise<void> {
     type: 'individual'
   };
 
-  const registered = await post('/auth/register', registerBody);
-  record(registered.status === 201, 'register returns 201', JSON.stringify(registered.json));
-  record(registered.json?.success === true, 'register response uses the success envelope');
-  record(!('emailVerified' in (registered.json?.data ?? {})), 'no emailVerified field in the response (Q5)');
-  record(!JSON.stringify(registered.json).includes('passwordHash'), 'no passwordHash leaks in the register response');
-
-  const registerCookie = parseSetCookie(registered.setCookie);
-  record(registerCookie?.name === SESSION_COOKIE_NAME, 'register sets the session cookie directly (Q5: no verification step)');
-
-  const meAfterRegister = await get('/auth/me', `${SESSION_COOKIE_NAME}=${registerCookie?.value}`);
+  const registration = await post('/auth/register', registerBody);
   record(
-    meAfterRegister.status === 200 && meAfterRegister.json?.data?.email === registerBody.email,
-    'the cookie from register authenticates immediately',
-    JSON.stringify(meAfterRegister.json)
+    registration.status === 503 && registration.json?.error?.code === 'SERVICE_UNAVAILABLE',
+    'registration requires configured email delivery',
+    JSON.stringify(registration.json)
+  );
+  record(
+    !(await Account.exists({ email: registerBody.email })),
+    'failed email setup does not leave an unverified account behind'
   );
 
-  const storedAccount = await Account.findOne({ email: registerBody.email }).select('+passwordHash');
-  record(!!storedAccount, 'the account actually exists in MongoDB');
-  record(!!storedAccount?.passwordHash.startsWith('$2b$12$'), 'the stored password is bcrypt-hashed, not plaintext');
-  record(storedAccount?.passwordHash !== registerBody.password, 'the stored password is not the plaintext password');
+  const storedAccount = await Account.create({
+    name: registerBody.name,
+    email: registerBody.email,
+    passwordHash: registerBody.password,
+    type: 'individual',
+    emailVerified: false
+  });
+  record(!!storedAccount, 'the account exists in MongoDB');
+  record(!!storedAccount.passwordHash.startsWith('$2b$12$'), 'the stored password is bcrypt-hashed, not plaintext');
+  record(storedAccount.passwordHash !== registerBody.password, 'the stored password is not the plaintext password');
 
-  const storedSession = await Session.findOne({ accountId: storedAccount?._id });
-  record(!!storedSession, 'a session document exists in MongoDB for the new account');
+  const unverifiedLogin = await post('/auth/login', { email: registerBody.email, password: registerBody.password });
+  record(
+    unverifiedLogin.status === 403 && unverifiedLogin.json?.error?.code === 'EMAIL_NOT_VERIFIED',
+    'an unverified account cannot log in',
+    JSON.stringify(unverifiedLogin.json)
+  );
+
+  const rawVerificationToken = await issueToken(storedAccount._id, 'email_verification');
+  const verified = await post('/auth/verify-email', { token: rawVerificationToken });
+  record(
+    verified.status === 200 && verified.json?.data?.emailVerified === true,
+    'a valid verification token verifies the account',
+    JSON.stringify(verified.json)
+  );
+  record(
+    (await Account.findById(storedAccount._id))?.emailVerified === true,
+    'verification is persisted on the account'
+  );
+
+  const replayedVerification = await post('/auth/verify-email', { token: rawVerificationToken });
+  record(
+    replayedVerification.status === 400 && replayedVerification.json?.error?.code === 'TOKEN_INVALID',
+    'a verification token can only be used once',
+    JSON.stringify(replayedVerification.json)
+  );
+
+  // --- Register with email delivery working ---
+  const smtp = await startFakeSmtp();
+  const freshEmail = 'malee@company.co.th';
+  const fresh = await post('/auth/register', { ...registerBody, name: 'Malee Rakdee', email: freshEmail });
+  record(
+    fresh.status === 201 && fresh.json?.data?.emailVerificationRequired === true,
+    'register returns 201 and asks for email verification',
+    JSON.stringify(fresh.json)
+  );
+  record(!fresh.setCookie, 'register does not sign the new account in (no session cookie before verification)');
+  const freshAccount = await Account.findOne({ email: freshEmail });
+  record(freshAccount?.emailVerified === false, 'a self-registered account starts unverified');
+  record(
+    !!freshAccount && (await Token.countDocuments({ accountId: freshAccount._id, purpose: 'email_verification' })) === 1,
+    'register issues one email-verification token'
+  );
+  record(
+    smtp.messages.length === 1 && /^To: .*malee@company\.co\.th/im.test(smtp.messages[0]),
+    'register sends exactly one email, to the new address',
+    String(smtp.messages.length)
+  );
 
   // --- Duplicate email ---
   const dupe = await post('/auth/register', registerBody);
   record(
-    dupe.status === 409 && dupe.json?.error?.code === 'EMAIL_ALREADY_REGISTERED',
-    'registering the same email twice is rejected',
+    dupe.status === 409 && dupe.json?.error?.code === 'REGISTRATION_FAILED' && !dupe.json?.error?.fields,
+    'registering the same email twice is rejected, without saying the email is the reason (no enumeration)',
     JSON.stringify(dupe.json)
   );
+  record(smtp.messages.length === 1, 'a refused duplicate sign-up sends no email');
+  await smtp.close();
 
   // --- Validation ---
   const badRegister = await post('/auth/register', { ...registerBody, email: 'not-an-email', confirmPassword: 'different' });
@@ -137,9 +196,10 @@ async function main(): Promise<void> {
   record(loggedIn.status === 200 && loggedIn.json?.success === true, 'correct credentials log in', JSON.stringify(loggedIn.json));
   const loginCookie = parseSetCookie(loggedIn.setCookie);
   record(loginCookie?.name === SESSION_COOKIE_NAME, 'login sets a fresh session cookie');
-  record(loginCookie?.value !== registerCookie?.value, 'login issues a different session token than register did');
 
-  const sessionCountAfterTwoLogins = await Session.countDocuments({ accountId: storedAccount?._id });
+  const secondLogin = await post('/auth/login', { email: registerBody.email, password: registerBody.password });
+  const secondLoginCookie = parseSetCookie(secondLogin.setCookie);
+  const sessionCountAfterTwoLogins = await Session.countDocuments({ accountId: storedAccount._id });
   record(sessionCountAfterTwoLogins === 2, 'two logins produce two session documents, not a shared one', String(sessionCountAfterTwoLogins));
 
   // --- Suspended account cannot log in ---
@@ -167,9 +227,13 @@ async function main(): Promise<void> {
   );
 
   const secondLogout = await post('/auth/logout', {}, `${SESSION_COOKIE_NAME}=${loginCookie?.value}`);
-  record(secondLogout.status === 200, 'logging out an already-gone session still returns 200 (idempotent)');
+  record(
+    secondLogout.status === 401 && secondLogout.json?.error?.code === 'NOT_AUTHENTICATED',
+    'a logged-out session cannot call the protected logout endpoint again',
+    JSON.stringify(secondLogout.json)
+  );
 
-  const otherSessionStillWorks = await get('/auth/me', `${SESSION_COOKIE_NAME}=${registerCookie?.value}`);
+  const otherSessionStillWorks = await get('/auth/me', `${SESSION_COOKIE_NAME}=${secondLoginCookie?.value}`);
   record(otherSessionStillWorks.status === 200, "logging out one session does not revoke the account's other sessions");
 
   console.log(results.join('\n'));

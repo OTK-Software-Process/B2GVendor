@@ -1,13 +1,18 @@
 export type ErrorCode =
   | 'VALIDATION_ERROR'
   | 'EMAIL_ALREADY_REGISTERED'
+  | 'REGISTRATION_FAILED'
   | 'INVALID_CREDENTIALS'
+  | 'EMAIL_NOT_VERIFIED'
   | 'ACCOUNT_SUSPENDED'
   | 'ACCOUNT_LOCKED'
   | 'NOT_AUTHENTICATED'
   | 'FORBIDDEN'
+  | 'CSRF_BLOCKED'
+  | 'UNSUPPORTED_MEDIA_TYPE'
   | 'TOKEN_INVALID'
   | 'BAD_REQUEST'
+  | 'SERVICE_UNAVAILABLE'
   | 'RATE_LIMITED'
   | 'NOT_FOUND'
   | 'CONFLICT'
@@ -45,8 +50,22 @@ export class AppError extends Error {
     });
   }
 
+  // The public sign-up's answer to a taken email: deliberately says nothing about
+  // WHY (EMAIL_ALREADY_REGISTERED is for signed-in admins, who may know).
+  static registrationFailed(): AppError {
+    return new AppError(
+      409,
+      'REGISTRATION_FAILED',
+      'We could not create your account with these details. Please check them and try again, or sign in if you already have an account.'
+    );
+  }
+
   static invalidCredentials(): AppError {
     return new AppError(401, 'INVALID_CREDENTIALS', 'Email or password is incorrect.');
+  }
+
+  static emailNotVerified(): AppError {
+    return new AppError(403, 'EMAIL_NOT_VERIFIED', 'Please verify your email address before signing in.');
   }
 
   static accountSuspended(): AppError {
@@ -72,6 +91,14 @@ export class AppError extends Error {
     return new AppError(403, 'FORBIDDEN', message);
   }
 
+  static csrfBlocked(): AppError {
+    return new AppError(403, 'CSRF_BLOCKED', 'This request was blocked: it did not come from the application.');
+  }
+
+  static unsupportedMediaType(): AppError {
+    return new AppError(415, 'UNSUPPORTED_MEDIA_TYPE', 'Requests that change data must be sent as application/json.');
+  }
+
   static tokenInvalid(): AppError {
     return new AppError(400, 'TOKEN_INVALID', 'This link has expired or has already been used.');
   }
@@ -86,6 +113,10 @@ export class AppError extends Error {
 
   static badRequest(message = 'Bad request.'): AppError {
     return new AppError(400, 'BAD_REQUEST', message);
+  }
+
+  static serviceUnavailable(message = 'Service temporarily unavailable.'): AppError {
+    return new AppError(503, 'SERVICE_UNAVAILABLE', message);
   }
 
   static conflict(message = 'This action conflicts with the current state.'): AppError {

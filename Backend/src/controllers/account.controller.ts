@@ -10,6 +10,13 @@ function getAuthenticatedAccountId(req: Request): string {
   return req.account._id.toString();
 }
 
+function getAuthenticatedSessionId(req: Request): string {
+  if (!req.authSession) {
+    throw AppError.notAuthenticated();
+  }
+  return req.authSession._id.toString();
+}
+
 export async function getProfile(
   req: Request,
   res: Response,
@@ -93,14 +100,20 @@ export async function changePassword(
 ) {
   try {
     const accountId = getAuthenticatedAccountId(req);
+    const currentSessionId = getAuthenticatedSessionId(req);
     const { currentPassword, newPassword, confirmNewPassword } = req.body;
     if (newPassword !== confirmNewPassword) {
       throw AppError.badRequest("New passwords do not match.");
     }
-    await services.changePassword(accountId, currentPassword, newPassword);
+    await services.changePassword(
+      accountId,
+      currentPassword,
+      newPassword,
+      currentSessionId,
+    );
     res.status(200).send({
       success: true,
-      data: { sessionRevoked: true, message: "Password updated" },
+      data: { sessionRevoked: false, message: "Password updated" },
     });
   } catch (error) {
     next(error);

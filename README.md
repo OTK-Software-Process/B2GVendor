@@ -50,7 +50,7 @@ cp B2GVendor/.env.example B2GVendor/.env
 
 The defaults work out of the box against the local Mongo from step 1 (`Backend/.env`'s `MONGODB_URI=mongodb://mongo:27017/...` — change `mongo` to `localhost` if you're running the Backend directly on your host rather than in Docker: `mongodb://localhost:27017/b2gvendor`). `B2GVendor/.env` already points at `http://localhost:4000/api/v1`, matching the Backend's default port.
 
-Two things are **off by default** and only need touching if you want them — see [AI tagging](#ai-tagging-optional) and [Software-only filter](#restricting-ingestion-to-one-topic-optional) below. Everything else (the ingestion pipeline itself, auth, notifications) works with zero extra config.
+AI tagging and the software-only filter are **off by default** and only need touching if you want them — see [AI tagging](#ai-tagging-optional) and [Software-only filter](#restricting-ingestion-to-one-topic-optional) below. Email verification during registration and email notifications require SMTP configuration; see [Email delivery](#email-delivery).
 
 ### 4. Seed data
 
@@ -141,7 +141,7 @@ A new work is only shown on the public site if the AI's resulting tags include a
 
 ## Email delivery
 
-`SMTP_HOST` is commented out by default in `Backend/.env.example` — with it unset, the app still boots and every notification/password-reset email is logged (not sent) with its full content, so you can see exactly what would have been sent. Set `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS` to actually deliver email.
+Set `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS` in `Backend/.env` to deliver email. New registrations require SMTP so the backend can send a 24-hour email-verification link; an account cannot sign in until that link is used. Instant and daily notification emails are also suppressed for unverified accounts.
 
 ## Audit log (developer guide)
 

@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { PublicShell } from '@/components/PublicShell';
 import { useApp } from '@/context/AppContext';
 import { api, ApiError } from '@/lib/api';
+import { localizeAuthError } from '@/lib/authMessages';
+import { forgotPasswordSchema } from '@/lib/schemas/auth';
 import { Mail, CheckCircle2, ArrowLeft, ShieldCheck, Loader2 } from 'lucide-react';
 
 export default function ForgotPasswordPage() {
@@ -19,15 +21,27 @@ export default function ForgotPasswordPage() {
     e.preventDefault();
     setFormError(null);
     setFieldError(null);
+
+    const result = forgotPasswordSchema.safeParse({ email });
+    if (!result.success) {
+      setFieldError(
+        lang === 'en'
+          ? 'Please enter a valid email address.'
+          : 'กรุณากรอกที่อยู่อีเมลให้ถูกต้อง',
+      );
+      return;
+    }
+
     setSubmitting(true);
 
     try {
-      await api.post('/auth/forgot-password', { email: email.trim() });
+      await api.post('/auth/forgot-password', result.data);
       setSubmitted(true);
     } catch (error) {
       if (error instanceof ApiError) {
-        setFieldError(error.fields?.email ?? error.message);
-        setFormError(error.message);
+        const message = localizeAuthError(error.message, lang);
+        setFieldError(error.fields?.email ?? message);
+        setFormError(message);
       } else {
         setFormError(
           lang === 'en'

@@ -1,11 +1,11 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { ApiError } from '@/lib/api';
 import { SitePollInfo } from '@/components/SitePollInfo';
-import { verifyDeptId, DeptIdVerification } from '@/lib/backend';
-import { Sliders, ShieldCheck, Lock, Plus, X, Power, Info, Loader2, AlertTriangle, RefreshCw, SearchCheck, CheckCircle2 } from 'lucide-react';
+import { verifyDeptId, DeptIdVerification, suggestDeptIds, DeptIdSuggestion, DeptIdSuggestionResult } from '@/lib/backend';
+import { Sliders, ShieldCheck, Lock, Plus, X, Power, Info, Loader2, AlertTriangle, RefreshCw, SearchCheck, CheckCircle2, Sparkles } from 'lucide-react';
 
 export default function SourceConfigPage() {
   const {
@@ -31,6 +31,43 @@ export default function SourceConfigPage() {
   const [verifying, setVerifying] = useState(false);
   const [verifyResult, setVerifyResult] = useState<DeptIdVerification | null>(null);
   const [verifyError, setVerifyError] = useState<string | null>(null);
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const [suggestLoading, setSuggestLoading] = useState(false);
+  const [suggestResult, setSuggestResult] = useState<DeptIdSuggestionResult | null>(null);
+  const [suggestError, setSuggestError] = useState(false);
+  // The suggestion the admin picked last, for as long as the field still holds its code.
+  const [pickedSuggestion, setPickedSuggestion] = useState<DeptIdSuggestion | null>(null);
+
+  // What the suggestions are searched with: the code being typed, else the site name already typed.
+  const suggestQuery = (newDeptId.trim() || newName.trim()).slice(0, 100);
+
+  // Two letters of a name, or any digits, are enough to search on.
+  const canSuggest = showAddModal && suggestOpen && (Array.from(suggestQuery).length >= 2 || /^\d+$/.test(suggestQuery));
+
+  useEffect(() => {
+    if (!canSuggest) return;
+    // Debounced, and a slower earlier answer can never overwrite a newer one.
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setSuggestLoading(true);
+      try {
+        const result = await suggestDeptIds(suggestQuery);
+        if (cancelled) return;
+        setSuggestResult(result);
+        setSuggestError(false);
+      } catch {
+        if (cancelled) return;
+        setSuggestResult(null);
+        setSuggestError(true);
+      } finally {
+        if (!cancelled) setSuggestLoading(false);
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [canSuggest, suggestQuery]);
 
   if (role !== 'superadmin') {
     return (
@@ -70,6 +107,25 @@ export default function SourceConfigPage() {
     setAddFieldErrors({});
     setVerifyResult(null);
     setVerifyError(null);
+    setSuggestOpen(false);
+    setSuggestResult(null);
+    setSuggestError(false);
+    setPickedSuggestion(null);
+  };
+
+  // Picking a suggestion only fills the form (never saves). The name, English
+  // name and short code are filled only where still empty, so nothing the
+  // admin has already typed is overwritten.
+  const handlePickSuggestion = (suggestion: DeptIdSuggestion) => {
+    if (suggestion.alreadyAdded) return;
+    setNewDeptId(suggestion.deptId);
+    if (!newName.trim()) setNewName(suggestion.name);
+    if (!newNameEn.trim() && suggestion.nameEn) setNewNameEn(suggestion.nameEn);
+    if (!newShortCode.trim() && suggestion.shortCode) setNewShortCode(suggestion.shortCode);
+    setPickedSuggestion(suggestion);
+    setVerifyResult(null);
+    setVerifyError(null);
+    setSuggestOpen(false);
   };
 
   const handleVerifyDeptId = async () => {
@@ -369,15 +425,23 @@ export default function SourceConfigPage() {
                       setNewDeptId(e.target.value);
                       setVerifyResult(null);
                       setVerifyError(null);
+                      setSuggestOpen(true);
+                      if (pickedSuggestion && e.target.value.trim() !== pickedSuggestion.deptId) setPickedSuggestion(null);
                     }}
+                    onFocus={() => setSuggestOpen(true)}
+                    onBlur={() => setTimeout(() => setSuggestOpen(false), 150)}
                     placeholder="2102"
+                    autoComplete="off"
+                    role="combobox"
+                    aria-expanded={suggestOpen}
+                    aria-controls="dept-id-suggestions"
                     className={`${inputClass('deptId')} font-mono mt-0 flex-1`}
                   />
                   <button
                     type="button"
                     onClick={handleVerifyDeptId}
                     disabled={!newDeptId.trim() || verifying}
-                    title={lang === 'en' ? 'There is no published directory mapping an agency name to a deptId -- this checks the real e-GP feed directly instead of guessing.' : 'ไม่มีทะเบียนรายชื่อที่จับคู่ชื่อหน่วยงานกับ deptId ปุ่มนี้จะตรวจสอบกับฟีด e-GP จริงโดยตรงแทนการเดา'}
+                    title={lang === 'en' ? 'Checks this code against the real e-GP feed -- the only way to be sure a suggested code is right.' : 'ตรวจรหัสนี้กับฟีด e-GP จริง -- เป็นวิธีเดียวที่ยืนยันได้ว่ารหัสที่แนะนำถูกต้อง'}
                     className="shrink-0 px-3 py-2.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed text-slate-600 font-bold text-xs flex items-center gap-1.5 transition-colors"
                   >
                     {verifying ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <SearchCheck className="w-3.5 h-3.5" />}
@@ -385,10 +449,85 @@ export default function SourceConfigPage() {
                   </button>
                 </div>
                 {addFieldErrors.deptId && <p className="text-[11px] text-rose-600 mt-1">{addFieldErrors.deptId}</p>}
+
+                {canSuggest && (suggestLoading || suggestResult || suggestError) && (
+                  <div id="dept-id-suggestions" role="listbox" className="mt-1.5 rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                    <div className="px-3 py-1.5 bg-slate-50 border-b border-slate-100 text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1.5">
+                      {suggestLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                      <span className="truncate">
+                        {lang === 'en' ? `Suggestions for “${suggestResult?.query ?? suggestQuery}”` : `คำแนะนำสำหรับ “${suggestResult?.query ?? suggestQuery}”`}
+                      </span>
+                    </div>
+                    {suggestError && (
+                      <p className="px-3 py-2 text-[11px] text-amber-700">
+                        {lang === 'en' ? 'Could not load suggestions. You can still type the code yourself.' : 'โหลดคำแนะนำไม่สำเร็จ ยังพิมพ์รหัสเองได้'}
+                      </p>
+                    )}
+                    {suggestResult && suggestResult.suggestions.length === 0 && !suggestLoading && (
+                      <p className="px-3 py-2 text-[11px] text-slate-500">
+                        {lang === 'en' ? 'No agency matches. Type the code yourself, then use "Verify live".' : 'ไม่พบหน่วยงานที่ตรงกัน พิมพ์รหัสเอง แล้วกด "ตรวจสอบจริง"'}
+                      </p>
+                    )}
+                    {suggestResult && suggestResult.suggestions.map(suggestion => (
+                      <button
+                        key={suggestion.deptId}
+                        type="button"
+                        role="option"
+                        aria-selected={newDeptId.trim() === suggestion.deptId}
+                        disabled={!!suggestion.alreadyAdded}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => handlePickSuggestion(suggestion)}
+                        className="w-full text-left px-3 py-2 flex items-start gap-3 border-b border-slate-50 last:border-0 hover:bg-sky-50 disabled:opacity-50 disabled:hover:bg-white disabled:cursor-not-allowed transition-colors"
+                      >
+                        <span className="font-mono text-xs font-bold text-slate-800 pt-0.5 w-10 shrink-0">{suggestion.deptId}</span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-xs font-semibold text-slate-800 truncate">{suggestion.name}</span>
+                          {(suggestion.ministry || suggestion.shortCode) && (
+                            <span className="block text-[10px] text-slate-400 truncate">{[suggestion.ministry, suggestion.shortCode].filter(Boolean).join(' · ')}</span>
+                          )}
+                        </span>
+                        {suggestion.alreadyAdded ? (
+                          <span className="shrink-0 text-[10px] font-bold text-slate-500 bg-slate-100 rounded-full px-2 py-0.5">
+                            {lang === 'en' ? `Already added (${suggestion.alreadyAdded.shortCode})` : `เพิ่มแล้ว (${suggestion.alreadyAdded.shortCode})`}
+                          </span>
+                        ) : suggestion.confidence === 'confirmed' ? (
+                          <span className="shrink-0 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
+                            {lang === 'en' ? 'Verified' : 'ยืนยันแล้ว'}
+                          </span>
+                        ) : (
+                          <span className="shrink-0 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
+                            {lang === 'en' ? 'Suggested' : 'ข้อเสนอแนะ'}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                    {suggestResult && suggestResult.directory.status !== 'ok' && (
+                      <p className="px-3 py-2 text-[10px] text-amber-700 bg-amber-50 border-t border-amber-100">
+                        {suggestResult.directory.status === 'unavailable'
+                          ? (lang === 'en' ? 'The full agency list (data.go.th) is unavailable right now, so only verified agencies are suggested.' : 'รายชื่อหน่วยงานทั้งหมด (data.go.th) ใช้งานไม่ได้ในขณะนี้ จึงแนะนำเฉพาะหน่วยงานที่ยืนยันแล้ว')
+                          : (lang === 'en' ? 'Showing the last saved agency list: data.go.th could not be refreshed.' : 'แสดงรายชื่อหน่วยงานที่บันทึกไว้ล่าสุด เนื่องจากอัปเดตจาก data.go.th ไม่ได้')}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {pickedSuggestion && (
+                  <p className={`mt-1.5 text-[11px] flex items-start gap-1.5 ${pickedSuggestion.confidence === 'confirmed' ? 'text-emerald-700' : 'text-amber-700'}`}>
+                    {pickedSuggestion.confidence === 'confirmed' ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-px" /> : <Info className="w-3.5 h-3.5 shrink-0 mt-px" />}
+                    <span>
+                      {pickedSuggestion.confidence === 'confirmed'
+                        ? (lang === 'en' ? `${pickedSuggestion.name}: this code was checked against the live e-GP feed.` : `${pickedSuggestion.name}: รหัสนี้ตรวจกับฟีด e-GP จริงแล้ว`)
+                        : (lang === 'en'
+                            ? `${pickedSuggestion.name}: converted from the Ministry of Finance agency list on data.go.th, not yet checked against e-GP. Click "Verify live" before adding.`
+                            : `${pickedSuggestion.name}: แปลงจากรายชื่อหน่วยงานของกระทรวงการคลังบน data.go.th ยังไม่ได้ตรวจกับ e-GP กรุณากด "ตรวจสอบจริง" ก่อนเพิ่ม`)}
+                    </span>
+                  </p>
+                )}
+
                 <p className="text-[11px] text-slate-400 mt-1">
                   {lang === 'en'
-                    ? 'The department code used by the e-GP announcement feed (e.g. 2102 for MOPH). There is no published list mapping agency names to this code -- "Verify live" checks the real feed instead of guessing.'
-                    : 'รหัสหน่วยงานที่ใช้กับ RSS ประกาศของ e-GP (เช่น 2102 สำหรับ สป.สธ.) ไม่มีทะเบียนที่จับคู่ชื่อหน่วยงานกับรหัสนี้ -- ปุ่ม "ตรวจสอบจริง" จะตรวจกับฟีดจริงแทนการเดา'}
+                    ? 'The department code used by the e-GP announcement feed (e.g. 2102 for MOPH). Start typing an agency name or code for suggestions; they are a starting point, so use "Verify live" to confirm a code against the real feed.'
+                    : 'รหัสหน่วยงานที่ใช้กับ RSS ประกาศของ e-GP (เช่น 2102 สำหรับ สป.สธ.) พิมพ์ชื่อหน่วยงานหรือรหัสเพื่อดูคำแนะนำ ซึ่งเป็นเพียงจุดเริ่มต้น กรุณากด "ตรวจสอบจริง" เพื่อยืนยันรหัสกับฟีดจริง'}
                 </p>
 
                 {verifyError && (

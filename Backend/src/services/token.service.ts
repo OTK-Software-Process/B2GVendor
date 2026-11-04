@@ -41,6 +41,28 @@ export async function consumeToken(
   return consumed.accountId;
 }
 
+export async function validateToken(
+  rawToken: string,
+  purpose: TokenPurpose
+): Promise<Types.ObjectId> {
+  if (typeof rawToken !== 'string' || rawToken.length === 0) {
+    throw AppError.tokenInvalid();
+  }
+
+  const token = await Token.findOne({
+    tokenHash: hashOneTimeToken(rawToken),
+    purpose,
+    usedAt: { $exists: false },
+    expiresAt: { $gt: new Date() }
+  }).select('accountId');
+
+  if (!token) {
+    throw AppError.tokenInvalid();
+  }
+
+  return token.accountId;
+}
+
 export async function invalidateTokens(
   accountId: Types.ObjectId | string,
   purpose: TokenPurpose

@@ -56,3 +56,14 @@ export const verifyDeptIdSchema = z
   .strict();
 
 export type VerifyDeptIdInput = z.infer<typeof verifyDeptIdSchema>;
+
+// Autocomplete for the deptId field: what the admin has typed so far (a code
+// such as "21", or part of an agency name in Thai or English).
+export const suggestDeptIdQuerySchema = z
+  .object({
+    q: z.string().trim().min(1, 'Type part of an agency name or code.').max(100),
+    limit: z.coerce.number().int().min(1).max(20).optional()
+  })
+  .strict();
+
+export type SuggestDeptIdQuery = z.infer<typeof suggestDeptIdQuerySchema>;

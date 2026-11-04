@@ -1,8 +1,9 @@
 import { Request, Response } from 'express';
 import * as govSiteService from '../services/govSite.service';
+import { suggestDeptIds } from '../services/deptIdSuggestion.service';
 import * as pollJobService from '../services/pollJob.service';
 import { ok, created } from '../utils/apiResponse';
-import { CreateGovSiteInput, UpdateGovSiteInput } from '../validators/govSite.validator';
+import { CreateGovSiteInput, UpdateGovSiteInput, SuggestDeptIdQuery } from '../validators/govSite.validator';
 import { IAccount } from '../models/account.model';
 import { audit } from '../services/audit.service';
 
@@ -41,6 +42,13 @@ export async function verifyDeptId(req: Request, res: Response): Promise<void> {
   const { deptId, announceTypes } = req.body as { deptId: string; announceTypes?: ('P0' | '15' | 'B0' | 'D0' | 'W0' | 'D1' | 'W1' | 'D2' | 'W2')[] };
   const result = await govSiteService.verifyDeptIdLive(deptId, announceTypes ?? ['B0', 'D0']);
   ok(res, result);
+}
+
+// Read-only: agencies (and their likely deptIds) matching what the admin has
+// typed in the Add Government Site form. Nothing is saved or audited.
+export async function suggestDeptId(req: Request, res: Response): Promise<void> {
+  const { q, limit } = req.query as unknown as SuggestDeptIdQuery;
+  ok(res, await suggestDeptIds(q, { limit }));
 }
 
 export async function pollOne(req: Request, res: Response): Promise<void> {

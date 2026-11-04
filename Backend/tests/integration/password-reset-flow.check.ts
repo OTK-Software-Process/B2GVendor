@@ -2,9 +2,12 @@ import mongoose from 'mongoose';
 import { createApp } from '../../src/app';
 import { Account } from '../../src/models/account.model';
 import { Token } from '../../src/models/token.model';
+import { mockPwnedPasswords } from '../helpers/mockPwnedPasswords';
 
 const MONGODB_URI =
   process.env.CHECK_MONGODB_URI ?? 'mongodb://127.0.0.1:27017/b2gvendor-password-reset-check';
+
+mockPwnedPasswords();
 
 async function main(): Promise<void> {
   process.env.MONGODB_URI = MONGODB_URI;

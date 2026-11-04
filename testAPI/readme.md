@@ -18,7 +18,7 @@ npm run rss -- 4520101 B0,D0,D1,D2,W0  # one agency, custom type list
 npm run rss -- ALL P0                  # national feed, just procurement plans
 ```
 
-No published master list of `deptId` values exists — collect the ones you need to track manually. See the header comment in `explore-egp-rss.ts` for the full type-code table and the confirmed (and important) finding that each item's `<link>` is either a direct PDF or an HTML page, mixed per item.
+No published master list of `deptId` values exists — but for central departments the code can be derived from the Ministry of Finance's department list on data.go.th (see `Backend/src/integrations/govAgencyDirectory.client.ts`, which the Add Government Site form uses for suggestions); anything else you still collect manually. See the header comment in `explore-egp-rss.ts` for the full type-code table and the confirmed (and important) finding that each item's `<link>` is either a direct PDF or an HTML page, mixed per item.
 
 ## 2. data.go.th / opend (historical, batch)
 

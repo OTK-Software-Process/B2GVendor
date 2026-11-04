@@ -16,11 +16,16 @@ import { Tag } from '../../src/models/tag.model';
 import { Work } from '../../src/models/work.model';
 import { audit } from '../../src/services/audit.service';
 import { createSession } from '../../src/services/session.service';
+import { issueToken } from '../../src/services/token.service';
+import { mockPwnedPasswords } from '../helpers/mockPwnedPasswords';
+import { startFakeSmtp } from '../helpers/fakeSmtp';
 
 // Drives every Sprint 3 admin edit through the REAL HTTP API with the REAL
 // registry, and checks what lands in the audit log. Uses its own throwaway
 // database -- never touches the dev database.
 const MONGODB_URI = process.env.CHECK_MONGODB_URI ?? 'mongodb://127.0.0.1:27017/b2gvendor-audit-registry-check';
+
+mockPwnedPasswords();
 
 // Backend/.env may hold REAL SMTP credentials: this check must never send mail.
 (env as { SMTP_HOST?: string }).SMTP_HOST = undefined;
@@ -167,11 +172,16 @@ async function main(): Promise<void> {
 
   // ===================================================== SELF-SERVICE (not an admin)
   await clearLog();
+  // Sign-up emails a verification link, so it needs (fake, local) SMTP.
+  const smtp = await startFakeSmtp();
   const reg = await call('POST', '/auth/register', undefined, { name: 'Wipa Srisuk', email: 'self@example.com', password: 'SecretPass123', confirmPassword: 'SecretPass123', type: 'individual' });
-  const selfCookie = (reg.setCookie ?? '').split(';')[0];
+  await smtp.close();
   r = await rows();
   record(reg.status === 201 && r.length === 1 && r[0].action === 'account.create' && r[0].actor.type === 'anonymous', 'a vendor registering themselves -> "account.create" by "anonymous" (nobody was signed in yet)', r[0]?.actor.type);
   record(r[0].request?.path === '/api/v1/auth/register', '...with the registration path');
+  // Sign-up no longer signs the vendor in (the email is verified first), so open their session directly.
+  const selfAccount = await Account.findOne({ email: 'self@example.com' });
+  const selfCookie = await cookieFor(selfAccount!);
 
   await clearLog();
   await call('PATCH', '/account/profile', selfCookie, { name: 'Wipa S' });
@@ -184,10 +194,25 @@ async function main(): Promise<void> {
   record(r.length === 1 && changePaths(r[0]) === 'notificationFrequency' && r[0].changes[0].before === 'instant' && r[0].changes[0].after === 'daily', 'changing notification settings is recorded (instant -> daily)');
 
   await clearLog();
+  const siblingSession = await createSession(selfAccount!._id, {});
   const pw = await call('POST', '/account/change-password', selfCookie, { currentPassword: 'SecretPass123', newPassword: 'BrandNewPass456', confirmNewPassword: 'BrandNewPass456' });
   r = await rows();
   record(pw.status === 200 && r.length === 1 && r[0].action === 'account.password_change', 'changing a password -> "account.password_change"', r.map(x => x.action).join());
   record(changePaths(r[0]) === 'passwordHash' && r[0].changes[0].before === '[REDACTED]' && r[0].changes[0].after === '[REDACTED]', '...only the masked hash (the bookkeeping timestamp is left out)', changePaths(r[0]));
+  record(pw.json.data.sessionRevoked === false, 'changing a password keeps the current session active');
+  record((await call('GET', '/auth/me', selfCookie)).status === 200, 'the current session remains active after changing a password');
+  record((await call('GET', '/auth/me', `${SESSION_COOKIE_NAME}=${siblingSession.rawToken}`)).status === 401, 'changing a password revokes other sessions');
+
+  const resetSession = await createSession(selfAccount!._id, {});
+  const resetToken = await issueToken(selfAccount!._id, 'password_reset');
+  const reset = await call('POST', '/auth/reset-password', undefined, {
+    token: resetToken,
+    newPassword: 'ResetPass789',
+    confirmNewPassword: 'ResetPass789',
+  });
+  record(reset.status === 200, 'resetting a password succeeds');
+  record((await call('GET', '/auth/me', selfCookie)).status === 401, 'resetting a password revokes the current session');
+  record((await call('GET', '/auth/me', `${SESSION_COOKIE_NAME}=${resetSession.rawToken}`)).status === 401, 'resetting a password revokes every session');
   r.forEach(x => seenActions.add(x.action));
 
   // ===================================================================== TAGS

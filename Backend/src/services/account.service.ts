@@ -1,9 +1,19 @@
 import { Account, IAccount, NotificationFrequency } from "../models/account.model";
 import { AppError } from "../utils/AppError";
 import { Session } from "../models/session.model";
-import { toSessionView } from "./session.service";
-import { consumeToken, issueToken } from "./token.service";
-import { sendPasswordResetEmail } from "./email.service";
+import {
+  revokeAllSessions,
+  revokeOtherSessions,
+  toSessionView,
+} from "./session.service";
+import {
+  consumeToken,
+  invalidateTokens,
+  issueToken,
+  validateToken,
+} from "./token.service";
+import { isEmailConfigured, sendPasswordResetEmail } from "./email.service";
+import { assertPasswordNotPwned } from "../integrations/haveIBeenPwned.client";
 import { clearFailedLogins } from "./loginLockout.service";
 
 export async function getProfile(accountId: string): Promise<IAccount> {
@@ -35,6 +45,7 @@ export async function changePassword(
   accountId: string,
   currentPassword: string,
   newPassword: string,
+  currentSessionId: string,
 ): Promise<void> {
   const account = await Account.findById(accountId).select('+passwordHash');
 
@@ -47,12 +58,18 @@ export async function changePassword(
     throw AppError.invalidCredentials();
   }
 
+  await assertPasswordNotPwned(newPassword);
   account.passwordHash = newPassword;
   await account.save();
+  await revokeOtherSessions(accountId, currentSessionId);
 }
 
 export async function forgotPassword(email: string): Promise<void> {
   try {
+    if (!isEmailConfigured()) {
+      throw new Error("SMTP is not configured; email could not be sent.");
+    }
+
     const account = await Account.findOne({ email: email.trim().toLowerCase() });
 
     if (!account) {
@@ -60,7 +77,12 @@ export async function forgotPassword(email: string): Promise<void> {
     }
 
     const rawToken = await issueToken(account._id, "password_reset");
-    await sendPasswordResetEmail(account.email, account.name, rawToken);
+    try {
+      await sendPasswordResetEmail(account.email, account.name, rawToken);
+    } catch (error) {
+      await invalidateTokens(account._id, "password_reset");
+      throw error;
+    }
   } catch (error) {
     console.error("Error in forgotPassword:", error);
     throw AppError.internalError(
@@ -73,6 +95,8 @@ export async function resetPassword(
   token: string,
   newPassword: string,
 ): Promise<void> {
+  await validateToken(token, "password_reset");
+  await assertPasswordNotPwned(newPassword);
   const accountId = await consumeToken(token, "password_reset");
 
   const account = await Account.findById(accountId).select('+passwordHash');
@@ -84,6 +108,7 @@ export async function resetPassword(
   await account.save();
   // Proving control of the mailbox lifts a sign-in lockout.
   await clearFailedLogins(account._id);
+  await revokeAllSessions(accountId);
 }
 
 export interface NotificationSettingsUpdate {
