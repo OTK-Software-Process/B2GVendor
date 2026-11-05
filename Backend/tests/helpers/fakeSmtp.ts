@@ -7,6 +7,7 @@ import { env } from '../../src/config/env';
 // No STARTTLS and no AUTH are offered, so nodemailer sends in plain text.
 export interface FakeSmtp {
   messages: string[];
+  rejectNextMessage(): void;
   close(): Promise<void>;
 }
 
@@ -14,6 +15,7 @@ type SmtpSettings = { SMTP_HOST?: string; SMTP_PORT?: number; SMTP_USER?: string
 
 export async function startFakeSmtp(): Promise<FakeSmtp> {
   const messages: string[] = [];
+  let rejectNextMessage = false;
   const server = net.createServer(socket => {
     let buffer = '';
     let data: string[] | null = null;
@@ -27,6 +29,12 @@ export async function startFakeSmtp(): Promise<FakeSmtp> {
         buffer = buffer.slice(end + 2);
         if (data) {
           if (line === '.') {
+            if (rejectNextMessage) {
+              rejectNextMessage = false;
+              reply('550 message rejected by test server');
+              data = null;
+              continue;
+            }
             messages.push(data.join('\n'));
             data = null;
             reply('250 queued');
@@ -56,6 +64,9 @@ export async function startFakeSmtp(): Promise<FakeSmtp> {
 
   return {
     messages,
+    rejectNextMessage: () => {
+      rejectNextMessage = true;
+    },
     close: () =>
       new Promise<void>(resolve => {
         settings.SMTP_HOST = undefined;

@@ -4,6 +4,7 @@ import { Account } from '../../src/models/account.model';
 import { Session } from '../../src/models/session.model';
 import { Token } from '../../src/models/token.model';
 import { issueToken } from '../../src/services/token.service';
+import { registerAccount } from '../../src/services/auth.service';
 import { env } from '../../src/config/env';
 import { SESSION_COOKIE_NAME } from '../../src/config/cookie';
 import { mockPwnedPasswords } from '../helpers/mockPwnedPasswords';
@@ -145,6 +146,40 @@ async function main(): Promise<void> {
     'register sends exactly one email, to the new address',
     String(smtp.messages.length)
   );
+
+  // --- Email delivery failure invalidates the issued verification token ---
+  const failedEmail = 'smtp-fail@company.co.th';
+  const verificationTokenCountBeforeFailure = await Token.countDocuments({
+    purpose: 'email_verification',
+    usedAt: { $exists: false }
+  });
+  smtp.rejectNextMessage();
+  let emailFailure: unknown;
+  try {
+    await registerAccount({
+      name: 'Failed Delivery',
+      email: failedEmail,
+      password: registerBody.password,
+      type: 'individual'
+    });
+  } catch (error) {
+    emailFailure = error;
+  }
+  const failedDeliveryAccount = await Account.findOne({ email: failedEmail });
+  record(
+    emailFailure instanceof Error && emailFailure.message.includes('550 message rejected'),
+    'registration surfaces an SMTP delivery failure',
+    emailFailure instanceof Error ? emailFailure.message : String(emailFailure)
+  );
+  record(!failedDeliveryAccount, 'failed email delivery removes the unverified account');
+  record(
+    (await Token.countDocuments({
+      purpose: 'email_verification',
+      usedAt: { $exists: false }
+    })) === verificationTokenCountBeforeFailure,
+    'failed email delivery invalidates the issued verification token'
+  );
+  record(smtp.messages.length === 1, 'the rejected message is not accepted by the fake SMTP server');
 
   // --- Duplicate email ---
   const dupe = await post('/auth/register', registerBody);

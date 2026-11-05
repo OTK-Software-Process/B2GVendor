@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import * as accountController from "../controllers/account.controller";
+import { passwordResetLimiter } from "../middlewares/rateLimit.middleware";
 import { validate } from "../middlewares/validate.middleware";
 
 const forgotPasswordSchema = z
@@ -39,6 +40,7 @@ passwordRouter.post(
 );
 passwordRouter.post(
   "/reset-password",
+  passwordResetLimiter,
   validate(resetPasswordSchema),
   accountController.resetPassword,
 );
