@@ -6,7 +6,8 @@ import { Tag } from '../models/tag.model';
 import { GovSite } from '../models/govSite.model';
 import { Notification, INotification } from '../models/notification.model';
 import { AppError } from '../utils/AppError';
-import { sendNewWorkMatchEmail, sendDailyDigestEmail } from './email.service';
+import { isEmailConfigured, sendNewWorkMatchEmail, sendDailyDigestEmail } from './email.service';
+import { issueToken } from './token.service';
 import { logger } from '../utils/logger';
 
 export interface NotificationView {
@@ -127,7 +128,7 @@ export async function notifyNewWorkMatches(work: IWork, tagIds: Types.ObjectId[]
       )];
       if (matchedTagNames.length === 0) continue;
 
-      await Notification.findOneAndUpdate(
+      const notificationResult = await Notification.findOneAndUpdate(
         { accountId: account._id, workId: work._id },
         {
           $set: {
@@ -143,8 +144,9 @@ export async function notifyNewWorkMatches(work: IWork, tagIds: Types.ObjectId[]
           },
           $setOnInsert: { read: false }
         },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
+        { upsert: true, new: true, setDefaultsOnInsert: true, includeResultMetadata: true }
       );
+      if (!notificationResult?.lastErrorObject?.upserted) continue;
 
       // In-app notification (above) always happens regardless of
       // preferences -- only the EMAIL is gated by account/notifications/
@@ -158,7 +160,9 @@ export async function notifyNewWorkMatches(work: IWork, tagIds: Types.ObjectId[]
       if (account.notificationFrequency === 'daily') continue;
 
       try {
-        await sendNewWorkMatchEmail(account.email, account.name, work._id.toString(), matchedTagNames);
+        if (!isEmailConfigured()) throw new Error('SMTP is not configured; email could not be sent.');
+        const unsubscribeToken = await issueToken(account._id, 'email_unsubscribe', { replaceExisting: false });
+        await sendNewWorkMatchEmail(account.email, account.name, work._id.toString(), matchedTagNames, unsubscribeToken);
       } catch (err) {
         logger.warn('notification', `Failed to notify ${account.email} about work ${work.projectId}`, err);
       }
@@ -191,10 +195,13 @@ export async function sendDailyDigests(): Promise<number> {
       const pending = await Notification.find({ accountId: account._id, includedInDigest: false }).sort({ createdAt: 1 });
       if (pending.length === 0) continue;
 
+      if (!isEmailConfigured()) throw new Error('SMTP is not configured; email could not be sent.');
+      const unsubscribeToken = await issueToken(account._id, 'email_unsubscribe', { replaceExisting: false });
       await sendDailyDigestEmail(
         account.email,
         account.name,
-        pending.map(n => ({ workId: n.workId.toString(), workTitle: n.workTitle, agencyName: n.agencyName, matchedTags: n.matchedTags }))
+        pending.map(n => ({ workId: n.workId.toString(), workTitle: n.workTitle, agencyName: n.agencyName, matchedTags: n.matchedTags })),
+        unsubscribeToken,
       );
 
       await Notification.updateMany({ _id: { $in: pending.map(n => n._id) } }, { $set: { includedInDigest: true } });

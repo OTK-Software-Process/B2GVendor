@@ -55,7 +55,19 @@ const updateNotificationSettingsSchema = z
   })
   .strict();
 
+const unsubscribeSchema = z
+  .object({
+    token: z.string().min(1).max(128),
+  })
+  .strict();
+
 export const accountRouter = Router();
+
+accountRouter.post(
+  "/unsubscribe",
+  validate(unsubscribeSchema),
+  accountController.unsubscribeFromEmails,
+);
 
 accountRouter.use(requireAuth);
 

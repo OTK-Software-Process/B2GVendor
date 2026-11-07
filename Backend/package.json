@@ -29,6 +29,7 @@
     "check:audit-api": "tsx tests/integration/audit-api.check.ts",
     "check:admin-ingestion": "tsx tests/integration/admin-ingestion.check.ts",
     "check:admin-permissions": "tsx tests/integration/admin-permissions.check.ts",
+    "check:notifications": "tsx tests/integration/notifications.check.ts",
     "check:ingestion": "tsx tests/integration/ingestion-flow.check.ts",
     "check:price": "tsx tests/integration/price-extraction.check.ts",
     "check:html-tor": "tsx tests/integration/html-tor.check.ts",

@@ -129,6 +129,18 @@ export async function updateNotificationSettings(
   return account;
 }
 
+export async function unsubscribeFromEmails(rawToken: string): Promise<void> {
+  const accountId = await validateToken(rawToken, 'email_unsubscribe');
+  const account = await Account.findByIdAndUpdate(
+    accountId,
+    { emailNotificationsEnabled: false },
+  );
+
+  if (!account) {
+    throw AppError.notFound("Account not found.");
+  }
+}
+
 export async function getSession(
   accountId: string,
 ): Promise<any> {
