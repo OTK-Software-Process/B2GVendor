@@ -182,7 +182,7 @@ Optional settings go inside the braces:
 - **A failed log write never breaks the action** it describes (it is reported in the server log). Pass `strict: true` to `audit.log()` to get the error instead.
 - **Not captured:** `bulkWrite` and raw `Model.collection.*` calls bypass Mongoose hooks. Call `audit.log()` yourself there.
 - **Load order matters.** The audit plugin only covers models loaded after it, so `import './audit/install'` must stay the first import of `app.ts` and `worker.ts`. If a registered model is not covered, the server logs an `[audit]` error at startup.
-- **Tests:** `npm run check:audit-core | check:audit-plugin | check:audit-registry | check:audit-api | check:notifications` (in `Backend/`) run against throwaway databases. The notification check requires MongoDB and a local throwaway database.
+- **Tests:** `npm run check:audit-core | check:audit-plugin | check:audit-registry | check:audit-api | check:notifications | check:tag-lifecycle` (in `Backend/`) run against throwaway databases. The notification check requires MongoDB and a local throwaway database.
 - **Unsubscribe browser regression:** from `B2GVendor/`, run `npx playwright install chromium` once, then `npm run test:e2e`. The anonymous unsubscribe test is marked expected-failing until the FR-3.7 backend integration is implemented.
 
 ## Seed scripts reference

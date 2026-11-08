@@ -26,7 +26,8 @@ export async function unfollowTag(accountId: string, tagId: string): Promise<voi
 export async function listFollowedTags(accountId: string): Promise<ITag[]> {
   const follows = await Follow.find({ accountId: toObjectId(accountId) }).select('tagId');
   const tagIds = follows.map(follow => follow.tagId);
-  return Tag.find({ _id: { $in: tagIds } }).sort({ facet: 1, name: 1 });
+  return Tag.find({ _id: { $in: tagIds }, retired: false })
+    .sort({ facet: 1, name: 1 });
 }
 
 // account/notifications/settings' "Per-Tag Pause" toggle -- see

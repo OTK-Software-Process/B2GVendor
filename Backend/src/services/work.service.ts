@@ -138,7 +138,7 @@ function listWorksByDeadline(query: Record<string, unknown>, page: number, pageS
 // Ids that aren't a real tag match nothing, as they always did.
 async function tagConditions(rawIds: string[]): Promise<Record<string, unknown>[]> {
   const validIds = rawIds.filter(id => Types.ObjectId.isValid(id));
-  const tags = validIds.length > 0 ? await Tag.find({ _id: { $in: validIds } }, 'facet') : [];
+  const tags = validIds.length > 0 ? await Tag.find({ _id: { $in: validIds }, retired: false }, 'facet') : [];
 
   const byFacet = new Map<string, string[]>();
   const known = new Set<string>();

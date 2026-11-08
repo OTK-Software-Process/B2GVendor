@@ -20,6 +20,7 @@
     "check:admin-guard": "tsx tests/integration/admin-guard.check.ts",
     "check:admin-dashboard": "tsx tests/integration/admin-dashboard.check.ts",
     "check:admin-tags": "tsx tests/integration/admin-tags.check.ts",
+    "check:tag-lifecycle": "tsx tests/integration/tag-lifecycle.check.ts",
     "check:admin-works": "tsx tests/integration/admin-works.check.ts",
     "check:admin-accounts": "tsx tests/integration/admin-accounts.check.ts",
     "check:admin-staff": "tsx tests/integration/admin-staff.check.ts",
