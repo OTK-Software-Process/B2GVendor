@@ -9,6 +9,7 @@ import { Tag } from '../../src/models/tag.model';
 import { Token } from '../../src/models/token.model';
 import { SESSION_COOKIE_NAME } from '../../src/config/cookie';
 import { issueToken } from '../../src/services/token.service';
+import { startFakeSmtp } from '../helpers/fakeSmtp';
 import { mockPwnedPasswords } from '../helpers/mockPwnedPasswords';
 
 // Uses its own throwaway database (dropped at the start and end) -- never
@@ -25,6 +26,26 @@ const PASSWORD = 'Password123';
 const results: string[] = [];
 function record(pass: boolean, label: string, detail = ''): void {
   results.push(`${pass ? 'PASS' : 'FAIL'}  ${label}${detail ? '  -> ' + detail : ''}`);
+}
+
+function decodeMimeBody(message: string): string {
+  const boundary = message.match(/boundary="?([^";\r\n]+)"?/i)?.[1];
+  const parts = boundary ? message.split(boundary).slice(1) : [message];
+  return parts.map(part => {
+    if (part.trimStart().startsWith('--')) return '';
+    const separator = /\r?\n\r?\n/.exec(part);
+    if (!separator || separator.index === undefined) return '';
+    const headers = part.slice(0, separator.index);
+    const body = part.slice(separator.index + separator[0].length).trim();
+    const encoding = headers.match(/^Content-Transfer-Encoding:\s*(\S+)/im)?.[1]?.toLowerCase();
+    if (encoding === 'base64') return Buffer.from(body.replace(/\s/g, ''), 'base64').toString('utf8');
+    if (encoding === 'quoted-printable') {
+      return body
+        .replace(/=\r?\n/g, '')
+        .replace(/=([A-F\d]{2})/gi, (_match, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+    }
+    return body;
+  }).join('\n');
 }
 
 // Captured logs are checked to ensure no reset link is written to them.
@@ -282,9 +303,45 @@ async function main(): Promise<void> {
   record((await call('DELETE', `/admin/accounts/${v3Id}`, superCookie)).status === 200, 'super admin can delete vendors too');
   record((await call('GET', '/admin/accounts', adminCookie)).json.data.summary.total === 3, 'the list summary reflects the deletions (v1, napat, prayut remain)');
 
+  // -------------------------------------------------- password-setup email
+  const smtp = await startFakeSmtp();
+  const setupEmail = await call('POST', '/admin/accounts', adminCookie, {
+    name: 'Setup Test',
+    email: 'setup-test@example.com'
+  });
+  const setupVendorId = setupEmail.json?.data?.vendor?.id;
+  const message = smtp.messages[0] ?? '';
+  const decodedMessage = decodeMimeBody(message);
+  const rawSetupToken = decodedMessage.match(/reset-password\/([A-Za-z0-9_-]+)/)?.[1];
+  record(
+    setupEmail.status === 201 && setupEmail.json.data.setupEmail.sent === true && smtp.messages.length === 1,
+    'creating a vendor sends exactly one password-setup email',
+    JSON.stringify({ status: setupEmail.status, sent: setupEmail.json?.data?.setupEmail?.sent, messages: smtp.messages.length })
+  );
+  record(
+    /^To: .*setup-test@example\.com/im.test(message) &&
+      decodedMessage.includes('/reset-password/') &&
+      !!rawSetupToken,
+    'the setup email is addressed to the vendor and contains the one-time setup link',
+  );
+  record(
+    !!setupVendorId &&
+      (await Token.countDocuments({ accountId: setupVendorId, purpose: 'password_reset' })) === 1,
+    'the setup email link corresponds to one persisted password-reset token'
+  );
+  if (rawSetupToken) {
+    const setupPassword = await call('POST', '/auth/reset-password', undefined, {
+      token: rawSetupToken,
+      newPassword: 'SetupPassword123',
+      confirmNewPassword: 'SetupPassword123'
+    });
+    record(setupPassword.status === 200, 'the emailed setup link lets the vendor set a password', String(setupPassword.status));
+  }
+  await smtp.close();
+
   // ------------------------------------------------------ mail failure is not fatal
   (env as { SMTP_HOST?: string; SMTP_PORT?: number }).SMTP_HOST = '127.0.0.1';
-  (env as { SMTP_HOST?: string; SMTP_PORT?: number }).SMTP_PORT = 1; // nothing listens here: connection refused
+  (env as { SMTP_PORT?: number }).SMTP_PORT = 1; // nothing listens here: connection refused
   const failMail = await call('POST', '/admin/accounts', adminCookie, { name: 'Mailfail', email: 'mailfail@example.com' });
   record(
     failMail.status === 201 && failMail.json.data.setupEmail.sent === false && failMail.json.data.setupEmail.reason === 'send_failed',

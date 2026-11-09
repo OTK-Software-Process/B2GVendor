@@ -249,7 +249,10 @@ async function main(): Promise<void> {
   await AuditLog.collection.deleteMany({});
   const vend = await mk('real-vendor@example.com', 'user');
   await AuditLog.collection.deleteMany({});
+  const statusChangeStartedAt = Date.now();
   await call('PATCH', `/admin/accounts/${vend._id}/suspend`, adminCookie);
+  await call('PATCH', `/admin/accounts/${vend._id}/reactivate`, adminCookie);
+  const statusChangeFinishedAt = Date.now();
   const created = await call('POST', '/admin/staff', superCookie, { name: 'Real Staff', email: 'real-staff@example.com', permission: 'tag:manage' });
   const staffAcct = created.json.data.admin.id;
   await call('PATCH', `/admin/staff/${staffAcct}`, superCookie, { permission: 'poll:manage' });
@@ -258,8 +261,44 @@ async function main(): Promise<void> {
   const asAdmin = (await call('GET', '/admin/audit-log?pageSize=100', adminCookie)).json.data;
   const asSuper = (await call('GET', '/admin/audit-log?pageSize=100', superCookie)).json.data;
   const suspendRow = asAdmin.items.find((i: any) => i.action === 'account.suspend');
-  record(!!suspendRow && suspendRow.entityLabel === 'real-vendor@example.com' && suspendRow.actor.email === 'admin@example.com' && suspendRow.changes[0].path === 'status', 'END TO END: a real suspend through the admin API shows up in the audit-log API with the right actor and diff');
-  record(asAdmin.items.every((i: any) => i.metadata?.role !== 'admin') && asAdmin.total === 1, 'END TO END: the same session of staff actions (create, permission change, sign-out, password link) is INVISIBLE to a regular Admin', `admin sees ${asAdmin.total}`);
+  const reactivateRow = asAdmin.items.find((i: any) => i.action === 'account.reactivate');
+  const auditTimeIsValid = (row: any) => {
+    const timestamp = Date.parse(row?.createdAt);
+    return Number.isFinite(timestamp) &&
+      timestamp >= statusChangeStartedAt - 5000 &&
+      timestamp <= statusChangeFinishedAt + 5000;
+  };
+  record(
+    !!suspendRow &&
+      suspendRow.entityLabel === 'real-vendor@example.com' &&
+      suspendRow.actor.email === 'admin@example.com' &&
+      suspendRow.actor.id === adminAcc._id.toString() &&
+      suspendRow.changes.some((change: any) => change.path === 'status' && change.before === 'active' && change.after === 'suspended') &&
+      auditTimeIsValid(suspendRow),
+    'END TO END: a real suspend is logged with its actor, status diff and timestamp'
+  );
+  record(
+    !!reactivateRow &&
+      reactivateRow.entityLabel === 'real-vendor@example.com' &&
+      reactivateRow.actor.email === 'admin@example.com' &&
+      reactivateRow.actor.id === adminAcc._id.toString() &&
+      reactivateRow.changes.some((change: any) => change.path === 'status' && change.before === 'suspended' && change.after === 'active') &&
+      auditTimeIsValid(reactivateRow) &&
+      Date.parse(reactivateRow.createdAt) >= Date.parse(suspendRow?.createdAt),
+    'END TO END: reactivation is separately logged with the actor, status diff and later timestamp'
+  );
+  const statusFilter = await call(
+    'GET',
+    `/admin/audit-log?action=account.reactivate&entityType=account&entityId=${vend._id}&actor=${adminAcc._id}`,
+    adminCookie
+  );
+  record(
+    statusFilter.status === 200 &&
+      statusFilter.json.data.total === 1 &&
+      statusFilter.json.data.items[0].id === reactivateRow?.id,
+    'END TO END: audit-log filters combine action, entity type, entity id and actor for a status change'
+  );
+  record(asAdmin.items.every((i: any) => i.metadata?.role !== 'admin') && asAdmin.total === 2, 'END TO END: the same session of staff actions (create, permission change, sign-out, password link) is INVISIBLE to a regular Admin', `admin sees ${asAdmin.total}`);
   record(['account.create', 'account.permission_change', 'account.sign_out_all', 'account.password_link_sent'].every(a => asSuper.items.some((i: any) => i.action === a)), 'END TO END: ...and all of it is visible to the Super Admin (including the manual events, which carry the role)', asSuper.items.map((i: any) => i.action).join());
   const fRealAdmin = (await call('GET', '/admin/audit-log/filters', adminCookie)).json.data;
   record(!fRealAdmin.actions.includes('account.permission_change') && fRealAdmin.actions.includes('account.suspend'), 'END TO END: the filter list for the Admin leaves out staff-only actions too');
