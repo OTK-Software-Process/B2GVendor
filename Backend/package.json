@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "check:shared": "tsx tests/integration/shared-layer.check.ts",
     "check:auth": "tsx tests/integration/auth-flow.check.ts",
+    "check:auth-registration": "tsx tests/integration/auth-registration.check.ts",
     "check:login-lockout": "tsx tests/integration/login-lockout.check.ts",
     "check:security-headers": "tsx tests/integration/security-headers.check.ts",
     "check:csrf": "tsx tests/integration/csrf.check.ts",

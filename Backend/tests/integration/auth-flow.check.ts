@@ -167,8 +167,12 @@ async function main(): Promise<void> {
   }
   const failedDeliveryAccount = await Account.findOne({ email: failedEmail });
   record(
-    emailFailure instanceof Error && emailFailure.message.includes('550 message rejected'),
-    'registration surfaces an SMTP delivery failure',
+    emailFailure instanceof Error &&
+      'status' in emailFailure &&
+      emailFailure.status === 503 &&
+      'code' in emailFailure &&
+      emailFailure.code === 'SERVICE_UNAVAILABLE',
+    'registration reports an SMTP delivery failure as service unavailable',
     emailFailure instanceof Error ? emailFailure.message : String(emailFailure)
   );
   record(!failedDeliveryAccount, 'failed email delivery removes the unverified account');
