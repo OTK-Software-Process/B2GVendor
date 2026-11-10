@@ -331,11 +331,11 @@ Every requirement carries its implementation status as of 04/11/2026 (see Sectio
   - **FR-1.5** *(Implemented)*: The system shall allow Admins to search (by name, email, or status), add, suspend/reactivate, and delete vendor accounts directly from an account list. Suspending an account shall end all of its sessions. A vendor account created by an Admin shall receive a one-time password-setup link by email.
   - **FR-1.6** *(Implemented)*: The system shall log every account status change (suspend, reactivate, delete) with actor and timestamp.
     - *Current:* The audit log covers more than account status: every create, update and delete of accounts, tags, works, government sites and ingestion settings is recorded with a field-level before/after diff, the actor, the request path and a timestamp. Secrets are masked (`[REDACTED]`). Entries are append-only — the data layer refuses any edit or delete — and are searchable and filterable on the **Audit Log** page.
-  - **FR-1.7** *(Partial)*: The system shall let a user reset a forgotten password by email with a single-use link valid for 1 hour. The request shall get the same answer whether or not the email is registered, and a completed reset shall end every session of the account and clear any sign-in lockout.
-    - *Next:* Apply the password-reset rate limit (5 requests per hour per IP) to the forgot-password and reset-password endpoints; the limit is defined but not yet attached to them.
+  - **FR-1.7** *(Implemented)*: The system shall let a user reset a forgotten password by email with a single-use link valid for 1 hour. The request shall get the same answer whether or not the email is registered, and a completed reset shall end every session of the account and clear any sign-in lockout.
+    - *Current:* Forgot-password and reset-password share a limit of 5 requests per hour per IP address.
   - **FR-1.8** *(Implemented)*: The system shall require a self-registered account to verify its email address before it can sign in. Registration sends a single-use verification link valid for 24 hours and does not start a session. If email delivery is not configured or the email cannot be sent, registration shall be refused (`SERVICE_UNAVAILABLE`) and shall leave no account behind. Accounts created by staff or by seed scripts are treated as already verified.
   - **FR-1.9** *(Implemented)*: The system shall apply one password policy on registration, password change and password reset: at least 8 characters, at least one letter and one number, at most 72 bytes in UTF-8 (the bcrypt input limit), and not present in the Have I Been Pwned breached-password list. The breach check shall send only the first 5 characters of the password's SHA-1 hash (k-anonymity range query); if the check service is unavailable, the request shall be refused rather than the check skipped.
-  - **FR-1.10** *(Implemented)*: The system shall let a signed-in user change their password after re-entering the current one. All of the user's other sessions shall be ended; the session that made the change stays signed in.
+  - **FR-1.10** *(Implemented)*: The system shall let a signed-in user change their password after re-entering the current one. All of the user's other sessions shall be ended; the session that made the change stays signed in. A wrong current password counts toward the same account lock as a failed sign-in, so a stolen session cannot be used to guess the password.
   - **FR-1.11** *(Implemented)*: The system shall split staff into roles. Every Admin can use the dashboard, manage vendor accounts and read the audit log, and additionally holds one role chosen by a Super Admin: **Poll Admin** (polling and run history), **Tag Admin** (tag vocabulary and the tags on each work) or **Poll and Tag Admin** (both). Only a Super Admin shall create Admin accounts, set their role, suspend/reactivate them, sign them out of every session, send them a password link, or delete them. Roles shall be enforced server-side; an Admin created before the role split has no role until a Super Admin assigns one.
   - **FR-1.12** *(Implemented)*: The system shall let a signed-in user view and edit their own profile (name, phone, business profile) and notification settings.
 
@@ -424,18 +424,18 @@ Every requirement carries its implementation status as of 04/11/2026 (see Sectio
 
 - **Functional Requirements:**
   - **FR-4.1** *(Partial)*: The system shall provide full-text search across title, agency, metadata, and extracted TOR document text.
-    - *Current:* A keyword matches the work's title and its description (a summary written from the TOR during ingestion).
-    - *Next:* Index the full extracted TOR text and the agency name.
+    - *Current:* A search is one or more words separated by spaces (at most 8 words and 200 characters), and every word must match the work's title, its description (a summary written from the TOR during ingestion) or its agency: the government site's name, English name or short code, or the name of an agency tag.
+    - *Next:* Index the full extracted TOR text.
   - **FR-4.2** *(Partial)*: The system shall provide faceted filters for status, government site, agency, method, budget range, and date range, reusing the same tag taxonomy as the Interest Tags feature.
-    - *Current:* Filters exist for status, government site, tags (agency, method, category and keyword — tags in the same facet are combined with OR, different facets with AND), maximum budget and fiscal year. Results can be sorted by date, budget or submission deadline, and are paged at up to 50 per page. The chosen filters are remembered in the browser and carried by every search link.
-    - *Next:* Add a minimum budget and a publish-date range.
+    - *Current:* Filters exist for status, government site, tags (agency, method, category and keyword — tags in the same facet are combined with OR, different facets with AND), minimum and maximum budget, publish-date range (whole Bangkok days, `YYYY-MM-DD`) and fiscal year. Results can be sorted by date, budget or submission deadline, and are paged at up to 50 per page; works that tie on the sort value keep a fixed order, so no work is repeated or skipped between pages. A malformed or unknown parameter is refused with `400`. The chosen filters are remembered in the browser and carried by every search link.
+    - *Next:* Offer the minimum budget and the publish-date range on the search page (the API already accepts them).
   - **FR-4.3** *(Implemented)*: The system shall display a color-coded, text-labeled status badge on every result row and on the work detail page, reflecting the latest status derived from the e-GP RSS announcement type, with no manual override path. `data.go.th` enrichment records carry no status field and never affect this badge.
     - *Current:* Status values are `PLANNED` (`P0`, `15`), `DRAFT_TOR` (`B0`), `BIDDING` (`D0`), `CANCELLED` (`D1`, `W1`), `AMENDED` (`D2`, `W2`) and `AWARDED` (`W0`), each labelled in Thai and English.
   - **FR-4.4** *(Partial)*: The system shall provide a government site directory, drillable into department/agency, linking to each site's ingested works.
     - *Current:* The directory lists every government site and its works; drilling into an agency lists the works carrying that agency tag, so it only shows agencies an Admin has tagged (FR-3.2).
   - **FR-4.5** *(Implemented)*: The system shall show a consistent loading skeleton, empty state, and retryable error state whenever results cannot be shown immediately.
   - **FR-4.6** *(Implemented)*: The system shall use Thai-aware tokenization and typo tolerance so that search works despite Thai having no word spacing.
-    - *Current:* Searchable text is stored in a normalized Thai form, matched with a typo-tolerant pattern; existing works are prepared once with `npm run backfill:search-text`.
+    - *Current:* Searchable text is stored in a normalized Thai form, matched with a typo-tolerant pattern; existing works are prepared once with `npm run backfill:search-text`. A very long query (more than about 40 Thai characters) is matched exactly, without typo tolerance, so that it can never exceed the database's pattern size limit.
 
 - **Traceability:**
   - US-4.1 (Search) → FR-4.1, FR-4.6
@@ -444,7 +444,7 @@ Every requirement carries its implementation status as of 04/11/2026 (see Sectio
   - US-4.4 (Browse by Site) → FR-4.4
   - US-4.5 (Loading/Empty/Error) → FR-4.5
 
-- **Verification:** Covered today by `check:thai-search`, `check:search-tags` and `check:facts-db`. Filter combinations, paging limits and injection attempts against search are planned (Section 5.6).
+- **Verification:** Covered today by `check:search-filter` (keyword search, every filter alone and combined, sorting, paging limits, invalid parameters and injection attempts), `check:thai-search`, `check:search-tags` and `check:facts-db`.
 
 ### 4.5 TOR Document Access
 
@@ -533,8 +533,8 @@ This section defines the measures required to protect user data, identity, and s
 - **Security Headers** *(Implemented)*: The API shall send `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'` and `Referrer-Policy: no-referrer` on every response, with no `X-Powered-By` header. The web application shall send a Content Security Policy, `Referrer-Policy`, `Permissions-Policy` and `X-Frame-Options`.
 
 - **Injection & Rate Limiting** *(Partial)*: The system shall apply OWASP Top 10 protections (especially injection on search) and rate limiting on authentication, search, and admin poll endpoints.
-  - *Current:* All input is validated against strict schemas that reject unknown fields; MongoDB operator and dotted keys are stripped from input; search text is escaped before it is used in a query; email templates escape every inserted value. Sign-in is limited to 10 attempts per 15 minutes and sign-up to 5 per hour per IP address.
-  - *Next:* Rate-limit forgot/reset password (FR-1.7), search, and the admin poll endpoints.
+  - *Current:* All input is validated against strict schemas that reject unknown fields; MongoDB operator and dotted keys are stripped from input; search text is escaped before it is used in a query; email templates escape every inserted value. Sign-in is limited to 10 attempts per 15 minutes, and sign-up and forgot/reset password to 5 per hour, per IP address. A request body that is not valid JSON, or is too large, is refused with `400` or `413` rather than a server error, and a search cannot be made to fail or stall by its text (long Thai text, regular-expression characters, operators).
+  - *Next:* Rate-limit search and the admin poll endpoints.
 
 - **Outbound Request Safety** *(Partial)*: The system shall only fetch from the government sources it is configured for.
   - *Current:* HTML announcement pages are fetched only from e-GP hosts, with every redirect checked (FR-2.3a).
@@ -602,13 +602,13 @@ This section defines how the requirements above are verified, and the testing wo
 - **NFR-V2 Continuous Integration** *(Planned)*: Every pull request shall run the backend checks and typecheck, and the frontend lint, typecheck and production build, and shall not be mergeable while any of them fails.
 
 - **NFR-V3 API Coverage per Use Case** *(Partial)*: Each use case in Section 6.2 shall have API-level tests for its basic and alternative flows.
-  - *Current:* *Register / Login*, *Poll Government Site*, *Manage Source Configuration*, *Manage Tag Vocabulary* and *Manage Vendor Accounts* are covered. *Search & Filter Work*, *View Work Detail*, and *Download TOR Document* are partly covered.
+  - *Current:* *Register / Login*, *Search & Filter Work*, *Poll Government Site*, *Manage Source Configuration*, *Manage Tag Vocabulary* and *Manage Vendor Accounts* are covered. *View Work Detail* and *Download TOR Document* are partly covered.
   - *Next:* Add tests for *Follow Interest Tag* (follow, pause, unfollow) and *Receive Notification* (matching, digest, notification center, unsubscribe), and complete the partial ones.
 
 - **NFR-V4 End-to-End, Accessibility and Browser Tests** *(Planned)*: The main journeys of every use case shall be tested in a real browser on Chrome, Firefox, Safari (WebKit) and Edge, in Thai and English, including automated WCAG 2.1 AA checks.
 
 - **NFR-V5 Security Testing** *(Partial)*: The controls in Section 5.3 shall be covered by automated tests, a dynamic application security scan, and a dependency vulnerability scan.
-  - *Current:* Automated checks cover CSRF, security headers, account enumeration, account lockout and document safety (`check:csrf`, `check:security-headers`, `check:auth-enumeration`, `check:login-lockout`, `check:tor-files`).
+  - *Current:* Automated checks cover CSRF, security headers, account enumeration, account lockout, sessions and cookie flags, search injection and document safety (`check:csrf`, `check:security-headers`, `check:auth-enumeration`, `check:login-lockout`, `check:login-session`, `check:search-filter`, `check:tor-files`).
   - *Next:* Add a dynamic scan (OWASP ZAP baseline) against the full stack, a dependency audit in CI, and cross-user access tests.
 
 - **NFR-V6 Performance Testing** *(Planned)*: The targets in Section 5.1 shall be measured under load, on a dataset of realistic size, before release.

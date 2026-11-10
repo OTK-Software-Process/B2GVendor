@@ -228,7 +228,7 @@ async function main(): Promise<void> {
   const unknownTag = await getJson(`/works?tag=${new Types.ObjectId()}`);
   record(unknownTag.status === 200 && unknownTag.json.data.total === 0, 'a tag id that does not exist matches nothing');
   const junkTag = await getJson('/works?tag=not-an-id');
-  record(junkTag.status === 200 && junkTag.json.data.total === 0, 'a malformed tag id matches nothing (no 500)');
+  record(junkTag.status === 400 && junkTag.json.error?.code === 'VALIDATION_ERROR', 'a malformed tag id is refused with 400 (a mistake, not a tag that matches nothing; and no 500)');
   const mixed = await getJson(`/works?tag=${ebid._id},${new Types.ObjectId()}`);
   record(mixed.status === 200 && mixed.json.data.total === 0, 'a real tag + a non-existent one matches nothing (facet AND)');
 

@@ -126,8 +126,11 @@ export interface ListWorksParams {
   siteId?: string;
   status?: BackendWorkStatus;
   tag?: string; // comma-separated Tag ids
-  q?: string;
+  q?: string; // words separated by spaces; every word must match
+  budgetMin?: number; // baht, inclusive
   budgetMax?: number;
+  publishedFrom?: string; // YYYY-MM-DD, inclusive (Bangkok day)
+  publishedTo?: string; // YYYY-MM-DD, inclusive (Bangkok day)
   fiscalYear?: number; // ปีงบประมาณ, Buddhist Era
   sort?: 'date' | 'budget-asc' | 'budget-desc' | 'deadline' | 'deadline-desc';
   page?: number;
@@ -148,8 +151,25 @@ function buildQuery(params: object): string {
   return qs ? `?${qs}` : '';
 }
 
+// The API refuses a search of more than 200 characters or 8 words, so a pasted
+// paragraph is cut down to what it accepts instead of ending in an error.
+const MAX_SEARCH_CHARACTERS = 200;
+const MAX_SEARCH_WORDS = 8;
+
+function fitSearchText(q: string | undefined): string | undefined {
+  if (!q) return q;
+  const words = q.trim().split(/\s+/).slice(0, MAX_SEARCH_WORDS).join(' ');
+  // Counted the way the API counts (UTF-16 units), without cutting a character in half.
+  let fitted = '';
+  for (const character of words) {
+    if (fitted.length + character.length > MAX_SEARCH_CHARACTERS) break;
+    fitted += character;
+  }
+  return fitted.trim();
+}
+
 export function fetchWorks(params: ListWorksParams = {}): Promise<ListWorksResponse> {
-  return api.get<ListWorksResponse>(`/works${buildQuery(params)}`);
+  return api.get<ListWorksResponse>(`/works${buildQuery({ ...params, q: fitSearchText(params.q) })}`);
 }
 
 export function fetchWorkById(id: string): Promise<BackendWork> {

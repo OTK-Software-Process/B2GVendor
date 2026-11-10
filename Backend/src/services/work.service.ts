@@ -1,8 +1,9 @@
 import { Types } from 'mongoose';
 import { Work, IWork, WorkStatus } from '../models/work.model';
 import { Tag } from '../models/tag.model';
+import { GovSite } from '../models/govSite.model';
 import { AppError } from '../utils/AppError';
-import { buildThaiSearchRegex } from '../utils/thaiSearch';
+import { buildThaiSearchRegex, splitSearchTerms } from '../utils/thaiSearch';
 
 // Best-effort full-text + facet query against a plain Mongo instance -- NOT
 // MongoDB Atlas Search. Atlas Search ($search/$searchMeta over an Atlas
@@ -20,8 +21,15 @@ export interface ListWorksFilter {
   // categories) match any of them; tags of DIFFERENT facets (a method AND a
   // category) must all be matched -- see tagConditions.
   tag?: string;
-  q?: string; // free-text query over title + description (name search)
+  // Free-text query: words separated by spaces, ALL of which must match the title,
+  // the description (the TOR summary) or the agency (government site / agency tag).
+  q?: string;
+  budgetMin?: number; // baht, inclusive; a work with no price never matches a budget filter
   budgetMax?: number;
+  // The publish-date range, YYYY-MM-DD, inclusive, read as Bangkok days (a work
+  // with no publish date never matches).
+  publishedFrom?: string;
+  publishedTo?: string;
   fiscalYear?: number; // ปีงบประมาณ, Buddhist Era (e.g. 2569)
   sort?: 'date' | 'budget-asc' | 'budget-desc' | 'deadline' | 'deadline-desc';
   page?: number;
@@ -35,12 +43,16 @@ export interface ListWorksResult {
   pageSize: number;
 }
 
+// Every sort ends in _id: works that tie on the sort field (the same budget, the
+// same publish day) would otherwise come back in an unspecified order that can
+// differ between two pages of the same search, so a work could appear on two
+// pages and another on none.
 const SORTS: Record<NonNullable<ListWorksFilter['sort']>, Record<string, 1 | -1>> = {
-  date: { pubDate: -1, createdAt: -1 },
-  'budget-desc': { budget: -1 },
-  'budget-asc': { budget: 1 },
-  deadline: { deadlineAt: 1 },
-  'deadline-desc': { deadlineAt: -1 }
+  date: { pubDate: -1, createdAt: -1, _id: -1 },
+  'budget-desc': { budget: -1, _id: -1 },
+  'budget-asc': { budget: 1, _id: 1 },
+  deadline: { deadlineAt: 1, _id: 1 },
+  'deadline-desc': { deadlineAt: -1, _id: -1 }
 };
 
 const POPULATE_SITE = { path: 'siteId', select: 'name shortCode' };
@@ -152,6 +164,41 @@ async function tagConditions(rawIds: string[]): Promise<Record<string, unknown>[
   return conditions;
 }
 
+// Bangkok has no daylight saving, so a day is always +07:00.
+const bangkokDayStart = (day: string): Date => new Date(`${day}T00:00:00.000+07:00`);
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Government sites and agency tags whose NAME contains the word, so a search for
+// an agency finds its works even when the title does not repeat the agency's
+// name. Exact (case-insensitive) matching: these names are not stored in the
+// normalized search form. Bounded, and the pattern is escaped user text.
+async function agenciesMatching(word: RegExp): Promise<{ siteIds: Types.ObjectId[]; tagIds: Types.ObjectId[] }> {
+  const [sites, tags] = await Promise.all([
+    GovSite.find({ $or: [{ name: word }, { nameEn: word }, { shortCode: word }] }, '_id').limit(100).lean(),
+    Tag.find({ facet: 'agency', retired: { $ne: true }, $or: [{ name: word }, { aliases: word }] }, '_id').limit(500).lean()
+  ]);
+  return { siteIds: sites.map(site => site._id), tagIds: tags.map(tag => tag._id) };
+}
+
+// One search word: matches the (normalized, typo-tolerant) search text, the
+// title or description exactly -- the exact clauses cover works not yet
+// backfilled with searchText -- or the work's agency.
+async function wordCondition(word: string): Promise<Record<string, unknown>> {
+  const exact = new RegExp(escapeRegExp(word), 'iu');
+  const { siteIds, tagIds } = await agenciesMatching(exact);
+  return {
+    $or: [
+      { searchText: buildThaiSearchRegex(word) },
+      { title: exact },
+      { description: exact },
+      ...(siteIds.length > 0 ? [{ siteId: { $in: siteIds } }] : []),
+      ...(tagIds.length > 0 ? [{ tags: { $in: tagIds } }] : [])
+    ]
+  };
+}
+
 export async function listWorks(filter: ListWorksFilter = {}): Promise<ListWorksResult> {
   const page = Math.max(1, filter.page ?? 1);
   const pageSize = Math.min(50, Math.max(1, filter.pageSize ?? 20));
@@ -166,37 +213,44 @@ export async function listWorks(filter: ListWorksFilter = {}): Promise<ListWorks
   if (filter.status) query.status = filter.status;
   if (filter.fiscalYear !== undefined) query.fiscalYear = filter.fiscalYear;
 
+  // Conditions that must ALL hold: the tag facets, then one per search word.
+  const allOf: Record<string, unknown>[] = [];
+
   if (filter.tag) {
     const tagIds = filter.tag
       .split(',')
       .map(id => id.trim())
       .filter(Boolean);
-    if (tagIds.length > 0) query.$and = await tagConditions(tagIds);
+    if (tagIds.length > 0) allOf.push(...(await tagConditions(tagIds)));
   }
 
-  if (filter.budgetMax !== undefined) {
-    query.budget = { $lte: filter.budgetMax };
+  if (filter.budgetMin !== undefined || filter.budgetMax !== undefined) {
+    query.budget = {
+      ...(filter.budgetMin !== undefined ? { $gte: filter.budgetMin } : {}),
+      ...(filter.budgetMax !== undefined ? { $lte: filter.budgetMax } : {})
+    };
+  }
+
+  if (filter.publishedFrom !== undefined || filter.publishedTo !== undefined) {
+    query.pubDate = {
+      ...(filter.publishedFrom !== undefined ? { $gte: bangkokDayStart(filter.publishedFrom) } : {}),
+      // through the END of the last day
+      ...(filter.publishedTo !== undefined ? { $lt: new Date(bangkokDayStart(filter.publishedTo).getTime() + DAY_MS) } : {})
+    };
   }
 
   if (filter.q) {
-    const pattern = buildThaiSearchRegex(filter.q);
-    const legacyExactPattern = new RegExp(
-      filter.q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
-      'iu'
-    );
-    // searchText stores normalized Thai text for fuzzy matching. The title
-    // and description clauses retain exact matching until the backfill has
-    // populated searchText on every existing work.
-    query.$or = [
-      { searchText: pattern },
-      { title: legacyExactPattern },
-      { description: legacyExactPattern }
-    ];
+    // Thai has no spaces, so a space is the only sign of separate keywords:
+    // "ถนน บางปะอิน" means a work about both, not that exact phrase. searchText
+    // stores normalized Thai text for the typo-tolerant match.
+    allOf.push(...(await Promise.all(splitSearchTerms(filter.q).map(wordCondition))));
   }
 
-  // With a budgetMax filter every match already has a price, so the plain
-  // sort below is correct; without one, unpriced works must be pushed last.
-  if (filter.sort === 'budget-asc' && filter.budgetMax === undefined) {
+  if (allOf.length > 0) query.$and = allOf;
+
+  // With a budget filter every match already has a price, so the plain sort
+  // below is correct; without one, unpriced works must be pushed last.
+  if (filter.sort === 'budget-asc' && filter.budgetMax === undefined && filter.budgetMin === undefined) {
     return listWorksPricedFirst(query, page, pageSize);
   }
   if (filter.sort === 'deadline' || filter.sort === 'deadline-desc') {
