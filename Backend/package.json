@@ -17,6 +17,7 @@
     "check:csrf": "tsx tests/integration/csrf.check.ts",
     "check:auth-enumeration": "tsx tests/integration/auth-enumeration.check.ts",
     "check:deptid-suggest": "tsx tests/integration/deptid-suggest.check.ts",
+    "check:login-session": "tsx tests/integration/login-session.check.ts",
     "check:admin-guard": "tsx tests/integration/admin-guard.check.ts",
     "check:admin-dashboard": "tsx tests/integration/admin-dashboard.check.ts",
     "check:admin-tags": "tsx tests/integration/admin-tags.check.ts",

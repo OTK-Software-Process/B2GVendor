@@ -14,7 +14,7 @@ import {
 } from "./token.service";
 import { isEmailConfigured, sendPasswordResetEmail } from "./email.service";
 import { assertPasswordNotPwned } from "../integrations/haveIBeenPwned.client";
-import { clearFailedLogins } from "./loginLockout.service";
+import { clearFailedLogins, reserveLoginAttempt } from "./loginLockout.service";
 
 export async function getProfile(accountId: string): Promise<IAccount> {
   const account = await Account.findById(accountId);
@@ -53,10 +53,20 @@ export async function changePassword(
     throw AppError.notFound("Account not found.");
   }
 
+  // Guessing the current password is guessing the password: it counts toward
+  // the same per-account lock as failed sign-ins. Otherwise someone holding a
+  // stolen session could try passwords here without limit and take the account
+  // over for good.
+  const attempt = await reserveLoginAttempt(account._id);
+  if (!attempt.allowed) {
+    throw AppError.accountLocked(attempt.retryAfterSeconds);
+  }
+
   const isMatch = await account.comparePassword(currentPassword);
   if (!isMatch) {
     throw AppError.invalidCredentials();
   }
+  await clearFailedLogins(account._id);
 
   await assertPasswordNotPwned(newPassword);
   account.passwordHash = newPassword;

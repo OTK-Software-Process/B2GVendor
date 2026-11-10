@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import * as accountController from "../controllers/account.controller";
 import { validate } from "../middlewares/validate.middleware";
+import { passwordResetLimiter } from "../middlewares/rateLimit.middleware";
 
 const forgotPasswordSchema = z
   .object({
@@ -32,13 +33,17 @@ const resetPasswordSchema = z
 
 export const passwordRouter = Router();
 
+// Both share passwordResetLimiter (5 an hour per address): forgot-password sends
+// an email each time, and reset-password is where a token would be guessed.
 passwordRouter.post(
   "/forgot-password",
+  passwordResetLimiter,
   validate(forgotPasswordSchema),
   accountController.forgotPassword,
 );
 passwordRouter.post(
   "/reset-password",
+  passwordResetLimiter,
   validate(resetPasswordSchema),
   accountController.resetPassword,
 );

@@ -8,6 +8,7 @@ import { PublicShell } from '@/components/PublicShell';
 import { useApp, AccountView } from '@/context/AppContext';
 import { api, ApiError } from '@/lib/api';
 import { safeNextPath } from '@/lib/adminAccess';
+import { localizeAuthError } from '@/lib/authMessages';
 import { Lock, Mail, ArrowRight, Eye, EyeOff } from 'lucide-react';
 
 export default function LoginPage() {
@@ -38,7 +39,7 @@ export default function LoginPage() {
           ? lang === 'en'
             ? 'Please verify your email address using the link we sent before signing in.'
             : 'กรุณายืนยันอีเมลจากลิงก์ที่เราส่งให้ก่อนเข้าสู่ระบบ'
-          : err.message);
+          : localizeAuthError(err.message, lang));
         setFieldErrors(err.fields ?? {});
       } else {
         setFormError(lang === 'en' ? 'Something went wrong. Please try again.' : 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง');
