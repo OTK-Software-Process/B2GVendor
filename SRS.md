@@ -4,13 +4,13 @@ for
 
 **B2G Vendor**
 
-Version 0.2
+Version 0.3
 
 Prepared by Techaphatr Indhavivadhana
 
 OTK
 
-04/11/2026
+11/11/2026
 
 ---
 
@@ -20,6 +20,7 @@ OTK
 |---|---|---|---|
 | 0.1 | 22/08/2026 | Techaphatr Indhavivadhana | Initial version. |
 | 0.2 | 04/11/2026 | Techaphatr Indhavivadhana | Sections 4 and 5 brought in line with the implemented system: an implementation status on every FR and NFR; new FR-1.7 to FR-1.12, FR-2.11 to FR-2.13 and FR-5.5; security NFRs for the authentication, CSRF, header and document-handling work; new Section 5.6 Verification Requirements; open issues in Section 7.1 updated; the site-coverage assumption in Section 2.5 corrected. The use case model (Section 6) is unchanged. |
+| 0.3 | 11/11/2026 | Buravit Yenjit | Requirements brought in line with the API test work, and the use case diagram redrawn. *Current* notes added or corrected, and a *Verification* line added, for sign-in, password reset and password change (FR-1.7, FR-1.10, Section 5.3), search and filters (FR-4.1, FR-4.2, FR-4.6), work detail, status history and status integrity (FR-2.5, FR-4.3, FR-5.1, FR-5.4, FR-5.5), following, pausing and unfollowing tags (FR-3.1, FR-3.6, FR-3.7), and source configuration and the Super Admin gate (FR-2.3, FR-2.8, FR-2.11); Section 5.6 (NFR-V1, NFR-V3, NFR-V5) records which use cases and security controls the API tests now cover. The use case diagram in Section 6.1 is redrawn in Mermaid so that GitHub displays it (its content is unchanged). The architecture and API reference are new documents in `docs/`, and `ProjectDescription.md` moved there. |
 
 ---
 
