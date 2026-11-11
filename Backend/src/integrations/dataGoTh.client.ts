@@ -2,7 +2,7 @@ import { env } from '../config/env';
 
 /**
  * Client for data.go.th -- the SECONDARY, historical/batch enrichment
- * source (see ProjectDescription.md N1). Ported from
+ * source (see docs/ProjectDescription.md N1). Ported from
  * testAPI/explore-api-data-go-th.ts. Confirmed live findings this client
  * relies on:
  *   - The real, working host is data.go.th (CKAN-based Action API at
@@ -115,7 +115,7 @@ export async function datastoreSearch(
 // corp_name/win_tin/contrct_num/contrct_date -- there is NO deptId or
 // agency-code column, only subdep_name (a free-text Thai sub-department
 // name). This dataset cannot answer the "map agency to e-GP deptId" open
-// risk (ProjectDescription.md N1) -- that remains unsolved/manual.
+// risk (docs/ProjectDescription.md N1) -- that remains unsolved/manual.
 export interface CkanResource {
   id: string;
   name: string;

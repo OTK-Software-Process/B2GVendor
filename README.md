@@ -1,6 +1,6 @@
 # B2G Vendor
 
-A multi-agency Thai government procurement disclosure portal — polls TOR/procurement announcements from real government e-GP/data.go.th sources, AI-tags and summarizes them, tracks status over their lifecycle, and notifies users (in-app + email) about work matching tags they follow. See [ProjectDescription.md](ProjectDescription.md) for the full requirements spec.
+A multi-agency Thai government procurement disclosure portal — polls TOR/procurement announcements from real government e-GP/data.go.th sources, AI-tags and summarizes them, tracks status over their lifecycle, and notifies users (in-app + email) about work matching tags they follow. See [docs/ProjectDescription.md](docs/ProjectDescription.md) for the full requirements spec, [docs/Architecture.md](docs/Architecture.md) for how the system is put together, and [docs/API.md](docs/API.md) for the REST API reference.
 
 ## Repo layout
 

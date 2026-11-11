@@ -19,7 +19,7 @@ export interface IGovSite extends Document {
   announceTypes: AnnounceType[];
 
   // Historical/enrichment source (data.go.th) -- optional, not every site has
-  // a resolvable CGD contract dataset (see ProjectDescription.md N1 notes).
+  // a resolvable CGD contract dataset (see docs/ProjectDescription.md N1 notes).
   dataGoThOrgSlug?: string;
   // Manual pin, wins outright when set (see dataGoThResource.service.ts).
   // Left unset, dataGoThPackageId (falling back to the shared

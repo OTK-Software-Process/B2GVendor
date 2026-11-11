@@ -24,7 +24,7 @@ import { notifyNewWorkMatches } from './notification.service';
 export type TriggeredBy = 'scheduler' | Types.ObjectId;
 
 /**
- * The core ingestion pipeline (ProjectDescription.md N1). Two independent
+ * The core ingestion pipeline (docs/ProjectDescription.md N1). Two independent
  * entry points -- runRssPoll (primary/live) and runDataGoThEnrichment
  * (secondary/batch) -- called by the ingestion-worker process, never by the
  * API container directly (see pollJob.service.ts for how "Poll Now"
