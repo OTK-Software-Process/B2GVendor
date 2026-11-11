@@ -628,55 +628,60 @@ This section defines how the requirements above are verified, and the testing wo
 
 ### 6.1 Use case diagram
 
-```plantuml
-@startuml
-left to right direction
-skinparam packageStyle rect
+```mermaid
+flowchart LR
+    subgraph actors[" "]
+        Visitor(["👤 Public Visitor"])
+        User(["👤 Registered User<br/><i>is also a Public Visitor</i>"])
+        Admin(["👤 Admin"])
+        SuperAdmin(["👤 Super Admin<br/><i>is also an Admin</i>"])
+        System(["⚙️ System<br/>Scheduler / Poller"])
+    end
 
-actor "Public Visitor" as Visitor
-actor "Registered User" as User
-actor "Admin" as Admin
-actor "Super Admin" as SuperAdmin
-actor "System\n(Scheduler/Poller)" as System
+    subgraph boundary["B2G Vendor"]
+        UC1(["Register / Login"])
+        UC2(["Search & Filter Work"])
+        UC3(["View Work Detail<br/>& Status History"])
+        UC4(["Download TOR Document"])
+        UC5(["Follow Interest Tag"])
+        UC6(["Receive Notification"])
+        UC7(["Poll Government Site"])
+        UC8(["Manage Source<br/>Configuration"])
+        UC9(["Manage Tag<br/>Vocabulary"])
+        UC10(["Manage Vendor<br/>Accounts"])
+    end
 
-Visitor <|-- User
-Admin <|-- SuperAdmin
+    Visitor --> UC1
+    Visitor --> UC2
+    Visitor --> UC3
+    Visitor --> UC4
 
-rectangle "B2G Vendor" {
-  usecase "Register / Login" as UC1
-  usecase "Search & Filter Work" as UC2
-  usecase "View Work Detail\n& Status History" as UC3
-  usecase "Download TOR Document" as UC4
-  usecase "Follow Interest Tag" as UC5
-  usecase "Receive Notification" as UC6
-  usecase "Poll Government Site" as UC7
-  usecase "Manage Source\nConfiguration" as UC8
-  usecase "Manage Tag\nVocabulary" as UC9
-  usecase "Manage Vendor\nAccounts" as UC10
-}
+    User --> UC5
+    User --> UC6
 
-Visitor --> UC1
-Visitor --> UC2
-Visitor --> UC3
-Visitor --> UC4
+    Admin --> UC7
+    Admin --> UC9
+    Admin --> UC10
 
-User --> UC5
-User --> UC6
+    SuperAdmin --> UC8
 
-Admin --> UC7
-Admin --> UC9
-Admin --> UC10
+    System --> UC7
+    System --> UC6
 
-SuperAdmin --> UC8
+    UC7 -.->|"«triggers»"| UC6
+    UC5 -.->|"«enables»"| UC6
+    UC8 -.->|"«configures»"| UC7
 
-System --> UC7
-System --> UC6
-
-UC7 ..> UC6 : <<triggers>>
-UC5 ..> UC6 : <<enables>>
-UC8 ..> UC7 : <<configures>>
-@enduml
+    classDef actor fill:#ffffff,stroke:#12233c,color:#12233c
+    classDef usecase fill:#e8f0fe,stroke:#1d63d8,color:#12233c
+    class Visitor,User,Admin,SuperAdmin,System actor
+    class UC1,UC2,UC3,UC4,UC5,UC6,UC7,UC8,UC9,UC10 usecase
+    style actors fill:none,stroke:none
 ```
+
+*How to read it:* a solid arrow means the actor performs the use case. A Registered User is also a Public
+Visitor, and a Super Admin is also an Admin, so each also does everything its parent role can. A dotted arrow is a
+relationship between two use cases.
 
 ### 6.2 Use case descriptions
 
