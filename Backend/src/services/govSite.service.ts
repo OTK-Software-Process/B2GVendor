@@ -7,6 +7,7 @@ import { AppError } from '../utils/AppError';
 import { effectivePollIntervalMinutes } from '../config/polling';
 import { getIngestionSettings, effectiveNextPollAt } from './ingestionSettings.service';
 import { fetchEgpRssFeed } from '../integrations/egpRss.client';
+import { logger } from '../utils/logger';
 
 export interface CreateGovSiteInput {
   name: string;
@@ -22,11 +23,17 @@ export interface CreateGovSiteInput {
   pollIntervalMinutes?: number;
 }
 
-// `pollIntervalMinutes: null` removes a site's own override so it follows the
-// global schedule again.
-export type UpdateGovSiteInput = Partial<Omit<CreateGovSiteInput, 'pollIntervalMinutes'>> & {
+// `null` removes a setting: pollIntervalMinutes goes back to following the global
+// schedule, and a data.go.th setting is no longer used.
+export type UpdateGovSiteInput = Partial<
+  Omit<CreateGovSiteInput, 'pollIntervalMinutes' | 'dataGoThOrgSlug' | 'dataGoThResourceId' | 'dataGoThPackageId' | 'dataGoThSearchQuery'>
+> & {
   enabled?: boolean;
   pollIntervalMinutes?: number | null;
+  dataGoThOrgSlug?: string | null;
+  dataGoThResourceId?: string | null;
+  dataGoThPackageId?: string | null;
+  dataGoThSearchQuery?: string | null;
 };
 
 export async function listGovSites(): Promise<IGovSite[]> {
@@ -148,37 +155,124 @@ async function ensureSiteTag(site: IGovSite): Promise<void> {
   );
 }
 
-export async function createGovSite(input: CreateGovSiteInput): Promise<IGovSite> {
-  const site = await GovSite.create({
-    name: input.name,
-    nameEn: input.nameEn,
-    shortCode: input.shortCode,
-    deptId: input.deptId,
-    announceTypes: input.announceTypes,
-    dataGoThOrgSlug: input.dataGoThOrgSlug,
-    dataGoThResourceId: input.dataGoThResourceId,
-    dataGoThPackageId: input.dataGoThPackageId,
-    dataGoThSearchQuery: input.dataGoThSearchQuery,
-    requestsPerMinute: input.requestsPerMinute,
-    pollIntervalMinutes: input.pollIntervalMinutes
-  });
+function isDuplicateKeyError(err: unknown): err is { code: 11000; keyPattern?: Record<string, unknown> } {
+  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 11000;
+}
 
-  await ensureSiteTag(site);
+// deptId and shortCode are each unique. The database says only "duplicate
+// key"; say which field it is (and who has it), so the form can mark it.
+async function describeConflict(err: unknown, excludeId?: string): Promise<AppError | null> {
+  if (!isDuplicateKeyError(err)) return null;
+  const clashes = Object.keys(err.keyPattern ?? {});
+  for (const field of ['deptId', 'shortCode'] as const) {
+    if (!clashes.includes(field)) continue;
+    const value = (err as { keyValue?: Record<string, string> }).keyValue?.[field];
+    const other = value ? await GovSite.findOne({ [field]: value, ...(excludeId ? { _id: { $ne: excludeId } } : {}) }).select('name shortCode') : null;
+    const used = field === 'deptId' ? 'deptId' : 'short code';
+    const message = other ? `${other.name} (${other.shortCode}) already uses this ${used}.` : `A government site already uses this ${used}.`;
+    return new AppError(409, 'CONFLICT', message, { [field]: message });
+  }
+  return null;
+}
+
+// A site's tag is named after it, and tag names are unique within their group,
+// so two sites cannot share a name: the second would be saved without its tag.
+async function assertNameFree(name: string, excludeId?: string): Promise<void> {
+  const other = await GovSite.findOne({ name, ...(excludeId ? { _id: { $ne: excludeId } } : {}) }).select('name shortCode');
+  if (other) {
+    const message = `${other.name} (${other.shortCode}) already uses this name.`;
+    throw new AppError(409, 'CONFLICT', message, { name: message });
+  }
+}
+
+export async function createGovSite(input: CreateGovSiteInput): Promise<IGovSite> {
+  await assertNameFree(input.name);
+  let site: IGovSite;
+  try {
+    site = await GovSite.create({
+      name: input.name,
+      nameEn: input.nameEn,
+      shortCode: input.shortCode,
+      deptId: input.deptId,
+      announceTypes: input.announceTypes,
+      dataGoThOrgSlug: input.dataGoThOrgSlug,
+      dataGoThResourceId: input.dataGoThResourceId,
+      dataGoThPackageId: input.dataGoThPackageId,
+      dataGoThSearchQuery: input.dataGoThSearchQuery,
+      requestsPerMinute: input.requestsPerMinute,
+      pollIntervalMinutes: input.pollIntervalMinutes
+    });
+  } catch (err) {
+    throw (await describeConflict(err)) ?? err;
+  }
+
+  try {
+    await ensureSiteTag(site);
+  } catch (err) {
+    // A site-group tag with this name already exists (not made by a site): take
+    // the site back out rather than leave one with no followable tag.
+    await GovSite.deleteOne({ _id: site._id });
+    if (isDuplicateKeyError(err)) {
+      const message = 'A tag with this name already exists in the government-site group.';
+      throw new AppError(409, 'CONFLICT', message, { name: message });
+    }
+    throw err;
+  }
   return site;
 }
 
-export async function updateGovSite(id: string, input: UpdateGovSiteInput): Promise<IGovSite> {
-  const { pollIntervalMinutes, ...rest } = input;
+// A site's tag is named after the site (tag.service.ts refuses to rename a site
+// tag by hand: "rename the site in Source Configuration"), so a rename here has
+// to carry over, or the website keeps offering the old name to follow. The tag
+// itself stays, so its followers and works stay attached.
+async function syncSiteTag(before: IGovSite, after: IGovSite): Promise<void> {
+  if (before.name === after.name && before.shortCode === after.shortCode) return;
 
-  const update: UpdateQuery<IGovSite> = { ...rest };
-  if (pollIntervalMinutes === null) {
-    update.$unset = { pollIntervalMinutes: 1 };
-  } else if (pollIntervalMinutes !== undefined) {
-    update.pollIntervalMinutes = pollIntervalMinutes;
+  const tag = await Tag.findOne({ facet: 'site', siteId: after._id });
+  if (!tag) return ensureSiteTag(after);
+
+  const previousName = tag.name;
+  tag.name = after.name;
+  tag.aliases = [...new Set([...tag.aliases.filter(alias => alias !== before.shortCode), after.shortCode])];
+  try {
+    await tag.save();
+  } catch (err) {
+    if (!isDuplicateKeyError(err)) throw err;
+    // Some other site tag already has this name: keep the old name rather than
+    // fail the rename the Super Admin asked for.
+    logger.warn('govSite', `Site tag for ${after.shortCode} keeps its name "${previousName}": a site tag named "${after.name}" already exists.`);
+    tag.name = previousName;
+    await tag.save();
   }
+}
 
-  const site = await GovSite.findByIdAndUpdate(id, update, { new: true, runValidators: true });
+export async function updateGovSite(id: string, input: UpdateGovSiteInput): Promise<IGovSite> {
+  const before = await GovSite.findById(id);
+  if (!before) throw AppError.notFound('Government site not found.');
+
+  // `null` means "remove this setting" (pollIntervalMinutes: follow the global
+  // schedule again; a data.go.th field: stop using it).
+  const set: Record<string, unknown> = {};
+  const unset: Record<string, 1> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (value === null) unset[key] = 1;
+    else if (value !== undefined) set[key] = value;
+  }
+  const update: UpdateQuery<IGovSite> = {};
+  if (Object.keys(set).length > 0) update.$set = set;
+  if (Object.keys(unset).length > 0) update.$unset = unset;
+
+  if (typeof input.name === 'string' && input.name !== before.name) await assertNameFree(input.name, id);
+
+  let site: IGovSite | null;
+  try {
+    site = await GovSite.findByIdAndUpdate(id, update, { new: true, runValidators: true });
+  } catch (err) {
+    throw (await describeConflict(err, id)) ?? err;
+  }
   if (!site) throw AppError.notFound('Government site not found.');
+
+  await syncSiteTag(before, site);
   return site;
 }
 
