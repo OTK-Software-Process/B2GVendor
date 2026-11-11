@@ -20,6 +20,7 @@
     "check:login-session": "tsx tests/integration/login-session.check.ts",
     "check:search-filter": "tsx tests/integration/search-filter.check.ts",
     "check:work-detail": "tsx tests/integration/work-detail.check.ts",
+    "check:follow-tags": "tsx tests/integration/follow-tags.check.ts",
     "check:admin-guard": "tsx tests/integration/admin-guard.check.ts",
     "check:admin-dashboard": "tsx tests/integration/admin-dashboard.check.ts",
     "check:admin-tags": "tsx tests/integration/admin-tags.check.ts",

@@ -145,7 +145,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const isPolling = pollStatus.isPolling || pollStarting;
   const unreadCount = notifications.filter(n => !n.read).length;
 
+  // What the signed-in user follows and has been notified about belongs to that
+  // user alone: it is dropped the moment they sign out, their session ends, or
+  // another account signs in, so the next person on the same browser never sees
+  // it (not even for the moment before their own data arrives, or if it fails to).
+  // `userDataEpoch` changes with every clear, so a follows/notifications request
+  // that was still in flight when the user signed out is dropped on arrival
+  // instead of filling the signed-out page with their data.
+  const userDataEpoch = useRef<number>(0);
+  const clearUserData = () => {
+    userDataEpoch.current += 1;
+    setFollowedTagIds([]);
+    setNotifications([]);
+  };
+
   const signIn = (nextAccount: AccountView) => {
+    clearUserData();
+    const epoch = userDataEpoch.current;
     setAccount(nextAccount);
     setRole(nextAccount.role);
 
@@ -156,6 +172,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // next full page reload.
     Promise.all([api.get<ApiTag[]>('/follows/tags'), api.get<NotificationItem[]>('/notifications')])
       .then(([apiTags, apiNotifications]) => {
+        if (epoch !== userDataEpoch.current) return;
         setFollowedTagIds(apiTags.map(tag => tag._id));
         setNotifications(apiNotifications);
       })
@@ -170,19 +187,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // refresh), the app reflects the real account instead.
   useEffect(() => {
     let cancelled = false;
+    let epochAtSignIn = userDataEpoch.current;
 
     api
       .get<AccountView>('/auth/me')
       .then(me => {
         if (cancelled) return [[], []] as [ApiTag[], NotificationItem[]];
         signIn(me);
+        epochAtSignIn = userDataEpoch.current;
         return Promise.all([
           api.get<ApiTag[]>('/follows/tags'),
           api.get<NotificationItem[]>('/notifications')
         ]);
       })
       .then(([apiTags, apiNotifications]) => {
-        if (!cancelled) {
+        if (!cancelled && epochAtSignIn === userDataEpoch.current) {
           setFollowedTagIds(apiTags.map(tag => tag._id));
           setNotifications(apiNotifications);
         }
@@ -284,6 +303,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const handleSessionInvalid = () => {
       setAccount(null);
       setRole('visitor');
+      clearUserData();
     };
     window.addEventListener(SESSION_INVALID_EVENT, handleSessionInvalid);
     return () => window.removeEventListener(SESSION_INVALID_EVENT, handleSessionInvalid);
@@ -298,6 +318,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
     setAccount(null);
     setRole('visitor');
+    clearUserData();
   };
 
   const toggleFollowTag = async (tagId: string) => {

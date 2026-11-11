@@ -19,8 +19,13 @@ export async function followTag(accountId: string, tagId: string): Promise<IFoll
   );
 }
 
+// Idempotent: a tag the user does not follow, or one an Admin has since retired,
+// is simply "already unfollowed" (200) -- a user must always be able to drop a
+// follow. Only an id that belongs to no tag at all is a mistake (404), as it is
+// for following or pausing one.
 export async function unfollowTag(accountId: string, tagId: string): Promise<void> {
-  await Follow.deleteOne({ accountId: toObjectId(accountId), tagId: toObjectId(tagId) });
+  const { deletedCount } = await Follow.deleteOne({ accountId: toObjectId(accountId), tagId: toObjectId(tagId) });
+  if (deletedCount === 0 && !(await Tag.exists({ _id: tagId }))) throw AppError.notFound('Tag not found.');
 }
 
 export async function listFollowedTags(accountId: string): Promise<ITag[]> {

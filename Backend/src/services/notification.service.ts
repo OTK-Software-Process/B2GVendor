@@ -127,7 +127,7 @@ export async function notifyNewWorkMatches(work: IWork, tagIds: Types.ObjectId[]
       )];
       if (matchedTagNames.length === 0) continue;
 
-      await Notification.findOneAndUpdate(
+      const filed = await Notification.findOneAndUpdate(
         { accountId: account._id, workId: work._id },
         {
           $set: {
@@ -143,8 +143,14 @@ export async function notifyNewWorkMatches(work: IWork, tagIds: Types.ObjectId[]
           },
           $setOnInsert: { read: false }
         },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
+        { upsert: true, new: true, setDefaultsOnInsert: true, includeResultMetadata: true }
       );
+
+      // At most one notification per work per user (FR-3.6): when this user was
+      // already told about this work (an earlier tag matched, or the work was
+      // changed and picked up one more of their tags) the in-app entry above is
+      // refreshed, but they are not emailed about the same work a second time.
+      if (filed.lastErrorObject?.updatedExisting) continue;
 
       // In-app notification (above) always happens regardless of
       // preferences -- only the EMAIL is gated by account/notifications/

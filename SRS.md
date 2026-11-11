@@ -395,6 +395,7 @@ Every requirement carries its implementation status as of 04/11/2026 (see Sectio
 
 - **Functional Requirements:**
   - **FR-3.1** *(Implemented)*: The system shall let a user follow tags from a controlled taxonomy grouped by facet (site, agency, method, category, keyword), addable/removable at any time.
+    - *Current:* There is no limit on how many tags a user follows. Following a tag the user already follows changes nothing (the website's button turns that case into an unfollow, as in Use Case 6.2.5), and unfollowing a tag that is not followed is equally harmless, so a double click, a retry or two open tabs never leave a duplicate or an error. A retired tag cannot be followed (404); a follow that was already in place when the tag was retired is kept (dormant, and live again if the tag is reactivated), is listed as retired, and can still be paused or removed. An id that is no tag is 404 and a malformed id is 400, on every follow endpoint. A user sees and changes only their own follows. The website forgets the follows and notifications it was showing as soon as the user signs out, their session ends or another account signs in.
   - **FR-3.2** *(Partial)*: The system shall automatically assign each ingested work 1..N tags, derived from its government site and agency/method (structured fields) plus AI-based classification of its Thai-language title and TOR text for category/keyword tags, optionally admin-curated afterward.
     - *Current:* The government-site tag is assigned automatically and the method tag deterministically (FR-2.12). Category and keyword tags are chosen by an AI model (OpenRouter by default, Vertex AI as an alternative) from the controlled vocabulary; the model may also propose at most one new tag per work, which is created for later admin review. Admins can add or remove any tag on a work, and a tag an Admin removed stays removed on later polls.
     - *Next:* Assign agency tags automatically (today an Admin must create and apply them by hand), and define the AI confidence threshold (Section 7.1).
@@ -405,8 +406,9 @@ Every requirement carries its implementation status as of 04/11/2026 (see Sectio
     - *Current:* The notification center shows read/unread state, with mark-as-read and mark-all-read. Email is sent only to addresses that have been verified (FR-1.8) and only while the user has email notifications switched on. The daily digest is sent at 08:00.
     - *Next:* Pin the digest schedule to Asia/Bangkok time; it currently follows the server's time zone, and the containers set none.
   - **FR-3.6** *(Implemented)*: The system shall send at most one notification per work per user, even if multiple followed tags match or the work is re-polled.
+    - *Current:* This covers the email as well as the in-app entry: when a later poll adds another followed tag to a work the user was already told about, the in-app entry is refreshed but no second email is sent.
   - **FR-3.7** *(Partial)*: The system shall allow a user to pause, edit, or delete a followed tag, and support email unsubscribe without requiring login.
-    - *Current:* Pausing, resuming and removing a followed tag work. The **Unsubscribe** page exists but is a front-end placeholder only: it calls no backend, and notification emails carry no unsubscribe link.
+    - *Current:* Pausing, resuming and removing a followed tag work. Pausing silences that follow only (no in-app entry and no email) while the tag stays followed; resuming brings it back for the next new work, not for work missed meanwhile. Pausing needs an existing follow (404 otherwise, so it cannot be used to follow), takes exactly `{"paused": true|false}` and is otherwise 400, and un-following a paused tag and following it again starts a fresh, un-paused follow. Follow endpoints answer 401 to a visitor and 403 to a suspended account. The **Unsubscribe** page exists but is a front-end placeholder only: it calls no backend, and notification emails carry no unsubscribe link.
     - *Next:* Add a signed, per-user unsubscribe token to every notification email and a no-login endpoint that switches email notifications off.
 
 - **Traceability:**
@@ -416,7 +418,7 @@ Every requirement carries its implementation status as of 04/11/2026 (see Sectio
   - US-3.4 (Edit Tags) → FR-3.7
   - US-3.5 (Admin Tag Management) → FR-3.4
 
-- **Verification:** Covered today by `check:admin-tags`, `check:admin-works` and `check:search-tags`; notification matching is exercised inside `check:facts-ingestion`. The follow and notification-center endpoints and the unsubscribe flow have no dedicated automated checks yet (Section 5.6).
+- **Verification:** Covered today by `check:follow-tags` (follow, unfollow, pause and resume; who may call it and whose follows a caller can see; what a follow, a paused follow and an unfollow do to the notifications and emails a poll produces), `check:admin-tags`, `check:admin-works` and `check:search-tags`; notification matching is also exercised inside `check:facts-ingestion`. The notification-center endpoints, the daily digest and the unsubscribe flow have no dedicated automated checks yet (Section 5.6).
 
 ### 4.4 Search, Browse & Status Display
 
@@ -603,8 +605,8 @@ This section defines how the requirements above are verified, and the testing wo
 - **NFR-V2 Continuous Integration** *(Planned)*: Every pull request shall run the backend checks and typecheck, and the frontend lint, typecheck and production build, and shall not be mergeable while any of them fails.
 
 - **NFR-V3 API Coverage per Use Case** *(Partial)*: Each use case in Section 6.2 shall have API-level tests for its basic and alternative flows.
-  - *Current:* *Register / Login*, *Search & Filter Work*, *View Work Detail & Status History*, *Poll Government Site*, *Manage Source Configuration*, *Manage Tag Vocabulary* and *Manage Vendor Accounts* are covered. *Download TOR Document* is partly covered.
-  - *Next:* Add tests for *Follow Interest Tag* (follow, pause, unfollow) and *Receive Notification* (matching, digest, notification center, unsubscribe), and complete the partial ones.
+  - *Current:* *Register / Login*, *Search & Filter Work*, *View Work Detail & Status History*, *Follow Interest Tag*, *Poll Government Site*, *Manage Source Configuration*, *Manage Tag Vocabulary* and *Manage Vendor Accounts* are covered. *Download TOR Document* and *Receive Notification* (matching and email are covered through `check:follow-tags`) are partly covered.
+  - *Next:* Add tests for the rest of *Receive Notification* (digest, notification center, unsubscribe), and complete the partial ones.
 
 - **NFR-V4 End-to-End, Accessibility and Browser Tests** *(Planned)*: The main journeys of every use case shall be tested in a real browser on Chrome, Firefox, Safari (WebKit) and Edge, in Thai and English, including automated WCAG 2.1 AA checks.
 
