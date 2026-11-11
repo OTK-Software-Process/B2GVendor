@@ -363,7 +363,7 @@ Every requirement carries its implementation status as of 04/11/2026 (see Sectio
     - *Current:* Each page read is capped at 2 MB and 30 seconds, paced by the site's request-rate limit, attempted at most 3 times at least 6 hours apart, and limited to 40 pages per site per poll. Redirects are checked against the same e-GP host rule. The off switch is `EGP_HTML_TOR_ENABLED=false`.
   - **FR-2.4** *(Implemented)*: The system shall upsert ingested records by a stable key (the project identifier) scoped per site, so re-polling updates rather than duplicates, and so records from either source correlate to the same work.
   - **FR-2.5** *(Implemented)*: The system shall flag brand-new works and changed fields (especially status) and emit events consumed by the notification and search features.
-    - *Current:* A status change is appended to the work's status history, and tags newly added to a work trigger the notification matching of FR-3.3.
+    - *Current:* Every announcement is recorded once in the work's status history, in order of publication, and tags newly added to a work trigger the notification matching of FR-3.3. A work's status is that of its latest announcement by publish date, never of the one read last: an older announcement that a feed still lists (or that turns up late, or after another type's feed has stopped listing the work) is filed in its place in time and cannot change the status, and re-reading a feed adds nothing. A newer announcement of the same type (a second amendment, a new invitation after a cancellation) is a new event. `npm run backfill:status-history` (`-- --dry-run` to only report) repairs works written by the older poll.
   - **FR-2.6** *(Implemented)*: The system shall record, per government site and per source, a run's start/end time, counts (fetched / new / updated / skipped / failed), and errors, viewable and filterable in the admin panel.
   - **FR-2.7** *(Partial)*: The system shall retry a failed poll with backoff and alert the Admin; a failure at one government site or one source shall not corrupt already-ingested data or block polling of the others.
     - *Current:* Requests to the e-GP RSS feed and `data.go.th` are retried twice with exponential backoff (0.5 s, then 1 s), and a failure is isolated to its site and source. Failed runs are visible in run history and counted (last 24 hours) on the admin dashboard.
@@ -430,7 +430,7 @@ Every requirement carries its implementation status as of 04/11/2026 (see Sectio
     - *Current:* Filters exist for status, government site, tags (agency, method, category and keyword — tags in the same facet are combined with OR, different facets with AND), minimum and maximum budget, publish-date range (whole Bangkok days, `YYYY-MM-DD`) and fiscal year. Results can be sorted by date, budget or submission deadline, and are paged at up to 50 per page; works that tie on the sort value keep a fixed order, so no work is repeated or skipped between pages. A malformed or unknown parameter is refused with `400`. The chosen filters are remembered in the browser and carried by every search link.
     - *Next:* Offer the minimum budget and the publish-date range on the search page (the API already accepts them).
   - **FR-4.3** *(Implemented)*: The system shall display a color-coded, text-labeled status badge on every result row and on the work detail page, reflecting the latest status derived from the e-GP RSS announcement type, with no manual override path. `data.go.th` enrichment records carry no status field and never affect this badge.
-    - *Current:* Status values are `PLANNED` (`P0`, `15`), `DRAFT_TOR` (`B0`), `BIDDING` (`D0`), `CANCELLED` (`D1`, `W1`), `AMENDED` (`D2`, `W2`) and `AWARDED` (`W0`), each labelled in Thai and English.
+    - *Current:* Status values are `PLANNED` (`P0`, `15`), `DRAFT_TOR` (`B0`), `BIDDING` (`D0`), `CANCELLED` (`D1`, `W1`), `AMENDED` (`D2`, `W2`) and `AWARDED` (`W0`), each labelled in Thai and English. The database refuses any other status or announcement type, and the only route that writes to a work is the tag editor (`PUT /admin/works/:id/tags`), which refuses a status.
   - **FR-4.4** *(Partial)*: The system shall provide a government site directory, drillable into department/agency, linking to each site's ingested works.
     - *Current:* The directory lists every government site and its works; drilling into an agency lists the works carrying that agency tag, so it only shows agencies an Admin has tagged (FR-3.2).
   - **FR-4.5** *(Implemented)*: The system shall show a consistent loading skeleton, empty state, and retryable error state whenever results cannot be shown immediately.
@@ -452,19 +452,20 @@ Every requirement carries its implementation status as of 04/11/2026 (see Sectio
 
 - **Functional Requirements:**
   - **FR-5.1** *(Implemented)*: The system shall provide a detail page showing title, agency, method, budget, dates, current status, and linked TOR/attachments, all sourced from ingested data.
-    - *Current:* The page also shows the fiscal year (marked when estimated), the submission deadline with days remaining, whether a price is a reference price or a winning bid, and a link that opens the e-GP announcement search for the work's project number.
+    - *Current:* The page also shows the fiscal year (marked when estimated), the submission deadline with days remaining, whether a price is a reference price or a winning bid, and a link that opens the e-GP announcement search for the work's project number. A malformed work id is refused with `400`; an id that is unknown, or belongs to a work hidden from the public site, answers `404` "This work is no longer available."
   - **FR-5.2** *(Partial)*: The system shall provide working, HTTPS download links to every ingested TOR file and attachment.
     - *Current:* Every stored TOR file downloads as a PDF attachment from the API; HTTPS depends on the production deployment (the local stack runs over plain HTTP).
     - *Next:* Serve the production deployment over HTTPS only (see Section 5.3).
   - **FR-5.3** *(Implemented)*: The system shall deduplicate downloaded files by hash so an unchanged document is not re-downloaded on every poll.
   - **FR-5.4** *(Implemented)*: The system shall display a chronological status-change history on the detail page, matching the same status source of truth used in search.
+    - *Current:* The history lists every announcement oldest first, and its last entry is always the work's current status.
   - **FR-5.5** *(Implemented)*: The system shall store and serve only genuine PDF documents: a file must begin with the `%PDF-` signature, is saved under its content hash with a safe display name, and is served as `application/pdf` with `nosniff` and as a download. ZIP bundles shall be opened within fixed limits (at most 200 entries, 50 PDFs, 50 MB per entry and 200 MB in total) and a single download is capped at 100 MB and 120 seconds. Older stored files that are not PDFs shall not be served.
 
 - **Traceability:**
   - US-5.1 (View Detail) → FR-5.1, FR-5.4
   - US-5.2 (Download TOR) → FR-5.2, FR-5.3, FR-5.5
 
-- **Verification:** Covered today by `check:tor-files` and `check:html-tor`. Download behavior over HTTP (headers, missing and out-of-range files) is planned (Section 5.6).
+- **Verification:** Covered today by `check:work-detail` (the detail response, status derivation, status ordering through real polls, enrichment never changing a status, and no way to write one), `check:tor-files` and `check:html-tor`. Download behavior over HTTP (headers, missing and out-of-range files) is planned (Section 5.6).
 
 ---
 
@@ -602,7 +603,7 @@ This section defines how the requirements above are verified, and the testing wo
 - **NFR-V2 Continuous Integration** *(Planned)*: Every pull request shall run the backend checks and typecheck, and the frontend lint, typecheck and production build, and shall not be mergeable while any of them fails.
 
 - **NFR-V3 API Coverage per Use Case** *(Partial)*: Each use case in Section 6.2 shall have API-level tests for its basic and alternative flows.
-  - *Current:* *Register / Login*, *Search & Filter Work*, *Poll Government Site*, *Manage Source Configuration*, *Manage Tag Vocabulary* and *Manage Vendor Accounts* are covered. *View Work Detail* and *Download TOR Document* are partly covered.
+  - *Current:* *Register / Login*, *Search & Filter Work*, *View Work Detail & Status History*, *Poll Government Site*, *Manage Source Configuration*, *Manage Tag Vocabulary* and *Manage Vendor Accounts* are covered. *Download TOR Document* is partly covered.
   - *Next:* Add tests for *Follow Interest Tag* (follow, pause, unfollow) and *Receive Notification* (matching, digest, notification center, unsubscribe), and complete the partial ones.
 
 - **NFR-V4 End-to-End, Accessibility and Browser Tests** *(Planned)*: The main journeys of every use case shall be tested in a real browser on Chrome, Firefox, Safari (WebKit) and Edge, in Thai and English, including automated WCAG 2.1 AA checks.

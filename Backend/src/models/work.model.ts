@@ -1,5 +1,5 @@
 import mongoose, { Schema, Document, Model, Types } from 'mongoose';
-import { AnnounceType } from './govSite.model';
+import { AnnounceType, ALL_ANNOUNCE_TYPES } from './govSite.model';
 import { normalizeThaiSearchText } from '../utils/thaiSearch';
 
 // Status is derived only from the e-GP RSS announce-type signal (FR-N4.4) --
@@ -11,6 +11,10 @@ export type WorkStatus =
   | 'CANCELLED'      // D1
   | 'AMENDED'        // D2
   | 'AWARDED';       // W0
+
+// Every status a work can have: the values of STATUS_BY_ANNOUNCE_TYPE. The schema
+// refuses anything else, so a status can only ever come from an e-GP announcement.
+export const WORK_STATUSES: readonly WorkStatus[] = ['PLANNED', 'DRAFT_TOR', 'BIDDING', 'CANCELLED', 'AMENDED', 'AWARDED'] as const;
 
 export const STATUS_BY_ANNOUNCE_TYPE: Record<AnnounceType, WorkStatus> = {
   P0: 'PLANNED',
@@ -182,8 +186,8 @@ const TorFileSchema = new Schema<ITorFile>(
 
 const StatusHistorySchema = new Schema<IStatusHistoryEntry>(
   {
-    status: { type: String, required: true },
-    announceType: { type: String, required: true },
+    status: { type: String, enum: WORK_STATUSES, required: true },
+    announceType: { type: String, enum: ALL_ANNOUNCE_TYPES, required: true },
     changedAt: { type: Date, required: true, default: Date.now },
     note: { type: String }
   },
@@ -198,8 +202,8 @@ const WorkSchema = new Schema<IWork>(
     title: { type: String, required: true, trim: true },
     searchText: { type: String, select: false },
     description: { type: String, trim: true, maxlength: 2000 },
-    status: { type: String, required: true, index: true },
-    announceType: { type: String, required: true },
+    status: { type: String, enum: WORK_STATUSES, required: true, index: true },
+    announceType: { type: String, enum: ALL_ANNOUNCE_TYPES, required: true },
     pubDate: { type: Date },
 
     torFiles: { type: [TorFileSchema], default: [] },

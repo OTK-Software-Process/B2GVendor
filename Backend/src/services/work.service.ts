@@ -292,6 +292,8 @@ export async function getWorkById(id: string): Promise<IWork> {
     .select('-excludedTags')
     .populate(POPULATE_SITE)
     .populate(POPULATE_TAGS);
-  if (!work) throw AppError.notFound('Work not found.');
+  // Use Case 6.2.3, alternative flow "Work Not Found" -- the same answer whether the
+  // id is unknown or the work is hidden from the public site.
+  if (!work) throw AppError.notFound('This work is no longer available.');
   return work;
 }

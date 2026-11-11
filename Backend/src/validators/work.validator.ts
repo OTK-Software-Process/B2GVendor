@@ -83,3 +83,19 @@ export const listWorksQuerySchema = listWorksQueryShape
     message: 'publishedFrom cannot be after publishedTo',
     path: ['publishedFrom']
   });
+
+// /works/:id and /works/:id/tor/:index. A work id is a MongoDB ObjectId; anything
+// else is a malformed request (400), as opposed to an id that is well formed but
+// belongs to no (visible) work (404).
+export const workParamsSchema = z
+  .object({
+    id: z.string().regex(OBJECT_ID, 'id must be a work id')
+  })
+  .strict();
+
+export const torFileParamsSchema = z
+  .object({
+    id: z.string().regex(OBJECT_ID, 'id must be a work id'),
+    index: z.string().regex(/^\d{1,4}$/, 'index must be the position of a TOR file in the work')
+  })
+  .strict();
