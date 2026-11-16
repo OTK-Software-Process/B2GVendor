@@ -93,6 +93,22 @@ export async function updateNotificationSettings(
   }
 }
 
+export async function unsubscribeFromEmails(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  try {
+    await services.unsubscribeFromEmails(req.body.token);
+    res.status(200).send({
+      success: true,
+      data: { emailNotificationsEnabled: false },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function changePassword(
   req: Request,
   res: Response,

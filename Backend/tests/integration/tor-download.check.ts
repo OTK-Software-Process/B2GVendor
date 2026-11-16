@@ -163,11 +163,15 @@ async function main(): Promise<void> {
   // ===================================================================== B. 404s
   section('B. out-of-range index and old non-PDF files -> 404');
   {
-    for (const bad of ['7', '99', '-1', '1.5', '1e0', '0x0', 'abc', '%200', '00000000000001']) {
-      const r = await get(`/works/${id}/tor/${bad}`);
-      if (r.status !== 404 || r.headers.get('content-type')?.includes('pdf')) record(false, `index "${bad}" should be 404`, `${r.status} ${r.headers.get('content-type')}`);
-    }
-    record(true, 'an index past the end (7, 99) or not a plain position (-1, 1.5, 1e0, 0x0, abc, " 0", too long) -> 404, no file');
+    // Out of range: a real position with no file there -> 404.
+    const outOfRange = await Promise.all(['7', '99'].map(i => get(`/works/${id}/tor/${i}`)));
+    record(outOfRange.every(r => r.status === 404 && !r.headers.get('content-type')?.includes('pdf')), 'an index past the end (7, 99) -> 404, no file', outOfRange.map(r => r.status).join(','));
+    // Not a position at all: refused by the request validator (400), as every
+    // malformed id is in the SRS -- and never a file either.
+    const malformed = ['-1', '1.5', '1e0', '0x0', 'abc', '%200', '00000000000001'];
+    const malformedAnswers = await Promise.all(malformed.map(i => get(`/works/${id}/tor/${i}`)));
+    const wrong = malformed.filter((_, n) => malformedAnswers[n].status !== 400 || malformedAnswers[n].headers.get('content-type')?.includes('pdf'));
+    record(wrong.length === 0, 'an index that is not a plain position (-1, 1.5, 1e0, 0x0, abc, " 0", too long) -> 400, no file', wrong.map(i => `${i}:${malformedAnswers[malformed.indexOf(i)].status}`).join(' '));
     const legacy = await get(`/works/${id}/tor/3`);
     record(legacy.status === 404 && !legacy.body.toString('utf8').includes('<script>'), 'an old stored file that is not a PDF -> 404, and its bytes never go out', `${legacy.status}`);
     const lost = await get(`/works/${id}/tor/4`);
@@ -177,7 +181,7 @@ async function main(): Promise<void> {
     const other = await get(`/works/${id}/tor/6`);
     record(other.status === 404, 'a link that is never downloaded ("other") -> 404');
     record((await get(`/works/${new mongoose.Types.ObjectId()}/tor/0`)).status === 404, 'an unknown work -> 404');
-    record((await get('/works/not-an-id/tor/0')).status === 404, 'a malformed work id -> 404');
+    record((await get('/works/not-an-id/tor/0')).status === 400, 'a malformed work id -> 400');
     const hidden = await Work.create({ ...workBase, projectId: '68050000002', title: 'hidden', ingestionRelevance: 'not-related', torFiles: [{ announceType: 'D0', linkType: 'pdf', sourceUrl: pdfLink('h'), storageKey: thai.storageKey, filename: 'h.pdf' }] });
     record((await get(`/works/${hidden._id}/tor/0`)).status === 404, 'a work hidden from the public site -> its files are 404 too');
   }

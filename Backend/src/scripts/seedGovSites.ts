@@ -12,7 +12,7 @@ import { GovSite, AnnounceType } from '../models/govSite.model';
  *    testAPI/explore-egp-rss.ts's header comment.
  *
  * 2. Real customer-requested agencies (2026-09-16) -- there is NO published
- *    master list mapping an agency to its e-GP deptId (ProjectDescription.md
+ *    master list mapping an agency to its e-GP deptId (docs/ProjectDescription.md
  *    N1 "Open risk"; data.go.th's own datasets carry no equivalent field
  *    either, see dataGoTh.client.ts). A first batch of 13-digit Tax IDs
  *    supplied for these agencies turned out to be from the wrong identifier

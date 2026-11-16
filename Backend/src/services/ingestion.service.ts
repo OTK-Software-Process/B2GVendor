@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 import { GovSite, IGovSite, AnnounceType } from '../models/govSite.model';
 import { Work, IWork, ITorFile, BudgetMissingReason, STATUS_BY_ANNOUNCE_TYPE } from '../models/work.model';
+import { applyAnnouncement } from '../utils/statusHistory';
 import { Tag } from '../models/tag.model';
 import { IngestionRun, IIngestionRun, IIngestionRunItemResult } from '../models/ingestionRun.model';
 import { fetchEgpRssFeed, downloadTorFile, fetchHtmlDocument, EgpRssItem } from '../integrations/egpRss.client';
@@ -23,7 +24,7 @@ import { notifyNewWorkMatches } from './notification.service';
 export type TriggeredBy = 'scheduler' | Types.ObjectId;
 
 /**
- * The core ingestion pipeline (ProjectDescription.md N1). Two independent
+ * The core ingestion pipeline (docs/ProjectDescription.md N1). Two independent
  * entry points -- runRssPoll (primary/live) and runDataGoThEnrichment
  * (secondary/batch) -- called by the ingestion-worker process, never by the
  * API container directly (see pollJob.service.ts for how "Poll Now"
@@ -785,10 +786,21 @@ async function upsertWorkFromRssItem(
   // derived status -- e.g. D1 (cancellation) and W1 (winner cancellation)
   // both map to CANCELLED, but a W1 arriving after a D1 is still a real,
   // separate event a vendor should see in the work's history.
-  if (existing.status !== status || existing.announceType !== announceType) {
-    existing.statusHistory.push({ status, announceType, changedAt: item.pubDate ?? new Date() });
-    existing.status = status;
-    existing.announceType = announceType;
+  //
+  // The work's status is that of its LATEST announcement by publish date, not
+  // of the item read last: a feed keeps listing old announcements, so an older
+  // one is seen again on every poll and must neither pull the status back nor
+  // be recorded twice (see utils/statusHistory.ts).
+  const applied = applyAnnouncement(
+    existing.statusHistory.map(e => ({ status: e.status, announceType: e.announceType, changedAt: e.changedAt, ...(e.note ? { note: e.note } : {}) })),
+    announceType,
+    item.pubDate,
+    new Date()
+  );
+  if (applied.recorded) existing.set('statusHistory', applied.history);
+  if (applied.recorded || existing.status !== applied.status || existing.announceType !== applied.announceType) {
+    existing.status = applied.status;
+    existing.announceType = applied.announceType;
     changed = true;
   }
 

@@ -7,7 +7,7 @@ import { toHttpsLink } from '../utils/httpsLinks';
 
 /**
  * Client for the live e-GP RSS feed -- the PRIMARY source of new/updated
- * TOR announcements (see ProjectDescription.md N1). Ported from
+ * TOR announcements (see docs/ProjectDescription.md N1). Ported from
  * testAPI/explore-egp-rss.ts, with two hardening changes for production use:
  *   1. A real XML parser (fast-xml-parser) instead of the exploration
  *      script's regex-based item extractor.

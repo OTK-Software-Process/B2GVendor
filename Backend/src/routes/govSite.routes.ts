@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as govSiteController from '../controllers/govSite.controller';
 import { validate } from '../middlewares/validate.middleware';
-import { createGovSiteSchema, updateGovSiteSchema, pollSiteSchema, verifyDeptIdSchema, suggestDeptIdQuerySchema } from '../validators/govSite.validator';
+import { createGovSiteSchema, updateGovSiteSchema, pollSiteSchema, verifyDeptIdSchema, suggestDeptIdQuerySchema, govSiteParamsSchema } from '../validators/govSite.validator';
 import { requireSuperAdmin } from '../middlewares/requireRole';
 import { requirePollAccess } from '../middlewares/requirePermission';
 import { asyncHandler } from '../utils/asyncHandler';
@@ -11,7 +11,7 @@ import { asyncHandler } from '../utils/asyncHandler';
 // and polling actions stay admin-gated below.
 export const govSiteRouter = Router();
 govSiteRouter.get('/', asyncHandler(govSiteController.list));
-govSiteRouter.get('/:id', asyncHandler(govSiteController.getById));
+govSiteRouter.get('/:id', validate(govSiteParamsSchema, 'params'), asyncHandler(govSiteController.getById));
 
 // Mounted under /admin (requireAuth + requireAdmin applied there) --
 // FR-N1.9: every Admin can view the site list; triggering a poll needs the Poll
@@ -20,7 +20,7 @@ govSiteRouter.get('/:id', asyncHandler(govSiteController.getById));
 export const adminGovSiteRouter = Router();
 adminGovSiteRouter.get('/', asyncHandler(govSiteController.listAdmin));
 adminGovSiteRouter.post('/', requireSuperAdmin, validate(createGovSiteSchema), asyncHandler(govSiteController.create));
-adminGovSiteRouter.patch('/:id', requireSuperAdmin, validate(updateGovSiteSchema), asyncHandler(govSiteController.update));
+adminGovSiteRouter.patch('/:id', requireSuperAdmin, validate(govSiteParamsSchema, 'params'), validate(updateGovSiteSchema), asyncHandler(govSiteController.update));
 
 // Autocomplete for the deptId field of the Add Site form -- Super Admin only,
 // like the form it serves.
@@ -31,4 +31,4 @@ adminGovSiteRouter.get('/dept-id-suggestions', requireSuperAdmin, validate(sugge
 adminGovSiteRouter.post('/verify-dept-id', requireSuperAdmin, validate(verifyDeptIdSchema), asyncHandler(govSiteController.verifyDeptId));
 
 adminGovSiteRouter.post('/poll-all', requirePollAccess, asyncHandler(govSiteController.pollAll));
-adminGovSiteRouter.post('/:id/poll', requirePollAccess, validate(pollSiteSchema), asyncHandler(govSiteController.pollOne));
+adminGovSiteRouter.post('/:id/poll', requirePollAccess, validate(govSiteParamsSchema, 'params'), validate(pollSiteSchema), asyncHandler(govSiteController.pollOne));

@@ -22,6 +22,20 @@ function mongooseValidationFields(err: mongoose.Error.ValidationError): FieldErr
   return fields;
 }
 
+// Errors thrown by express.json() / body-parser for a body the CLIENT got wrong
+// (broken JSON, a bare string, too big, an unsupported charset). They carry an
+// `entity.*`-style `type` and a 4xx `status`; anything else is a real server fault.
+interface BodyParserError {
+  type: string;
+  status: number;
+}
+
+function isBodyParserError(err: unknown): err is BodyParserError {
+  if (typeof err !== 'object' || err === null) return false;
+  const { type, status } = err as { type?: unknown; status?: unknown };
+  return typeof type === 'string' && /^(entity\.|encoding\.|charset\.|request\.)/.test(type) && typeof status === 'number' && status >= 400 && status < 500;
+}
+
 export function notFoundHandler(_req: Request, _res: Response, next: NextFunction): void {
   next(AppError.notFound());
 }
@@ -34,6 +48,12 @@ export function errorHandler(
 ): Response {
   if (err instanceof AppError) {
     return fail(res, err.status, err.code, err.message, err.fields, err.details);
+  }
+
+  if (isBodyParserError(err)) {
+    // Never echo the parser's own message: it quotes the offending input.
+    const problem = err.type === 'entity.too.large' ? AppError.payloadTooLarge() : AppError.badRequest('The request body is not valid JSON.');
+    return fail(res, problem.status, problem.code, problem.message);
   }
 
   if (err instanceof mongoose.Error.ValidationError) {

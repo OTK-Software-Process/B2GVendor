@@ -4,9 +4,12 @@ import { AppError } from '../utils/AppError';
 
 export async function issueToken(
   accountId: Types.ObjectId | string,
-  purpose: TokenPurpose
+  purpose: TokenPurpose,
+  options: { replaceExisting?: boolean } = {}
 ): Promise<string> {
-  await Token.deleteMany({ accountId, purpose, usedAt: { $exists: false } });
+  if (options.replaceExisting !== false) {
+    await Token.deleteMany({ accountId, purpose, usedAt: { $exists: false } });
+  }
 
   const { raw, tokenHash, expiresAt } = issueOneTimeToken(purpose);
 

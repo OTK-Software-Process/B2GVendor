@@ -1,6 +1,6 @@
 # B2G Vendor
 
-A multi-agency Thai government procurement disclosure portal — polls TOR/procurement announcements from real government e-GP/data.go.th sources, AI-tags and summarizes them, tracks status over their lifecycle, and notifies users (in-app + email) about work matching tags they follow. See [ProjectDescription.md](ProjectDescription.md) for the full requirements spec.
+A multi-agency Thai government procurement disclosure portal — polls TOR/procurement announcements from real government e-GP/data.go.th sources, AI-tags and summarizes them, tracks status over their lifecycle, and notifies users (in-app + email) about work matching tags they follow. See [docs/ProjectDescription.md](docs/ProjectDescription.md) for the full requirements spec, [docs/Architecture.md](docs/Architecture.md) for how the system is put together, and [docs/API.md](docs/API.md) for the REST API reference.
 
 ## Repo layout
 
@@ -182,7 +182,8 @@ Optional settings go inside the braces:
 - **A failed log write never breaks the action** it describes (it is reported in the server log). Pass `strict: true` to `audit.log()` to get the error instead.
 - **Not captured:** `bulkWrite` and raw `Model.collection.*` calls bypass Mongoose hooks. Call `audit.log()` yourself there.
 - **Load order matters.** The audit plugin only covers models loaded after it, so `import './audit/install'` must stay the first import of `app.ts` and `worker.ts`. If a registered model is not covered, the server logs an `[audit]` error at startup.
-- **Tests:** `npm test -- audit` (in `Backend/`) runs `check:audit-core | check:audit-plugin | check:audit-registry | check:audit-api` against a throwaway database.
+- **Tests:** `npm test -- audit notifications tag-lifecycle` (in `Backend/`) runs `check:audit-core | check:audit-plugin | check:audit-registry | check:audit-api | check:notifications | check:tag-lifecycle` against a throwaway database.
+- **Unsubscribe browser regression:** from `B2GVendor/`, run `npx playwright install chromium` once, then `npm run test:e2e`. The anonymous unsubscribe test is marked expected-failing until the FR-3.7 backend integration is implemented.
 
 ## Seed scripts reference
 

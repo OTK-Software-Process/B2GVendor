@@ -6,7 +6,8 @@ import { Tag } from '../models/tag.model';
 import { GovSite } from '../models/govSite.model';
 import { Notification, INotification } from '../models/notification.model';
 import { AppError } from '../utils/AppError';
-import { sendNewWorkMatchEmail, sendDailyDigestEmail } from './email.service';
+import { isEmailConfigured, sendNewWorkMatchEmail, sendDailyDigestEmail } from './email.service';
+import { issueToken } from './token.service';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
 
@@ -129,7 +130,7 @@ export async function notifyNewWorkMatches(work: IWork, tagIds: Types.ObjectId[]
     const accountById = new Map(accounts.map(account => [account._id.toString(), account]));
     // Instant emails are collected and sent a few at a time after the in-app
     // notifications are stored (EMAIL_SEND_CONCURRENCY), not one after another.
-    const emails: { email: string; name: string; matchedTagNames: string[] }[] = [];
+    const emails: { accountId: Types.ObjectId; email: string; name: string; matchedTagNames: string[] }[] = [];
 
     for (const accountId of accountIds) {
       const account = accountById.get(accountId);
@@ -143,7 +144,7 @@ export async function notifyNewWorkMatches(work: IWork, tagIds: Types.ObjectId[]
       )];
       if (matchedTagNames.length === 0) continue;
 
-      await Notification.findOneAndUpdate(
+      const filed = await Notification.findOneAndUpdate(
         { accountId: account._id, workId: work._id },
         {
           $set: {
@@ -159,8 +160,14 @@ export async function notifyNewWorkMatches(work: IWork, tagIds: Types.ObjectId[]
           },
           $setOnInsert: { read: false }
         },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
+        { upsert: true, new: true, setDefaultsOnInsert: true, includeResultMetadata: true }
       );
+
+      // At most one notification per work per user (FR-3.6): when this user was
+      // already told about this work (an earlier tag matched, or the work was
+      // changed and picked up one more of their tags) the in-app entry above is
+      // refreshed, but they are not emailed about the same work a second time.
+      if (filed.lastErrorObject?.updatedExisting) continue;
 
       // In-app notification (above) always happens regardless of
       // preferences -- only the EMAIL is gated by account/notifications/
@@ -173,12 +180,14 @@ export async function notifyNewWorkMatches(work: IWork, tagIds: Types.ObjectId[]
       if (!account.emailNotificationsEnabled) continue;
       if (account.notificationFrequency === 'daily') continue;
 
-      emails.push({ email: account.email, name: account.name, matchedTagNames });
+      emails.push({ accountId: account._id, email: account.email, name: account.name, matchedTagNames });
     }
 
-    await forEachWithConcurrency(emails, env.EMAIL_SEND_CONCURRENCY, async ({ email, name, matchedTagNames }) => {
+    await forEachWithConcurrency(emails, env.EMAIL_SEND_CONCURRENCY, async ({ accountId, email, name, matchedTagNames }) => {
       try {
-        await sendNewWorkMatchEmail(email, name, work._id.toString(), matchedTagNames);
+        if (!isEmailConfigured()) throw new Error('SMTP is not configured; email could not be sent.');
+        const unsubscribeToken = await issueToken(accountId, 'email_unsubscribe', { replaceExisting: false });
+        await sendNewWorkMatchEmail(email, name, work._id.toString(), matchedTagNames, unsubscribeToken);
       } catch (err) {
         logger.warn('notification', `Failed to notify ${email} about work ${work.projectId}`, err);
       }
@@ -211,10 +220,13 @@ export async function sendDailyDigests(): Promise<number> {
       const pending = await Notification.find({ accountId: account._id, includedInDigest: false }).sort({ createdAt: 1 });
       if (pending.length === 0) continue;
 
+      if (!isEmailConfigured()) throw new Error('SMTP is not configured; email could not be sent.');
+      const unsubscribeToken = await issueToken(account._id, 'email_unsubscribe', { replaceExisting: false });
       await sendDailyDigestEmail(
         account.email,
         account.name,
-        pending.map(n => ({ workId: n.workId.toString(), workTitle: n.workTitle, agencyName: n.agencyName, matchedTags: n.matchedTags }))
+        pending.map(n => ({ workId: n.workId.toString(), workTitle: n.workTitle, agencyName: n.agencyName, matchedTags: n.matchedTags })),
+        unsubscribeToken,
       );
 
       await Notification.updateMany({ _id: { $in: pending.map(n => n._id) } }, { $set: { includedInDigest: true } });

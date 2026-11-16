@@ -372,7 +372,9 @@ async function main(): Promise<void> {
     status: 'BIDDING',
     announceType: 'D0',
     torFiles: [{ announceType: 'D0', linkType: 'pdf', sourceUrl: 'http://example.test/x.pdf', storageKey: 'k.pdf', filename: 'x.pdf', downloadedAt: new Date() }],
-    statusHistory: [{ status: 'BIDDING', announceType: 'D0', changedAt: new Date() }]
+    // published before the winner announcement the feed below carries (30 Sep 2025): a status follows the
+    // announcement's own date, so an invitation dated later than the award would stay the latest event
+    statusHistory: [{ status: 'BIDDING', announceType: 'D0', changedAt: new Date('2025-09-01T03:00:00Z') }]
   });
   pages.set('80000004', { kind: 'winner', amount: '๑๐๐,๐๐๐.๐๐' });
   feed.W0 = [{ id: '80000004', title: 'legacy 80000004' }];

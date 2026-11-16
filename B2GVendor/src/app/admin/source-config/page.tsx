@@ -136,7 +136,7 @@ export default function SourceConfigPage() {
     try {
       setVerifyResult(await verifyDeptId(newDeptId.trim()));
     } catch (err) {
-      setVerifyError(err instanceof ApiError ? err.message : lang === 'en' ? 'Could not reach the e-GP feed. Try again.' : 'เชื่อมต่อฟีด e-GP ไม่สำเร็จ กรุณาลองใหม่');
+      setVerifyError(err instanceof ApiError ? err.fields?.deptId ?? err.message : lang === 'en' ? 'Could not reach the e-GP feed. Try again.' : 'เชื่อมต่อฟีด e-GP ไม่สำเร็จ กรุณาลองใหม่');
     } finally {
       setVerifying(false);
     }
@@ -189,6 +189,17 @@ export default function SourceConfigPage() {
         text: err instanceof ApiError ? err.message : lang === 'en' ? 'Could not update the site. Please try again.' : 'อัปเดตหน่วยงานไม่สำเร็จ กรุณาลองใหม่'
       });
     }
+  };
+
+  // Editing a field takes back the error the server gave for it (and the banner above the form).
+  const clearFieldError = (field: string) => {
+    setAddError(null);
+    setAddFieldErrors(prev => {
+      if (!(field in prev)) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
   };
 
   const inputClass = (field: string) =>
@@ -374,7 +385,7 @@ export default function SourceConfigPage() {
                   type="text"
                   autoFocus
                   value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
+                  onChange={(e) => { setNewName(e.target.value); clearFieldError('name'); }}
                   placeholder="เช่น การทางพิเศษแห่งประเทศไทย"
                   className={inputClass('name')}
                 />
@@ -385,10 +396,11 @@ export default function SourceConfigPage() {
                 <input
                   type="text"
                   value={newNameEn}
-                  onChange={(e) => setNewNameEn(e.target.value)}
+                  onChange={(e) => { setNewNameEn(e.target.value); clearFieldError('nameEn'); }}
                   placeholder="e.g. Expressway Authority of Thailand"
                   className={inputClass('nameEn')}
                 />
+                {addFieldErrors.nameEn && <p className="text-[11px] text-rose-600 mt-1">{addFieldErrors.nameEn}</p>}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -396,7 +408,7 @@ export default function SourceConfigPage() {
                   <input
                     type="text"
                     value={newShortCode}
-                    onChange={(e) => setNewShortCode(e.target.value)}
+                    onChange={(e) => { setNewShortCode(e.target.value); clearFieldError('shortCode'); }}
                     placeholder="EXAT"
                     className={inputClass('shortCode')}
                   />
@@ -409,7 +421,7 @@ export default function SourceConfigPage() {
                     min={1}
                     max={600}
                     value={newRpm}
-                    onChange={(e) => setNewRpm(parseInt(e.target.value, 10) || 0)}
+                    onChange={(e) => { setNewRpm(parseInt(e.target.value, 10) || 0); clearFieldError('requestsPerMinute'); }}
                     className={inputClass('requestsPerMinute')}
                   />
                   {addFieldErrors.requestsPerMinute && <p className="text-[11px] text-rose-600 mt-1">{addFieldErrors.requestsPerMinute}</p>}
@@ -423,6 +435,7 @@ export default function SourceConfigPage() {
                     value={newDeptId}
                     onChange={(e) => {
                       setNewDeptId(e.target.value);
+                      clearFieldError('deptId');
                       setVerifyResult(null);
                       setVerifyError(null);
                       setSuggestOpen(true);

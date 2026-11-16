@@ -12,6 +12,7 @@ export type ErrorCode =
   | 'UNSUPPORTED_MEDIA_TYPE'
   | 'TOKEN_INVALID'
   | 'BAD_REQUEST'
+  | 'PAYLOAD_TOO_LARGE'
   | 'SERVICE_UNAVAILABLE'
   | 'RATE_LIMITED'
   | 'NOT_FOUND'
@@ -113,6 +114,10 @@ export class AppError extends Error {
 
   static badRequest(message = 'Bad request.'): AppError {
     return new AppError(400, 'BAD_REQUEST', message);
+  }
+
+  static payloadTooLarge(message = 'The request is too large.'): AppError {
+    return new AppError(413, 'PAYLOAD_TOO_LARGE', message);
   }
 
   static serviceUnavailable(message = 'Service temporarily unavailable.'): AppError {
