@@ -55,7 +55,7 @@ async function send(mail: Mail): Promise<void> {
   logger.info('email', `sent "${mail.subject}" to ${mail.to}`);
 }
 
-function layout(heading: string, body: string, buttonLabel: string, url: string): string {
+function layout(heading: string, body: string, buttonLabel: string, url: string, footerHtml = ''): string {
   return `<!doctype html>
 <html lang="th">
   <body style="margin:0;padding:24px;background:#f1f5f9;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;color:#0f172a;">
@@ -64,6 +64,7 @@ function layout(heading: string, body: string, buttonLabel: string, url: string)
       <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#334155;">${escapeHtml(body)}</p>
       <a href="${escapeHtml(url)}" style="display:inline-block;background:#0284c7;color:#ffffff;text-decoration:none;padding:12px 20px;border-radius:8px;font-size:14px;font-weight:600;">${escapeHtml(buttonLabel)}</a>
       <p style="margin:24px 0 0;font-size:12px;line-height:1.6;color:#64748b;word-break:break-all;">${escapeHtml(url)}</p>
+      ${footerHtml}
     </div>
   </body>
 </html>`;
@@ -134,18 +135,22 @@ export async function sendNewWorkMatchEmail(
   name: string,
   work: string,
   matchedTagNames: string[],
+  unsubscribeToken: string,
 ): Promise<void> {
   const url = `${env.APP_URL}/works/${encodeURIComponent(work)}`;
+  const unsubscribeUrl = `${env.APP_URL}/unsubscribe/${encodeURIComponent(unsubscribeToken)}`;
+  const unsubscribeFooter = `<p style="margin:24px 0 0;font-size:12px;color:#64748b;">To stop these emails, <a href="${escapeHtml(unsubscribeUrl)}" style="color:#0284c7;">unsubscribe here</a>.</p>`;
 
   await send({
     to,
     subject: "งานใหม่ตรงกับแท็กที่คุณติดตาม | New work matches your followed tags",
-    text: `สวัสดีคุณ ${name}\n\nมีงานใหม่ที่ตรงกับแท็กที่คุณติดตาม: ${matchedTagNames.join(', ')}\n\nดูรายละเอียดงานได้ที่: ${url}`,
+    text: `สวัสดีคุณ ${name}\n\nมีงานใหม่ที่ตรงกับแท็กที่คุณติดตาม: ${matchedTagNames.join(', ')}\n\nดูรายละเอียดงานได้ที่: ${url}\n\nTo stop these emails: ${unsubscribeUrl}`,
     html: layout(
       'งานใหม่ตรงกับแท็กที่คุณติดตาม',
       `สวัสดีคุณ ${name} — มีงานใหม่ที่ตรงกับแท็กที่คุณติดตาม: ${matchedTagNames.join(', ')}`,
       'ดูรายละเอียดงาน',
-      url
+      url,
+      unsubscribeFooter,
     )
   });
 }
@@ -162,7 +167,8 @@ export interface DailyDigestItem {
 // match. Unlike sendNewWorkMatchEmail, this has multiple links (one per
 // work), so it builds its own HTML rather than reusing layout()'s
 // single-button shape.
-export async function sendDailyDigestEmail(to: string, name: string, items: DailyDigestItem[]): Promise<void> {
+export async function sendDailyDigestEmail(to: string, name: string, items: DailyDigestItem[], unsubscribeToken: string): Promise<void> {
+  const unsubscribeUrl = `${env.APP_URL}/unsubscribe/${encodeURIComponent(unsubscribeToken)}`;
   const rows = items
     .map(item => {
       const url = `${env.APP_URL}/works/${encodeURIComponent(item.workId)}`;
@@ -178,7 +184,7 @@ export async function sendDailyDigestEmail(to: string, name: string, items: Dail
   await send({
     to,
     subject: `สรุปงานใหม่ประจำวัน (${items.length} รายการ) | Your daily digest (${items.length} new)`,
-    text: `สวัสดีคุณ ${name}\n\nมีงานใหม่ที่ตรงกับแท็กที่คุณติดตาม ${items.length} รายการในวันนี้:\n\n${textLines}`,
+    text: `สวัสดีคุณ ${name}\n\nมีงานใหม่ที่ตรงกับแท็กที่คุณติดตาม ${items.length} รายการในวันนี้:\n\n${textLines}\n\nTo stop these emails: ${unsubscribeUrl}`,
     html: `<!doctype html>
 <html lang="th">
   <body style="margin:0;padding:24px;background:#f1f5f9;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;color:#0f172a;">
@@ -186,6 +192,7 @@ export async function sendDailyDigestEmail(to: string, name: string, items: Dail
       <h1 style="margin:0 0 16px;font-size:20px;">สรุปงานใหม่ประจำวัน</h1>
       <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#334155;">สวัสดีคุณ ${escapeHtml(name)} — มีงานใหม่ที่ตรงกับแท็กที่คุณติดตาม ${items.length} รายการในวันนี้:</p>
       <ul style="margin:0;padding:0;list-style:none;">${rows}</ul>
+      <p style="margin:24px 0 0;font-size:12px;color:#64748b;">To stop these emails, <a href="${escapeHtml(unsubscribeUrl)}" style="color:#0284c7;">unsubscribe here</a>.</p>
     </div>
   </body>
 </html>`

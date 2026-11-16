@@ -2,13 +2,38 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
+import { useParams } from 'next/navigation';
 import { PublicShell } from '@/components/PublicShell';
 import { useApp } from '@/context/AppContext';
-import { MailX, CheckCircle2, ShieldCheck } from 'lucide-react';
+import { api, ApiError } from '@/lib/api';
+import { MailX, CheckCircle2, Loader2 } from 'lucide-react';
 
 export default function UnsubscribePage() {
   const { lang } = useApp();
+  const { token } = useParams<{ token: string }>();
   const [unsubscribed, setUnsubscribed] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleUnsubscribe = async () => {
+    setError(null);
+    setSubmitting(true);
+
+    try {
+      await api.postPublic('/account/unsubscribe', { token: decodeURIComponent(token) });
+      setUnsubscribed(true);
+    } catch (requestError) {
+      setError(
+        requestError instanceof ApiError
+          ? requestError.message
+          : lang === 'en'
+            ? 'Could not unsubscribe. Please try again.'
+            : 'ไม่สามารถยกเลิกการรับอีเมลได้ กรุณาลองอีกครั้ง'
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <PublicShell>
@@ -26,11 +51,25 @@ export default function UnsubscribePage() {
                 {lang === 'en' ? 'One-click email opt-out. No login required.' : 'ยกเลิกการส่งข่าวสารอีเมลสำหรับบัญชีของคุณ ไม่จำเป็นต้องเข้าสู่ระบบ'}
               </p>
 
+              {error && (
+                <p role="alert" className="text-sm text-rose-700">
+                  {error}
+                </p>
+              )}
+
               <button
-                onClick={() => setUnsubscribed(true)}
-                className="w-full py-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-sm transition-colors shadow-xs"
+                onClick={handleUnsubscribe}
+                disabled={submitting}
+                className="w-full py-3 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white font-bold text-sm transition-colors shadow-xs"
               >
-                {lang === 'en' ? 'Confirm Unsubscribe' : 'ยืนยันการยกเลิกการรับข่าวสาร'}
+                {submitting ? (
+                  <span className="inline-flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    {lang === 'en' ? 'Unsubscribing...' : 'กำลังยกเลิก...'}
+                  </span>
+                ) : (
+                  lang === 'en' ? 'Confirm Unsubscribe' : 'ยืนยันการยกเลิกการรับข่าวสาร'
+                )}
               </button>
             </div>
           ) : (

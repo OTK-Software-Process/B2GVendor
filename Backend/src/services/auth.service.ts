@@ -81,7 +81,11 @@ export async function registerAccount(
   try {
     const rawToken = await issueToken(account._id, 'email_verification');
     tokenIssued = true;
-    await sendEmailVerificationEmail(account.email, account.name, rawToken);
+    try {
+      await sendEmailVerificationEmail(account.email, account.name, rawToken);
+    } catch {
+      throw AppError.serviceUnavailable('Email verification could not be sent. Please try again later.');
+    }
   } catch (error) {
     if (tokenIssued) {
       await invalidateTokens(account._id, 'email_verification');

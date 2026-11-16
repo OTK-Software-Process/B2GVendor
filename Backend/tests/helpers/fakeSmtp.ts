@@ -11,6 +11,8 @@ export interface FakeSmtp {
   acceptedAt: number[];
   // Most messages being delivered at the same time (fully sent, not yet accepted).
   maxInFlightMessages: number;
+  // Answer the next message with "550 rejected" instead of accepting it.
+  rejectNextMessage(): void;
   close(): Promise<void>;
 }
 
@@ -27,6 +29,7 @@ export async function startFakeSmtp(options: FakeSmtpOptions = {}): Promise<Fake
   const acceptedAt: number[] = [];
   let inFlight = 0;
   const stats = { maxInFlightMessages: 0 };
+  let rejectNextMessage = false;
   const server = net.createServer(socket => {
     let buffer = '';
     let data: string[] | null = null;
@@ -40,6 +43,12 @@ export async function startFakeSmtp(options: FakeSmtpOptions = {}): Promise<Fake
         buffer = buffer.slice(end + 2);
         if (data) {
           if (line === '.') {
+            if (rejectNextMessage) {
+              rejectNextMessage = false;
+              reply('550 message rejected by test server');
+              data = null;
+              continue;
+            }
             const message = data.join('\n');
             data = null;
             inFlight += 1;
@@ -81,6 +90,9 @@ export async function startFakeSmtp(options: FakeSmtpOptions = {}): Promise<Fake
     acceptedAt,
     get maxInFlightMessages() {
       return stats.maxInFlightMessages;
+    },
+    rejectNextMessage: () => {
+      rejectNextMessage = true;
     },
     close: () =>
       new Promise<void>(resolve => {
