@@ -182,7 +182,7 @@ Optional settings go inside the braces:
 - **A failed log write never breaks the action** it describes (it is reported in the server log). Pass `strict: true` to `audit.log()` to get the error instead.
 - **Not captured:** `bulkWrite` and raw `Model.collection.*` calls bypass Mongoose hooks. Call `audit.log()` yourself there.
 - **Load order matters.** The audit plugin only covers models loaded after it, so `import './audit/install'` must stay the first import of `app.ts` and `worker.ts`. If a registered model is not covered, the server logs an `[audit]` error at startup.
-- **Tests:** `npm run check:audit-core | check:audit-plugin | check:audit-registry | check:audit-api` (in `Backend/`) run against throwaway databases.
+- **Tests:** `npm test -- audit` (in `Backend/`) runs `check:audit-core | check:audit-plugin | check:audit-registry | check:audit-api` against a throwaway database.
 
 ## Seed scripts reference
 
@@ -233,6 +233,21 @@ cd B2GVendor
 npm run lint
 npm run build
 ```
+
+## Tests and CI
+
+```bash
+cd Backend
+npm test                       # every check:* script, one command; non-zero exit on any failure
+npm test -- ingestion tor      # only checks whose name contains "ingestion" or "tor"
+npm test -- --list             # what would run
+```
+
+`npm test` (`Backend/tests/run-all.ts`) starts a **throwaway MongoDB** — a `mongo:7` container on a random port with its data in RAM, removed afterwards (or the server in `TEST_MONGODB_URI`) — gives each check its own database, and runs every check hermetically: `Backend/.env` is not read, `SMTP_HOST` is empty (no real email can go out; mail tests use an in-memory SMTP server), AI is off, and the e-GP / data.go.th URLs point at a closed port, so nothing reaches a live government site. Needs Docker running, or `TEST_MONGODB_URI`.
+
+CI (`.github/workflows/ci.yml`) runs on every pull request and every push to `main`: backend typecheck + `npm test` against a Mongo service container, and frontend lint, `tsc` and `next build`. Make the **`CI passed`** check required in the branch protection rule for `main` (GitHub → Settings → Branches) so a failing PR can't be merged.
+
+Performance and load tests (k6 + Lighthouse, on a seeded 20,000-work data set): see [Backend/perf/README.md](Backend/perf/README.md) — `npm run perf`, `npm run perf:lighthouse`.
 
 ### testAPI
 

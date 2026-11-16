@@ -22,6 +22,9 @@ build/
 # tor-storage volume)
 Backend/storage/
 
+# Performance-test state: seeded ids, throwaway session cookies, k6/Lighthouse results
+Backend/perf/.state/
+
 # Logs
 npm-debug.log*
 yarn-debug.log*

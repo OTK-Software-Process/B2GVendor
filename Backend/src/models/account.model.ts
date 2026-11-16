@@ -1,5 +1,5 @@
 import mongoose, { Schema, Document, Model } from "mongoose";
-import bcrypt from "bcryptjs";
+import { hashPassword, verifyPassword } from "../utils/passwordHasher";
 import { env } from "../config/env";
 
 export type AccountType = "individual" | "business";
@@ -228,7 +228,8 @@ AccountSchema.pre("validate", function (next) {
 
 AccountSchema.pre("save", async function (next) {
   if (!this.isModified("passwordHash")) return next();
-  this.passwordHash = await bcrypt.hash(this.passwordHash, env.BCRYPT_ROUNDS);
+  // Off the main thread (utils/passwordHasher.ts): ~200 ms of CPU per hash.
+  this.passwordHash = await hashPassword(this.passwordHash, env.BCRYPT_ROUNDS);
   this.passwordChangedAt = new Date();
   next();
 });
@@ -236,7 +237,7 @@ AccountSchema.pre("save", async function (next) {
 AccountSchema.methods.comparePassword = function (
   plain: string,
 ): Promise<boolean> {
-  return bcrypt.compare(plain, this.passwordHash);
+  return verifyPassword(plain, this.passwordHash);
 };
 
 export const Account: Model<IAccount> =

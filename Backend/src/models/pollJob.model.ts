@@ -24,6 +24,11 @@ export interface IPollJob extends Document {
   finishedAt?: Date;
   resultRunIds: Types.ObjectId[];
   error?: string;
+  // Set ('poll') only on a manual "Poll Now" job while it is queued/running, and
+  // removed when it ends. A unique index on it means two admins clicking at the
+  // same instant can't both get a job in: the second insert fails -> 409. (The
+  // "is anything already running?" read alone has a gap between read and insert.)
+  manualLock?: string;
 
   createdAt: Date;
   updatedAt: Date;
@@ -41,7 +46,8 @@ const PollJobSchema = new Schema<IPollJob>(
     heartbeatAt: { type: Date },
     finishedAt: { type: Date },
     resultRunIds: { type: [{ type: Schema.Types.ObjectId, ref: 'IngestionRun' }], default: [] },
-    error: { type: String }
+    error: { type: String },
+    manualLock: { type: String }
   },
   { timestamps: true }
 );
@@ -54,6 +60,8 @@ PollJobSchema.pre('validate', function (next) {
 });
 
 PollJobSchema.index({ status: 1, createdAt: 1 });
+// At most ONE job may hold the manual lock (sparse: jobs without it aren't indexed).
+PollJobSchema.index({ manualLock: 1 }, { unique: true, sparse: true });
 
 export const PollJob: Model<IPollJob> =
   mongoose.models.PollJob || mongoose.model<IPollJob>('PollJob', PollJobSchema);

@@ -19,7 +19,8 @@ export function Footer() {
           {/* Col 1: About & Disclosure */}
           <div className="space-y-3 md:col-span-1">
             <div className="flex items-center gap-2">
-              <Image src="/Logo.png" alt="B2G Vendor" width={32} height={32} className="w-8 h-8 object-contain shrink-0" />
+              {/* Same intrinsic size as the navbar logo, so both use ONE image request; CSS draws it at 32 px. */}
+              <Image src="/Logo.png" alt="B2G Vendor" width={44} height={44} className="w-8 h-8 object-contain shrink-0" />
               <span className="font-extrabold text-base text-slate-900">B2G Vendor</span>
             </div>
             <p className="text-slate-500 leading-relaxed">

@@ -81,6 +81,10 @@ export interface TORFile {
   // feed gave) -- present for every file, including the ones we also host a
   // copy of. Only ever an http(s) URL. Undefined when the feed gave none.
   sourceUrl?: string;
+  // A PDF / zip the government site linked to that we could not download yet
+  // (the source link is dead right now). Shown as "temporarily unavailable"
+  // instead of a download button; the backend retries it on every poll.
+  unavailable?: boolean;
 }
 
 export interface StatusHistoryItem {

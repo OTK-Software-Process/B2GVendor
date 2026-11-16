@@ -15,7 +15,9 @@
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* The system monospace face (project numbers, IDs, emails): no font file to
+     download on a phone before the page becomes usable. */
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 }
 
 html {

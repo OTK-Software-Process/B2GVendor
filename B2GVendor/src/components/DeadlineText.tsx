@@ -31,8 +31,11 @@ export function DeadlineText({
   if (!view) return null;
 
   const caption = lang === 'en' ? 'Bid deadline' : 'กำหนดยื่นข้อเสนอ';
+  // "N days left" depends on the clock: rendered on the server, it can differ by
+  // a day from the browser's render right at midnight. Accept the server's
+  // text then, instead of React discarding the whole server-rendered page.
   const pill = view.leftText ? (
-    <span className={`inline-block px-1.5 py-0.5 rounded-md text-[10px] font-bold ${DEADLINE_TONE_CLASS[view.tone]}`}>{view.leftText}</span>
+    <span suppressHydrationWarning className={`inline-block px-1.5 py-0.5 rounded-md text-[10px] font-bold ${DEADLINE_TONE_CLASS[view.tone]}`}>{view.leftText}</span>
   ) : null;
 
   if (variant === 'block') {

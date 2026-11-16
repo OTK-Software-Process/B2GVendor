@@ -20,10 +20,16 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  // A GET goes out WITHOUT a Content-Type header: it has no body, and the header
+  // alone turns it into a "non-simple" cross-origin request that the browser
+  // must first ask permission for (a CORS preflight) -- one extra round trip
+  // before every page's data on a phone network. Requests that change data
+  // keep it: the API's CSRF check requires application/json for them.
+  const method = (options.method ?? 'GET').toUpperCase();
   const res = await fetch(`${BASE}${path}`, {
     ...options,
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...options.headers },
+    headers: method === 'GET' || method === 'HEAD' ? { ...options.headers } : { 'Content-Type': 'application/json', ...options.headers },
   });
 
   const body = await res.json().catch(() => null);

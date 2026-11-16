@@ -107,6 +107,20 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 const POLL_STATUS_ACTIVE_MS = 3000;
 const POLL_STATUS_IDLE_MS = 10000;
 
+// Runs `task` once the browser is idle after the page has painted (at most
+// `timeoutMs` later). For data no page needs for its first paint -- the tag
+// taxonomy and the site list feed search suggestions and filters; the public
+// pages' own content comes from the server -- so on a phone those requests don't
+// compete with the page's JavaScript. Returns a cancel function.
+function whenIdle(task: () => void, timeoutMs = 1500): () => void {
+  if (typeof window.requestIdleCallback === 'function') {
+    const handle = window.requestIdleCallback(task, { timeout: timeoutMs });
+    return () => window.cancelIdleCallback(handle);
+  }
+  const handle = window.setTimeout(task, 200);
+  return () => window.clearTimeout(handle);
+}
+
 // Admins get the enriched admin list (works count, last run, next run);
 // everyone else the public directory. No mock fallback: an unreachable API is
 // reported as an error rather than papered over with invented sites.
@@ -220,30 +234,38 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false;
 
-    loadGovSites(isAdminRole)
-      .then(items => {
-        if (!cancelled) setGovSitesState({ items, forAdmin: isAdminRole, status: 'ready' });
-      })
-      .catch(() => {
-        if (!cancelled) setGovSitesState(prev => ({ ...prev, status: 'error' }));
-      });
+    const load = () =>
+      loadGovSites(isAdminRole)
+        .then(items => {
+          if (!cancelled) setGovSitesState({ items, forAdmin: isAdminRole, status: 'ready' });
+        })
+        .catch(() => {
+          if (!cancelled) setGovSitesState(prev => ({ ...prev, status: 'error' }));
+        });
+    // An admin's screens are built on this list: load it at once. For everyone
+    // else it only feeds filters, so it waits until the page has painted.
+    const cancelIdle = isAdminRole ? (load(), () => undefined) : whenIdle(load);
 
     return () => {
       cancelled = true;
+      cancelIdle();
     };
   }, [isAdminRole]);
 
   useEffect(() => {
     let cancelled = false;
 
-    fetchTags()
-      .then(list => {
-        if (!cancelled) setTags(list.map(toTagItem));
-      })
-      .catch(() => {});
+    const cancelIdle = whenIdle(() => {
+      fetchTags()
+        .then(list => {
+          if (!cancelled) setTags(list.map(toTagItem));
+        })
+        .catch(() => {});
+    });
 
     return () => {
       cancelled = true;
+      cancelIdle();
     };
   }, []);
 

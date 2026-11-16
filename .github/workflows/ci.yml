@@ -1,0 +1,93 @@
+# CI for the B2G Vendor monorepo: runs on every pull request and on every push
+# to main.
+#
+#   backend   -- typecheck + the whole test suite (`npm test` runs every
+#                check:* script) against a throwaway MongoDB service container,
+#                with SMTP_HOST empty so no real email can go out
+#   frontend  -- eslint, tsc, next build
+#   ci-ok     -- one status that is green only when both jobs are: make THIS
+#                the required check in the branch protection rule for main
+#                (Settings -> Branches), so a failing PR can't be merged
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend (typecheck + tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: Backend
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ ping: 1 })'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      # tests/run-all.ts gives every check its own database on this server.
+      TEST_MONGODB_URI: mongodb://127.0.0.1:27017
+      SMTP_HOST: ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20 # same major as the production images (Backend/Dockerfile)
+          cache: npm
+          cache-dependency-path: Backend/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  frontend:
+    name: Frontend (lint + tsc + build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: B2GVendor
+    env:
+      NEXT_PUBLIC_API_URL: http://localhost:4000/api/v1
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20 # same major as the production image (B2GVendor/Dockerfile)
+          cache: npm
+          cache-dependency-path: B2GVendor/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      # next-env.d.ts is generated (and git-ignored): create it before tsc.
+      - run: npx next typegen
+      - run: npx tsc --noEmit
+      - run: npm run build
+
+  ci-ok:
+    name: CI passed
+    if: always()
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Both jobs succeeded
+        run: |
+          echo "backend: ${{ needs.backend.result }}, frontend: ${{ needs.frontend.result }}"
+          test "${{ needs.backend.result }}" = success
+          test "${{ needs.frontend.result }}" = success

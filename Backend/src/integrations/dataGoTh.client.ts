@@ -33,11 +33,13 @@ function authHeaders(): Record<string, string> {
   };
 }
 
-async function ckanAction<T>(action: string, params: Record<string, string> = {}): Promise<T> {
+async function ckanAction<T>(action: string, params: Record<string, string> = {}, signal?: AbortSignal): Promise<T> {
   const url = new URL(`${env.DATA_GO_TH_BASE_URL}/api/3/action/${action}`);
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
 
-  const res = await fetch(url, { headers: authHeaders() });
+  // Time-limited, like the e-GP feed: a portal that never answers must not hang the poll.
+  const timeout = AbortSignal.timeout(env.INGESTION_REQUEST_TIMEOUT_MS);
+  const res = await fetch(url, { headers: authHeaders(), signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
   const text = await res.text();
 
   let json: CkanEnvelope<T>;
@@ -84,7 +86,8 @@ export interface DatastoreSearchOptions {
 
 export async function datastoreSearch(
   resourceId: string,
-  options: DatastoreSearchOptions = {}
+  options: DatastoreSearchOptions = {},
+  signal?: AbortSignal
 ): Promise<CkanDatastoreResult> {
   const params: Record<string, string> = { resource_id: resourceId };
   if (options.filters) params.filters = JSON.stringify(options.filters);
@@ -92,7 +95,7 @@ export async function datastoreSearch(
   if (options.offset) params.offset = String(options.offset);
   if (options.fields?.length) params.fields = options.fields.join(',');
 
-  return ckanAction<CkanDatastoreResult>('datastore_search', params);
+  return ckanAction<CkanDatastoreResult>('datastore_search', params, signal);
 }
 
 // A package (CKAN's name for a dataset) is a set of resources. package_show

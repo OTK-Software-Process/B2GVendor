@@ -6,22 +6,29 @@ import { PublicShell } from '@/components/PublicShell';
 import { SearchBar } from '@/components/SearchBar';
 import { WorkCard } from '@/components/WorkCard';
 import { useApp } from '@/context/AppContext';
-import { fetchWorks, toWorkItem } from '@/lib/backend';
+import { BackendWork, fetchWorks, toWorkItem } from '@/lib/backend';
 import { WorkItem } from '@/lib/mock-data';
 import { useSearchHref } from '@/lib/useSearchHref';
-import { ArrowRight, ArrowUpRight } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 
-export function HomeClient() {
-  const { lang, ingestionRuns, govSites } = useApp();
+interface HomeClientProps {
+  // The latest works, fetched by the server page (null if that failed).
+  initialWorks: BackendWork[] | null;
+}
+
+export function HomeClient({ initialWorks }: HomeClientProps) {
+  const { lang, ingestionRuns } = useApp();
   const searchHref = useSearchHref();
   const latestRun = ingestionRuns[0];
 
-  const [recentWorks, setRecentWorks] = useState<WorkItem[]>([]);
+  const [recentWorks, setRecentWorks] = useState<WorkItem[]>(() => (initialWorks ?? []).map(toWorkItem));
 
   // Real recently-ingested works (GET /works, sorted newest-first, page 1)
   // -- this page shows a different, live slice from Mongo, not a fixed
-  // mock array.
+  // mock array. Normally already rendered by the server; fetched here only
+  // when the server couldn't.
   useEffect(() => {
+    if (initialWorks) return;
     let cancelled = false;
     fetchWorks({ sort: 'date', page: 1, pageSize: 4 })
       .then(res => {
@@ -31,7 +38,7 @@ export function HomeClient() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [initialWorks]);
 
   const featuredWork = recentWorks[0];
   const restOfWorks = recentWorks.slice(1);

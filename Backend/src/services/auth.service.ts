@@ -1,5 +1,5 @@
 import { randomBytes } from 'crypto';
-import bcrypt from 'bcryptjs';
+import { hashPassword, verifyPassword } from '../utils/passwordHasher';
 import { Request } from 'express';
 import { env } from '../config/env';
 import { Account, IAccount } from '../models/account.model';
@@ -30,7 +30,7 @@ function sessionContextFromRequest(req: Request): SessionContext {
 // match it.
 let dummyHash: Promise<string> | undefined;
 function getDummyHash(): Promise<string> {
-  dummyHash ??= bcrypt.hash(randomBytes(32).toString('hex'), env.BCRYPT_ROUNDS);
+  dummyHash ??= hashPassword(randomBytes(32).toString('hex'), env.BCRYPT_ROUNDS);
   return dummyHash;
 }
 // Built at start-up, so the first unknown-email sign-in is not the slow one.
@@ -109,7 +109,7 @@ export async function loginWithPassword(
   const account = await Account.findOne({ email: input.email }).select('+passwordHash');
 
   if (!account) {
-    await bcrypt.compare(input.password, await getDummyHash());
+    await verifyPassword(input.password, await getDummyHash());
     throw AppError.invalidCredentials();
   }
 

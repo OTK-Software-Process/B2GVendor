@@ -39,7 +39,11 @@ export function Navbar() {
   const isAdminRole = role === 'admin' || role === 'superadmin';
   const [errorNotice, setErrorNotice] = useState('');  
 
+  // The full profile, once someone is signed in. A visitor has none: asking
+  // would only cost every public page a 401 round trip on a phone.
+  const accountId = account?.id;
   useEffect(() => {
+      if (!accountId) return;
       api.get<AccountView>('/account/profile')
         .then((loadedProfile) => {
           setProfile(loadedProfile);
@@ -52,7 +56,7 @@ export function Navbar() {
         })
         .catch((error: Error) => setErrorNotice(error.message));
 
-    }, []);
+    }, [accountId]);
 
   return (
     <header className="sticky top-0 z-40 w-full bg-white/95 backdrop-blur-md border-b border-slate-200">

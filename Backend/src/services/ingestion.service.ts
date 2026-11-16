@@ -111,7 +111,18 @@ export function isTagExcluded(work: { excludedTags?: Types.ObjectId[] }, tagId: 
   return !!work.excludedTags?.some(t => t.equals(tagId));
 }
 
-export async function runRssPoll(site: IGovSite, triggeredBy: TriggeredBy): Promise<IIngestionRun> {
+export interface PollRunOptions {
+  // Aborted when the poll job this run belongs to has gone on too long (see
+  // pollJob.service.ts executePollJob). The run then stops where it is, keeps
+  // what it already stored, and is recorded as failed.
+  signal?: AbortSignal;
+}
+
+// What a run that was stopped by the poll time limit says in its log.
+export const RUN_TIMED_OUT_MESSAGE = 'Timed out: the poll ran longer than its time limit and was stopped before this run finished.';
+
+export async function runRssPoll(site: IGovSite, triggeredBy: TriggeredBy, options: PollRunOptions = {}): Promise<IIngestionRun> {
+  const { signal } = options;
   // FR-N1.10: a manual and scheduled poll for the same site+source must not
   // run destructively at the same time.
   if (await isAlreadyRunning(site._id, 'rss')) {
@@ -143,14 +154,16 @@ export async function runRssPoll(site: IGovSite, triggeredBy: TriggeredBy): Prom
   const minDelayMs = Math.ceil(60000 / site.requestsPerMinute);
   let isFirstRequest = true;
 
-  for (const announceType of site.announceTypes as AnnounceType[]) {
-    if (!isFirstRequest) await sleep(minDelayMs);
+  feeds: for (const announceType of site.announceTypes as AnnounceType[]) {
+    if (signal?.aborted) break;
+    if (!isFirstRequest) await sleep(minDelayMs, signal);
     isFirstRequest = false;
 
     let items: EgpRssItem[] = [];
     try {
-      items = await withRetry(() => fetchEgpRssFeed(site.deptId, announceType));
+      items = await withRetry(() => fetchEgpRssFeed(site.deptId, announceType, signal), { signal });
     } catch (err) {
+      if (signal?.aborted) break;
       failedCount += 1;
       const message = err instanceof Error ? err.message : String(err);
       errorLog.push(`[${announceType}] fetch failed: ${message}`);
@@ -161,11 +174,23 @@ export async function runRssPoll(site: IGovSite, triggeredBy: TriggeredBy): Prom
     fetchedCount += items.length;
 
     for (const item of items) {
+      if (signal?.aborted) break feeds;
+      // Documents the item links to that could not be fetched (a dead link): the
+      // work is still stored, and the problem goes into this run's log, which is
+      // what admins read (run history).
+      const documentProblems: string[] = [];
       try {
-        const result = await upsertWorkFromRssItem(site, announceType, item, candidateTags, siteTag?._id, inScopeTagIds);
+        const result = await upsertWorkFromRssItem(site, announceType, item, candidateTags, siteTag?._id, inScopeTagIds, documentProblems);
         if (result === 'new') newCount += 1;
         if (result === 'updated') updatedCount += 1;
-        itemResults.push({ title: item.title, projectId: item.projectId ?? undefined, announceType, status: result });
+        for (const problem of documentProblems) errorLog.push(`[${announceType}] item "${item.projectId}": ${problem}`);
+        itemResults.push({
+          title: item.title,
+          projectId: item.projectId ?? undefined,
+          announceType,
+          status: result,
+          ...(documentProblems.length > 0 ? { message: documentProblems.join('; ') } : {})
+        });
       } catch (err) {
         failedCount += 1;
         const message = err instanceof Error ? err.message : String(err);
@@ -176,20 +201,29 @@ export async function runRssPoll(site: IGovSite, triggeredBy: TriggeredBy): Prom
     }
   }
 
-  try {
-    const fixed = await retryMissingTorDownloads(site, candidateTags);
-    if (fixed > 0) logger.info('ingestion', `Retried and recovered ${fixed} previously-failed TOR download(s) for ${site.shortCode}`);
-  } catch (err) {
-    logger.warn('ingestion', `TOR download retry sweep failed for ${site.shortCode}`, err);
+  if (!signal?.aborted) {
+    try {
+      const sweepProblems: string[] = [];
+      const fixed = await retryMissingTorDownloads(site, candidateTags, { signal, documentProblems: sweepProblems, skipAttemptedSince: run.startedAt });
+      for (const problem of sweepProblems) errorLog.push(`[retry] ${problem}`);
+      if (fixed > 0) logger.info('ingestion', `Retried and recovered ${fixed} previously-failed TOR download(s) for ${site.shortCode}`);
+    } catch (err) {
+      logger.warn('ingestion', `TOR download retry sweep failed for ${site.shortCode}`, err);
+    }
   }
 
   run.fetchedCount = fetchedCount;
   run.newCount = newCount;
   run.updatedCount = updatedCount;
   run.failedCount = failedCount;
-  run.errorLog = errorLog;
   run.itemResults = itemResults;
-  run.status = failedCount === 0 ? 'success' : newCount + updatedCount > 0 ? 'partial' : 'failed';
+  if (signal?.aborted) {
+    errorLog.push(RUN_TIMED_OUT_MESSAGE);
+    run.status = 'failed';
+  } else {
+    run.status = failedCount === 0 ? 'success' : newCount + updatedCount > 0 ? 'partial' : 'failed';
+  }
+  run.errorLog = errorLog;
   run.finishedAt = new Date();
   await run.save();
 
@@ -222,6 +256,14 @@ export interface SweepOptions {
   htmlOnly?: boolean;
   // Called after each work the sweep changed and saved -- progress for a long run.
   onWorkSaved?: (work: IWork) => void;
+  // Stop early when the poll is stopped (time limit).
+  signal?: AbortSignal;
+  // Collects "this TOR link is still dead" messages for the run's log.
+  documentProblems?: string[];
+  // A PDF/zip download attempted at or after this moment is left alone: the
+  // poll that just tried it (and failed) must not hammer the same dead link
+  // again seconds later -- the next poll retries it.
+  skipAttemptedSince?: Date;
 }
 
 // A work with no price and an HTML page nobody has read yet (skipped altogether
@@ -299,6 +341,7 @@ async function retryMissingTorDownloads(site: IGovSite, candidateTags: TagCandid
   let recovered = 0;
 
   for (const work of works) {
+    if (options.signal?.aborted) break;
     let mutated = false; // the work needs saving
     let recoveredHere = false; // a document really came back
 
@@ -311,6 +354,7 @@ async function retryMissingTorDownloads(site: IGovSite, candidateTags: TagCandid
       if (file.supersededAt) continue;
       if (file.linkType === 'pdf' || file.linkType === 'zip') {
         if (options.htmlOnly || file.storageKey) continue;
+        if (options.skipAttemptedSince && file.fetchAttemptedAt && file.fetchAttemptedAt >= options.skipAttemptedSince) continue;
       } else if (file.linkType === 'html') {
         if (!env.EGP_HTML_TOR_ENABLED) continue;
         // Already read, or not worth a request (has a price).
@@ -334,21 +378,22 @@ async function retryMissingTorDownloads(site: IGovSite, candidateTags: TagCandid
       try {
         const item: EgpRssItem = { title: work.title, link: sourceUrl, linkType, description: '', pubDate: null, projectId: work.projectId };
         if (isHtml) htmlFetches += 1;
-        const extracted = await downloadAndExtractTorFiles(item, gapMs);
+        const problems: string[] = [];
+        const extracted = await downloadAndExtractTorFiles(item, gapMs, problems);
+        for (const problem of problems) options.documentProblems?.push(`work "${work.projectId}": ${problem}`);
 
         if (!extracted || extracted.length === 0) {
-          if (isHtml) {
-            // Remember the miss, so a page that keeps failing is given up on
-            // instead of being retried -- and using up this sweep's quota --
-            // forever.
-            for (const f of work.torFiles) {
-              if (f.sourceUrl === sourceUrl && !f.supersededAt && !f.downloadedAt) {
-                f.fetchAttempts = (f.fetchAttempts ?? 0) + 1;
-                f.fetchAttemptedAt = new Date();
-              }
+          // Remember the miss: for an HTML page so one that keeps failing is
+          // given up on instead of being retried -- and using up this sweep's
+          // quota -- forever; for a PDF/zip so admins can see since when the
+          // link has been dead (it is still retried on every poll).
+          for (const f of work.torFiles) {
+            if (f.sourceUrl === sourceUrl && !f.supersededAt && !f.downloadedAt) {
+              f.fetchAttempts = (f.fetchAttempts ?? 0) + 1;
+              f.fetchAttemptedAt = new Date();
             }
-            mutated = true;
           }
+          mutated = true;
           continue;
         }
 
@@ -465,7 +510,14 @@ const MAX_ATTACHMENT_SCAN_BYTES = 25 * 1024 * 1024;
 //
 // null = nothing could be read (failed download, blocked/unreachable page, or
 // e-GP's "file not found" page) -- a later poll's retry sweep tries again.
-async function downloadAndExtractTorFiles(item: EgpRssItem, htmlGapMs: number): Promise<ExtractedTorFile[] | null> {
+// A PDF/zip link that could not be downloaded (a dead source link) is also
+// described in `problems`, which ends up in the run's log for admins.
+async function downloadAndExtractTorFiles(item: EgpRssItem, htmlGapMs: number, problems?: string[]): Promise<ExtractedTorFile[] | null> {
+  const reportDeadLink = (err: unknown): void => {
+    const reason = err instanceof Error ? err.message : String(err);
+    problems?.push(`TOR ${item.linkType} link unavailable (${item.link}): ${reason}`);
+  };
+
   if (item.linkType === 'html') {
     if (!env.EGP_HTML_TOR_ENABLED) return null;
 
@@ -500,6 +552,7 @@ async function downloadAndExtractTorFiles(item: EgpRssItem, htmlGapMs: number): 
       ];
     } catch (err) {
       logger.warn('ingestion', `Failed to download/extract TOR PDF from ${item.link}`, err);
+      reportDeadLink(err);
       return null; // a later poll's retryMissingTorDownloads() sweep will try again
     }
   }
@@ -510,6 +563,7 @@ async function downloadAndExtractTorFiles(item: EgpRssItem, htmlGapMs: number): 
       const pdfEntries = extractPdfsFromZip(downloaded.buffer);
       if (pdfEntries.length === 0) {
         logger.warn('ingestion', `Zip from ${item.link} contained no PDF entries`);
+        reportDeadLink(new Error('the archive contains no PDF'));
         return null;
       }
 
@@ -540,6 +594,7 @@ async function downloadAndExtractTorFiles(item: EgpRssItem, htmlGapMs: number): 
       return results;
     } catch (err) {
       logger.warn('ingestion', `Failed to download/extract TOR zip from ${item.link}`, err);
+      reportDeadLink(err);
       return null; // a later poll's retryMissingTorDownloads() sweep will try again
     }
   }
@@ -615,14 +670,15 @@ function buildTorFiles(announceType: AnnounceType, item: EgpRssItem, extracted: 
     // fetched at all) -- still record the link itself so a later poll's retry
     // sweep (pdf/zip/html) or a human ('other') can act on it. An HTML page
     // that was JUST attempted is stamped, so the sweep at the end of this same
-    // poll leaves it alone (see HTML_RETRY_AFTER_MS).
-    const attemptedHtml = item.linkType === 'html' && env.EGP_HTML_TOR_ENABLED;
+    // poll leaves it alone (see HTML_RETRY_AFTER_MS); a PDF/zip download that
+    // just failed is stamped so admins can see since when the link is dead.
+    const attempted = (item.linkType === 'html' && env.EGP_HTML_TOR_ENABLED) || item.linkType === 'pdf' || item.linkType === 'zip';
     return [
       {
         announceType,
         linkType: item.linkType,
         sourceUrl: item.link,
-        ...(attemptedHtml ? { fetchAttempts: 1, fetchAttemptedAt: new Date() } : {})
+        ...(attempted ? { fetchAttempts: 1, fetchAttemptedAt: new Date() } : {})
       }
     ];
   }
@@ -644,7 +700,8 @@ async function upsertWorkFromRssItem(
   item: EgpRssItem,
   candidateTags: TagCandidate[],
   siteTagId: Types.ObjectId | undefined,
-  inScopeTagIds: Set<string> | null
+  inScopeTagIds: Set<string> | null,
+  documentProblems?: string[]
 ): Promise<'new' | 'updated' | 'skipped'> {
   if (!item.projectId) {
     // No stable key to upsert on -- can't safely store this item.
@@ -658,7 +715,7 @@ async function upsertWorkFromRssItem(
     // Download+extract BEFORE analysis, so a real PDF (when one exists --
     // possibly one of several bundled in a zip) informs both the tags and
     // the description -- FR-3.2.
-    const extracted = await downloadAndExtractTorFiles(item, requestGapMs(site));
+    const extracted = await downloadAndExtractTorFiles(item, requestGapMs(site), documentProblems);
     const analysis = await analyzeTorDocument(analysisInputFor(item.title, extracted, announceType), candidateTags);
 
     // Customer requirement (e.g. "software-only"): every work is still
@@ -762,7 +819,7 @@ async function upsertWorkFromRssItem(
     if (existing.ingestionRelevance === 'not-related') {
       existing.torFiles.push({ announceType, linkType: item.linkType, sourceUrl: item.link });
     } else {
-      newExtracted = await downloadAndExtractTorFiles(item, requestGapMs(site));
+      newExtracted = await downloadAndExtractTorFiles(item, requestGapMs(site), documentProblems);
       existing.torFiles.push(...buildTorFiles(announceType, item, newExtracted));
     }
     changed = true;
@@ -827,7 +884,8 @@ async function upsertWorkFromRssItem(
   return 'skipped';
 }
 
-export async function runDataGoThEnrichment(site: IGovSite, triggeredBy: TriggeredBy): Promise<IIngestionRun> {
+export async function runDataGoThEnrichment(site: IGovSite, triggeredBy: TriggeredBy, options: PollRunOptions = {}): Promise<IIngestionRun> {
+  const { signal } = options;
   if (await isAlreadyRunning(site._id, 'data_go_th')) {
     throw new Error(`A data.go.th enrichment run for ${site.shortCode} is already running`);
   }
@@ -856,10 +914,11 @@ export async function runDataGoThEnrichment(site: IGovSite, triggeredBy: Trigger
   const itemResults: IIngestionRunItemResult[] = [];
 
   try {
-    const { records } = await withRetry(() => datastoreSearch(resourceId, { limit: 200 }));
+    const { records } = await withRetry(() => datastoreSearch(resourceId, { limit: 200 }, signal), { signal });
     fetchedCount = records.length;
 
     for (const record of records) {
+      if (signal?.aborted) break;
       const projectId = record.proj_no != null ? String(record.proj_no) : undefined;
       const title = (record.proj_name != null ? String(record.proj_name) : projectId) ?? '(no project number)';
       try {
@@ -874,18 +933,25 @@ export async function runDataGoThEnrichment(site: IGovSite, triggeredBy: Trigger
       }
     }
   } catch (err) {
-    failedCount += 1;
-    const message = err instanceof Error ? err.message : String(err);
-    errorLog.push(`datastore_search failed: ${message}`);
-    logger.warn('ingestion', `data.go.th enrichment fetch failed for ${site.shortCode}`, err);
+    if (!signal?.aborted) {
+      failedCount += 1;
+      const message = err instanceof Error ? err.message : String(err);
+      errorLog.push(`datastore_search failed: ${message}`);
+      logger.warn('ingestion', `data.go.th enrichment fetch failed for ${site.shortCode}`, err);
+    }
   }
 
   run.fetchedCount = fetchedCount;
   run.updatedCount = updatedCount;
   run.failedCount = failedCount;
-  run.errorLog = errorLog;
   run.itemResults = itemResults;
-  run.status = failedCount === 0 ? 'success' : updatedCount > 0 ? 'partial' : 'failed';
+  if (signal?.aborted) {
+    errorLog.push(RUN_TIMED_OUT_MESSAGE);
+    run.status = 'failed';
+  } else {
+    run.status = failedCount === 0 ? 'success' : updatedCount > 0 ? 'partial' : 'failed';
+  }
+  run.errorLog = errorLog;
   run.finishedAt = new Date();
   await run.save();
 
@@ -936,19 +1002,25 @@ function toDate(value: unknown): Date | undefined {
   return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
-export async function pollAllEnabledSites(triggeredBy: TriggeredBy): Promise<IIngestionRun[]> {
+export async function pollAllEnabledSites(triggeredBy: TriggeredBy, options: PollRunOptions = {}): Promise<IIngestionRun[]> {
   const sites = await GovSite.find({ enabled: true });
   const runs: IIngestionRun[] = [];
 
+  // One site at a time; a site whose poll fails (or throws) never stops the
+  // ones after it. Only the poll's time limit stops the loop.
   for (const site of sites) {
+    if (options.signal?.aborted) {
+      logger.warn('ingestion', `Poll stopped by its time limit before reaching ${site.shortCode}`);
+      break;
+    }
     try {
-      runs.push(await runRssPoll(site, triggeredBy));
+      runs.push(await runRssPoll(site, triggeredBy, options));
     } catch (err) {
       logger.warn('ingestion', `Skipped RSS poll for ${site.shortCode}`, err);
     }
-    if (hasDataGoThConfig(site)) {
+    if (hasDataGoThConfig(site) && !options.signal?.aborted) {
       try {
-        runs.push(await runDataGoThEnrichment(site, triggeredBy));
+        runs.push(await runDataGoThEnrichment(site, triggeredBy, options));
       } catch (err) {
         logger.warn('ingestion', `Skipped data.go.th enrichment for ${site.shortCode}`, err);
       }

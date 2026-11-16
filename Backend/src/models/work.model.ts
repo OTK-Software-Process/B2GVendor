@@ -1,6 +1,7 @@
 import mongoose, { Schema, Document, Model, Types } from 'mongoose';
 import { AnnounceType } from './govSite.model';
 import { normalizeThaiSearchText } from '../utils/thaiSearch';
+import { toHttpsLink } from '../utils/httpsLinks';
 
 // Status is derived only from the e-GP RSS announce-type signal (FR-N4.4) --
 // data.go.th enrichment never sets this, it has no status field at all.
@@ -226,7 +227,22 @@ const WorkSchema = new Schema<IWork>(
 
     ingestionRelevance: { type: String, enum: ['shown', 'not-related'], index: true }
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    toJSON: {
+      // In production every e-GP link the API hands out is https (see
+      // utils/httpsLinks.ts). The stored sourceUrl is left exactly as the feed
+      // gave it -- it is the key the ingestion pipeline matches documents on.
+      transform(_doc, ret: Record<string, unknown>) {
+        if (Array.isArray(ret.torFiles)) {
+          ret.torFiles = (ret.torFiles as Array<Record<string, unknown>>).map(file =>
+            typeof file.sourceUrl === 'string' ? { ...file, sourceUrl: toHttpsLink(file.sourceUrl) } : file
+          );
+        }
+        return ret;
+      }
+    }
+  }
 );
 
 WorkSchema.pre('validate', function updateSearchText() {

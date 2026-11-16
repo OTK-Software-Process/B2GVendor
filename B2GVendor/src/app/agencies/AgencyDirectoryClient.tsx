@@ -4,12 +4,21 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
-import { fetchWorks, toTagItem } from '@/lib/backend';
+import { BackendGovSite, fetchWorks, toGovSiteItem, toTagItem } from '@/lib/backend';
 import { TagItem } from '@/lib/mock-data';
 import { Building2, Search, ArrowRight, Landmark, X } from 'lucide-react';
 
-export function AgencyDirectoryClient() {
-  const { lang, govSites, tags } = useApp();
+interface AgencyDirectoryClientProps {
+  // The public site directory, fetched by the server page (null if that failed).
+  initialSites: BackendGovSite[] | null;
+}
+
+export function AgencyDirectoryClient({ initialSites }: AgencyDirectoryClientProps) {
+  const { lang, govSites: contextSites, govSitesStatus, tags } = useApp();
+  // The server-rendered list until the app-wide one has loaded (it is the same
+  // public directory for a visitor; an admin's is the enriched admin list).
+  const [serverSites] = useState(() => (initialSites ?? []).map(toGovSiteItem));
+  const govSites = govSitesStatus === 'ready' || !initialSites ? contextSites : serverSites;
   const router = useRouter();
   const searchParams = useSearchParams();
   const [filterQuery, setFilterQuery] = useState('');

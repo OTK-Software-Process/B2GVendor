@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Search, X, Sparkles, ArrowRight } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
@@ -16,15 +16,21 @@ function SearchBarForm({ placeholder, size = 'normal', autoFocus = false }: Sear
   const searchParams = useSearchParams();
   const { lang, tags } = useApp();
 
-  const initialQuery = searchParams.get('q') || '';
-  const [query, setQuery] = useState(initialQuery);
+  const urlQuery = searchParams.get('q') || '';
+  const [query, setQuery] = useState(urlQuery);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [typoNotice, setTypoNotice] = useState<string | null>(null);
   const [focused, setFocused] = useState(false);
 
-  useEffect(() => {
-    setQuery(searchParams.get('q') || '');
-  }, [searchParams]);
+  // When the URL's ?q= changes (back/forward, a link, another search box), show
+  // it in the box. Done while rendering -- React's "adjust state when a prop
+  // changes" pattern -- not with setState in an effect, which renders twice
+  // (and is a lint error here: react-hooks/set-state-in-effect).
+  const [syncedUrlQuery, setSyncedUrlQuery] = useState(urlQuery);
+  if (urlQuery !== syncedUrlQuery) {
+    setSyncedUrlQuery(urlQuery);
+    setQuery(urlQuery);
+  }
 
   const handleInputChange = (val: string) => {
     setQuery(val);
