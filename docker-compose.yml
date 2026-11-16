@@ -53,6 +53,10 @@ services:
     restart: unless-stopped
     env_file:
       - ./B2GVendor/.env
+    environment:
+      # The public pages fetch their first data on the server (B2GVendor/src/lib/serverApi.ts).
+      # Inside this container "localhost:4000" is not the API -- reach it by its service name.
+      API_INTERNAL_URL: ${API_INTERNAL_URL:-http://backend:4000/api/v1}
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
     depends_on:

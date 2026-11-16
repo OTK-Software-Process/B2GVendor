@@ -1,5 +1,6 @@
 import { PublicShell } from '@/components/PublicShell';
 import { AgencyDirectoryClient } from './AgencyDirectoryClient';
+import { serverFetchGovSites } from '@/lib/serverApi';
 
 // Server Component page (no 'use client') so this route segment config is
 // actually honored: forces full dynamic rendering, skipping static
@@ -10,10 +11,14 @@ import { AgencyDirectoryClient } from './AgencyDirectoryClient';
 // confirmed live), so this route avoids Suspense entirely instead.
 export const dynamic = 'force-dynamic';
 
-export default function AgencyDirectoryPage() {
+// The site directory is fetched here so the site cards are in the HTML
+// (lib/serverApi.ts); null = the API didn't answer in time, and the cards come
+// from the app-wide list once the browser has loaded it, as before.
+export default async function AgencyDirectoryPage() {
+  const sites = await serverFetchGovSites();
   return (
     <PublicShell>
-      <AgencyDirectoryClient />
+      <AgencyDirectoryClient initialSites={sites} />
     </PublicShell>
   );
 }

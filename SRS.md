@@ -476,13 +476,15 @@ Each requirement below carries its status as of 04/11/2026 (Section 1.2). Target
 
 This section defines the specific timing and throughput constraints the system must meet to ensure a smooth user experience.
 
-- **Page Load Speed** *(Planned — not yet measured)*: The web application shall render core public pages interactive within 2.5 seconds on mid-range mobile / 4G.
+- **Page Load Speed** *(Measured 2026-11-16 — met in production-like conditions)*: The web application shall render core public pages interactive within 2.5 seconds on mid-range mobile / 4G.
+  - *Current:* The public pages render their data on the server (home, search, agencies, work detail). Lighthouse mobile defaults (mid-range phone, 4G), median of 3: 2.11 s on every page over HTTPS/HTTP/2 as in production; 2.42–2.46 s with the throttling really applied over the local HTTP/1.1 server; 2.50–2.72 s in Lighthouse's strictest estimate (simulated, HTTP/1.1). Before: 3.3–3.6 s (and ~7.8 s before an 889 KB favicon was replaced). See `Backend/perf/README.md` (`npm run perf:lighthouse`).
 
-- **Search Latency** *(Planned — not yet measured)*: Faceted search results (with status and facets) shall return within 1.5 seconds at p95 for typical queries.
-  - *Next:* Measure under load (Section 5.6). The keyword match is pattern-based, not index-based, so it is the first candidate for optimisation if the target is missed as the data grows.
+- **Search Latency** *(Measured 2026-11-16 — met)*: Faceted search results (with status and facets) shall return within 1.5 seconds at p95 for typical queries.
+  - *Current:* k6, 20,000 works, the search page's typical query mix at 5 searches/s: p95 582 ms (`npm run perf -- search`). The typo-tolerant pattern was restructured (same matches, ~10× faster per scan).
+  - *Next:* The keyword match is still a pattern scan, not an index: p95 stays under 0.7 s up to ~8 searches/s on the test machine, beyond that MongoDB saturates. A search index (NFR-N4.1) is the next step as traffic or data grows.
 
-- **Notification Timeliness** *(Implemented by design — not yet measured)*: Instant notifications shall be dispatched within approximately 5 minutes of the poll that discovered the matching work.
-  - *Current:* Instant notifications are created, and their emails sent, during the poll that ingests the work.
+- **Notification Timeliness** *(Measured 2026-11-16 — met)*: Instant notifications shall be dispatched within approximately 5 minutes of the poll that discovered the matching work.
+  - *Current:* Instant notifications are created, and their emails sent (5 at a time), during the poll that ingests the work. A poll bringing 10 new works to a site 150 vendors follow sends its 1,500 emails within 31 s of Poll Now at 60 ms SMTP latency per message (`npm run check:notify-latency`, part of `npm test`).
 
 - **Ingestion Throughput** *(Implemented)*: The system shall support incremental polling (only new/changed items since the last run where possible) to keep each run fast and light.
   - *Current:* Unchanged items are counted as skipped and not rewritten; reading of HTML announcement pages is capped per poll (FR-2.3a).

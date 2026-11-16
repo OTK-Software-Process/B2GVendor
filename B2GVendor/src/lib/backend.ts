@@ -77,6 +77,8 @@ export interface BackendTorFile {
   filename?: string;
   downloadedAt?: string;
   role?: 'primary' | 'attachment';
+  fetchAttempts?: number;
+  fetchAttemptedAt?: string;
   supersededAt?: string;
 }
 
@@ -139,7 +141,7 @@ export interface FiscalYearOption {
   count: number;
 }
 
-function buildQuery(params: object): string {
+export function buildQuery(params: object): string {
   const usp = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== '') usp.set(key, String(value));
@@ -320,6 +322,9 @@ export function safeHttpUrl(raw: string | undefined | null): string | undefined 
 
 export function toTORFile(workId: string, file: BackendTorFile, index: number): TORFile {
   const downloadable = Boolean(file.storageKey);
+  // A document file (not a web page) we haven't been able to download: its
+  // source link is dead for now -- the API answers 503 for it.
+  const unavailable = !downloadable && (file.linkType === 'pdf' || file.linkType === 'zip');
   return {
     id: `${workId}-${index}`,
     name: torFileName(file, index),
@@ -332,7 +337,8 @@ export function toTORFile(workId: string, file: BackendTorFile, index: number): 
     external: !downloadable,
     // Every TOR links back to where the government published it -- including the
     // ones we also host a copy of.
-    sourceUrl: safeHttpUrl(file.sourceUrl)
+    sourceUrl: safeHttpUrl(file.sourceUrl),
+    unavailable
   };
 }
 

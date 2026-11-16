@@ -47,7 +47,11 @@ async function outcome(fn: () => Promise<unknown>): Promise<string> {
   }
 }
 
-// Count (and keep) every bcrypt call the app makes.
+// Count (and keep) every bcrypt call the app makes. The app normally hashes in
+// worker threads (src/utils/passwordHasher.ts), where these spies can't see; with
+// the pool off every hash/compare runs here, through the very same calls.
+// (check:password-hasher covers the worker pool itself.)
+process.env.PASSWORD_HASH_WORKERS = '0';
 const realCompare = bcrypt.compare;
 const realHash = bcrypt.hash;
 const compares: { plain: string; hash: string }[] = [];

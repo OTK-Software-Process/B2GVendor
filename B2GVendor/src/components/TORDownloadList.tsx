@@ -5,7 +5,7 @@ import { TORFile } from '@/lib/mock-data';
 import { EgpPageLink } from '@/lib/egp';
 import { EgpPageLinks } from './EgpPageLinks';
 import { useApp } from '@/context/AppContext';
-import { FileText, Download, ExternalLink } from 'lucide-react';
+import { FileText, Download, ExternalLink, Clock } from 'lucide-react';
 
 interface TORDownloadListProps {
   files: TORFile[];
@@ -28,11 +28,12 @@ export function TORDownloadList({ files, egpPages = [], projectId }: TORDownload
 
   // Every TOR links back to where the government published it. A file we host a
   // copy of gets that as a second link (an external-only entry's main button
-  // already goes there); the several files of one zip share a source, so the
+  // already goes there), and so does a file that is temporarily unavailable
+  // (it has no button); the several files of one zip share a source, so the
   // link is shown once, on the first of them.
   const seenSources = new Set<string>();
   const showOrigin = files.map(file => {
-    if (!file.sourceUrl || file.external || seenSources.has(file.sourceUrl)) return false;
+    if (!file.sourceUrl || (file.external && !file.unavailable) || seenSources.has(file.sourceUrl)) return false;
     seenSources.add(file.sourceUrl);
     return true;
   });
@@ -52,6 +53,7 @@ export function TORDownloadList({ files, egpPages = [], projectId }: TORDownload
 
       <div className="divide-y divide-slate-200">
         {files.map((file, index) => {
+          const isUnavailable = Boolean(file.unavailable);
           const isExternalReference = Boolean(file.external);
 
           return (
@@ -61,14 +63,25 @@ export function TORDownloadList({ files, egpPages = [], projectId }: TORDownload
                   {file.type}
                 </div>
                 <div className="min-w-0">
-                  <a
-                    href={file.url}
-                    target={isExternalReference ? '_blank' : undefined}
-                    rel={isExternalReference ? 'noopener noreferrer' : undefined}
-                    className="text-sm font-semibold text-slate-900 hover:text-emerald-600 transition-colors truncate block"
-                  >
-                    {file.name}
-                  </a>
+                  {isUnavailable ? (
+                    <span className="text-sm font-semibold text-slate-500 truncate block">{file.name}</span>
+                  ) : (
+                    <a
+                      href={file.url}
+                      target={isExternalReference ? '_blank' : undefined}
+                      rel={isExternalReference ? 'noopener noreferrer' : undefined}
+                      className="text-sm font-semibold text-slate-900 hover:text-emerald-600 transition-colors truncate block"
+                    >
+                      {file.name}
+                    </a>
+                  )}
+                  {isUnavailable && (
+                    <p className="text-xs text-amber-700 mt-0.5">
+                      {lang === 'en'
+                        ? 'The government site did not deliver this document. We will try again on the next update.'
+                        : 'เว็บไซต์ต้นทางยังไม่ส่งเอกสารนี้ ระบบจะลองดึงอีกครั้งในการอัปเดตครั้งถัดไป'}
+                    </p>
+                  )}
                   {file.date && (
                     <div className="flex items-center gap-3 text-xs text-slate-400 mt-0.5">
                       <span>{lang === 'en' ? 'Downloaded:' : 'ดาวน์โหลดเมื่อ:'} {file.date}</span>
@@ -88,24 +101,34 @@ export function TORDownloadList({ files, egpPages = [], projectId }: TORDownload
                 </div>
               </div>
 
-              <a
-                href={file.url}
-                target={isExternalReference ? '_blank' : undefined}
-                rel={isExternalReference ? 'noopener noreferrer' : undefined}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl bg-white border border-slate-200 text-slate-700 hover:border-emerald-500 hover:text-emerald-600 transition-all shadow-2xs cursor-pointer shrink-0"
-              >
-                {isExternalReference ? (
-                  <>
-                    <ExternalLink className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>{lang === 'en' ? 'View on source site' : 'ดูที่เว็บไซต์ต้นทาง'}</span>
-                  </>
-                ) : (
-                  <>
-                    <Download className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>{lang === 'en' ? 'Download' : 'ดาวน์โหลด'}</span>
-                  </>
-                )}
-              </a>
+              {isUnavailable ? (
+                <span
+                  role="status"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl bg-amber-50 border border-amber-200 text-amber-800 shrink-0"
+                >
+                  <Clock className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>{lang === 'en' ? 'Temporarily unavailable' : 'ไม่พร้อมให้ดาวน์โหลดชั่วคราว'}</span>
+                </span>
+              ) : (
+                <a
+                  href={file.url}
+                  target={isExternalReference ? '_blank' : undefined}
+                  rel={isExternalReference ? 'noopener noreferrer' : undefined}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl bg-white border border-slate-200 text-slate-700 hover:border-emerald-500 hover:text-emerald-600 transition-all shadow-2xs cursor-pointer shrink-0"
+                >
+                  {isExternalReference ? (
+                    <>
+                      <ExternalLink className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>{lang === 'en' ? 'View on source site' : 'ดูที่เว็บไซต์ต้นทาง'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>{lang === 'en' ? 'Download' : 'ดาวน์โหลด'}</span>
+                    </>
+                  )}
+                </a>
+              )}
             </div>
           );
         })}

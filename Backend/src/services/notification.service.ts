@@ -7,7 +7,20 @@ import { GovSite } from '../models/govSite.model';
 import { Notification, INotification } from '../models/notification.model';
 import { AppError } from '../utils/AppError';
 import { sendNewWorkMatchEmail, sendDailyDigestEmail } from './email.service';
+import { env } from '../config/env';
 import { logger } from '../utils/logger';
+
+// Runs `worker` over `items`, at most `limit` at a time.
+async function forEachWithConcurrency<T>(items: T[], limit: number, worker: (item: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  const lanes = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const item = items[next++];
+      await worker(item);
+    }
+  });
+  await Promise.all(lanes);
+}
 
 export interface NotificationView {
   id: string;
@@ -114,6 +127,9 @@ export async function notifyNewWorkMatches(work: IWork, tagIds: Types.ObjectId[]
     const site = await GovSite.findById(work.siteId).select('name');
     const tagNames = new Map(tags.map(tag => [tag._id.toString(), tag.name]));
     const accountById = new Map(accounts.map(account => [account._id.toString(), account]));
+    // Instant emails are collected and sent a few at a time after the in-app
+    // notifications are stored (EMAIL_SEND_CONCURRENCY), not one after another.
+    const emails: { email: string; name: string; matchedTagNames: string[] }[] = [];
 
     for (const accountId of accountIds) {
       const account = accountById.get(accountId);
@@ -157,12 +173,16 @@ export async function notifyNewWorkMatches(work: IWork, tagIds: Types.ObjectId[]
       if (!account.emailNotificationsEnabled) continue;
       if (account.notificationFrequency === 'daily') continue;
 
-      try {
-        await sendNewWorkMatchEmail(account.email, account.name, work._id.toString(), matchedTagNames);
-      } catch (err) {
-        logger.warn('notification', `Failed to notify ${account.email} about work ${work.projectId}`, err);
-      }
+      emails.push({ email: account.email, name: account.name, matchedTagNames });
     }
+
+    await forEachWithConcurrency(emails, env.EMAIL_SEND_CONCURRENCY, async ({ email, name, matchedTagNames }) => {
+      try {
+        await sendNewWorkMatchEmail(email, name, work._id.toString(), matchedTagNames);
+      } catch (err) {
+        logger.warn('notification', `Failed to notify ${email} about work ${work.projectId}`, err);
+      }
+    });
   } catch (err) {
     logger.warn('notification', `Failed to find followers for work ${work.projectId}`, err);
   }

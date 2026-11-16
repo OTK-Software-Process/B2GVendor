@@ -12,22 +12,36 @@ import { ErrorRetry } from '@/components/ErrorRetry';
 import { Pagination } from '@/components/Pagination';
 import { FollowTagButton } from '@/components/FollowTagButton';
 import { useApp } from '@/context/AppContext';
-import { fetchWorks, toWorkItem, ListWorksParams } from '@/lib/backend';
+import { fetchWorks, toWorkItem, ListWorksParams, ListWorksResponse } from '@/lib/backend';
 import { WorkItem } from '@/lib/mock-data';
 import { clearSavedFilterQuery, loadSavedFilterQuery, pickFilterQuery, saveFilterQuery } from '@/lib/savedSearchFilters';
+import { SEARCH_PAGE_SIZE as PAGE_SIZE, searchKey, searchListParams } from '@/lib/searchQuery';
 import { X, ArrowUpDown } from 'lucide-react';
 
-const PAGE_SIZE = 10;
+interface SearchClientProps {
+  // The first page of results the server already fetched for the URL it rendered
+  // (`key` = which query they answer, lib/searchQuery.ts), or null.
+  initial: { key: string; result: ListWorksResponse } | null;
+}
 
-export function SearchClient() {
+export function SearchClient({ initial }: SearchClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { lang, tags, govSites } = useApp();
 
-  const [isLoading, setIsLoading] = useState(true);
+  // The API query this URL stands for -- the same mapping the server used.
+  const listParams = searchListParams(key => searchParams.get(key));
+  const queryKey = searchKey(listParams);
+  const startsWithServerResults = initial !== null && initial.key === queryKey;
+
+  const [isLoading, setIsLoading] = useState(!startsWithServerResults);
   const [error, setError] = useState<string | null>(null);
-  const [items, setItems] = useState<WorkItem[]>([]);
-  const [total, setTotal] = useState(0);
+  const [items, setItems] = useState<WorkItem[]>(() => (startsWithServerResults ? initial.result.items.map(toWorkItem) : []));
+  const [total, setTotal] = useState(() => (startsWithServerResults ? initial.result.total : 0));
+  // Which query the results on screen belong to: nothing is fetched while it
+  // matches the URL (e.g. the results the server rendered).
+  const loadedKey = useRef<string | null>(startsWithServerResults ? queryKey : null);
+  const [attempt, setAttempt] = useState(0);
 
   // Filters are remembered across pages (lib/savedSearchFilters.ts): arriving at
   // a bare /search puts back the ones the user left with, and every change to
@@ -89,27 +103,21 @@ export function SearchClient() {
   // page navigation actually re-fetches a different slice from Mongo
   // (page/pageSize/total from the API response), it doesn't slice a fixed
   // client-side array.
+  // The query is keyed by `queryKey`, so a re-render with the same URL (or the
+  // server-rendered results) never refetches; `attempt` forces one for "retry".
   useEffect(() => {
+    if (loadedKey.current === queryKey) return;
     let cancelled = false;
 
     async function run() {
       setIsLoading(true);
       setError(null);
       try {
-        const res = await fetchWorks({
-          q: q || undefined,
-          status: (statusParam || undefined) as ListWorksParams['status'],
-          siteId: siteParam || undefined,
-          tag: tagsParam || undefined,
-          budgetMax: budgetMaxParam ? Number(budgetMaxParam) : undefined,
-          fiscalYear: fiscalYearParam ? Number(fiscalYearParam) : undefined,
-          sort: sortBy,
-          page: requestedPage,
-          pageSize: PAGE_SIZE
-        });
+        const res = await fetchWorks(searchListParams(key => searchParams.get(key)));
         if (cancelled) return;
         setItems(res.items.map(toWorkItem));
         setTotal(res.total);
+        loadedKey.current = queryKey;
       } catch {
         if (!cancelled) setError(lang === 'en' ? 'Failed to load search results.' : 'ไม่สามารถโหลดผลการค้นหาได้');
       } finally {
@@ -121,7 +129,7 @@ export function SearchClient() {
     return () => {
       cancelled = true;
     };
-  }, [q, statusParam, siteParam, tagsParam, budgetMaxParam, fiscalYearParam, sortBy, requestedPage, lang]);
+  }, [queryKey, attempt, lang, searchParams]);
 
   const removeChip = (key: string) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -281,9 +289,9 @@ export function SearchClient() {
         <ErrorRetry
           message={error}
           onRetry={() => {
-            // Re-run the effect by touching a param round-trip; simplest is
-            // to just force a state flip via the page param.
-            router.replace(`/search?${searchParams.toString()}`);
+            // Same URL, so nothing else would refetch: forget what was loaded and ask again.
+            loadedKey.current = null;
+            setAttempt(n => n + 1);
           }}
         />
       ) : isLoading ? (

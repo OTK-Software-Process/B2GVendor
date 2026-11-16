@@ -3,6 +3,7 @@ import { env } from '../config/env';
 import { AnnounceType } from '../models/govSite.model';
 import { logger } from '../utils/logger';
 import { sleep } from '../utils/retry';
+import { toHttpsLink } from '../utils/httpsLinks';
 
 /**
  * Client for the live e-GP RSS feed -- the PRIMARY source of new/updated
@@ -62,12 +63,20 @@ const parser = new XMLParser({
   isArray: (_name, jpath) => jpath === 'rss.channel.item'
 });
 
-export async function fetchEgpRssFeed(deptId: string | null, announceType: AnnounceType): Promise<EgpRssItem[]> {
+// Every feed request is time-limited (INGESTION_REQUEST_TIMEOUT_MS), and also
+// stops at once when the poll it belongs to is stopped (`signal`, see
+// pollJob.service.ts's time limit).
+export function requestSignal(signal?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(env.INGESTION_REQUEST_TIMEOUT_MS);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
+export async function fetchEgpRssFeed(deptId: string | null, announceType: AnnounceType, signal?: AbortSignal): Promise<EgpRssItem[]> {
   const url = new URL(env.EGP_RSS_BASE_URL);
   if (deptId) url.searchParams.set('deptId', deptId);
   url.searchParams.set('anounceType', announceType);
 
-  const res = await fetch(url);
+  const res = await fetch(url, { signal: requestSignal(signal) });
   if (!res.ok) {
     throw new Error(`e-GP RSS feed returned HTTP ${res.status} for ${url}`);
   }
@@ -118,7 +127,7 @@ const TOR_TIMEOUT_MS = 120_000;
 export const TOR_MAX_BYTES = 100 * 1024 * 1024;
 
 export async function downloadTorFile(url: string, extensionFallback: 'pdf' | 'zip' = 'pdf', maxBytes = TOR_MAX_BYTES): Promise<DownloadedFile> {
-  const res = await fetch(url, { signal: AbortSignal.timeout(TOR_TIMEOUT_MS) });
+  const res = await fetch(toHttpsLink(url), { signal: AbortSignal.timeout(TOR_TIMEOUT_MS) });
   if (!res.ok) {
     throw new Error(`Failed to download TOR file (HTTP ${res.status}) from ${url}`);
   }
@@ -254,7 +263,8 @@ export async function fetchHtmlDocument(url: string, options: { minGapMs?: numbe
   // follow them itself would already have contacted an unexpected host by the
   // time we could look at where it ended up.
   const signal = AbortSignal.timeout(HTML_TIMEOUT_MS);
-  let currentUrl = url;
+  // In production, straight to https instead of a plain-http first hop.
+  let currentUrl = toHttpsLink(url);
   let res: Response | null = null;
   for (let hop = 0; hop <= HTML_MAX_REDIRECTS; hop++) {
     const response = await fetch(currentUrl, {

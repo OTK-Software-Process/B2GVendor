@@ -3,7 +3,8 @@ import { PollJob, IPollJob, PollJobSource } from '../models/pollJob.model';
 import { GovSite } from '../models/govSite.model';
 import { IngestionRun, IIngestionRun } from '../models/ingestionRun.model';
 import { AppError } from '../utils/AppError';
-import { runRssPoll, runDataGoThEnrichment, pollAllEnabledSites, TriggeredBy } from './ingestion.service';
+import { runRssPoll, runDataGoThEnrichment, pollAllEnabledSites, TriggeredBy, PollRunOptions } from './ingestion.service';
+import { env } from '../config/env';
 import { logger } from '../utils/logger';
 
 /**
@@ -28,16 +29,58 @@ export const POLL_JOB_STALE_MS = 2 * 60_000;
 // A 'queued' job this old was never claimed -- no worker is running. Same
 // reasoning: don't let an orphaned request lock the button indefinitely.
 export const POLL_JOB_QUEUE_EXPIRY_MS = 60 * 60_000;
+// A poll may run for at most this long (POLL_JOB_MAX_DURATION_MINUTES, 2 h by
+// default): executePollJob then stops it and records it as failed ("timed
+// out"), so one stuck site can't hold the Poll Now lock for ever...
+export function pollJobMaxDurationMs(): number {
+  return env.POLL_JOB_MAX_DURATION_MINUTES * 60_000;
+}
+// ...and if even that doesn't end it (the worker is alive but wedged), the
+// reaper closes it this long after the limit, and it stops counting as in progress.
+export const POLL_JOB_TIMEOUT_GRACE_MS = 5 * 60_000;
+
+function timedOutMessage(maxDurationMs: number): string {
+  const seconds = Math.round(maxDurationMs / 1000);
+  const limit = seconds >= 60 ? `${Math.round(seconds / 60)} minute(s)` : `${seconds} second(s)`;
+  return `Timed out: the poll ran longer than ${limit} and was stopped.`;
+}
 
 // A job that is genuinely in progress: queued and still fresh, or running with
-// a live heartbeat.
+// a live heartbeat and not past its time limit.
 function activeJobFilter(now: number = Date.now()): FilterQuery<IPollJob> {
   return {
     $or: [
-      { status: 'running', heartbeatAt: { $gte: new Date(now - POLL_JOB_STALE_MS) } },
+      {
+        status: 'running',
+        heartbeatAt: { $gte: new Date(now - POLL_JOB_STALE_MS) },
+        claimedAt: { $gte: new Date(now - pollJobMaxDurationMs() - POLL_JOB_TIMEOUT_GRACE_MS) }
+      },
       { status: 'queued', createdAt: { $gte: new Date(now - POLL_JOB_QUEUE_EXPIRY_MS) } }
     ]
   };
+}
+
+const MANUAL_LOCK = 'poll';
+
+function isDuplicateKeyError(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 11000;
+}
+
+// Inserts a manual job holding the one manual lock (see PollJob.manualLock).
+// The read in assertNoActivePoll gives the friendly answer in the normal case;
+// this insert is what makes two simultaneous clicks safe.
+async function createManualJob(fields: Partial<IPollJob>): Promise<IPollJob> {
+  // A lock left on a job that no longer counts as in progress (its worker died,
+  // it expired) must not block the next Poll Now.
+  await PollJob.updateMany({ manualLock: MANUAL_LOCK, $nor: [activeJobFilter()] }, { $unset: { manualLock: 1 } });
+  try {
+    return await PollJob.create({ ...fields, manualLock: MANUAL_LOCK });
+  } catch (err) {
+    if (isDuplicateKeyError(err)) {
+      throw AppError.conflict('A poll is already in progress. Wait for it to finish before starting another.');
+    }
+    throw err;
+  }
 }
 
 export interface ActivePollJobView {
@@ -106,7 +149,7 @@ export async function enqueueSitePoll(
   }
 
   await assertNoActivePoll();
-  return PollJob.create({ scope: 'site', siteId: site._id, source, requestedBy });
+  return createManualJob({ scope: 'site', siteId: site._id, source, requestedBy });
 }
 
 export async function enqueueAllSitesPoll(requestedBy: Types.ObjectId): Promise<IPollJob> {
@@ -115,7 +158,7 @@ export async function enqueueAllSitesPoll(requestedBy: Types.ObjectId): Promise<
   }
 
   await assertNoActivePoll();
-  return PollJob.create({ scope: 'all', source: 'both', requestedBy });
+  return createManualJob({ scope: 'all', source: 'both', requestedBy });
 }
 
 export async function getPollJob(id: string): Promise<IPollJob> {
@@ -137,9 +180,21 @@ export async function claimNextPollJob(): Promise<IPollJob | null> {
   );
 }
 
-export async function executePollJob(job: IPollJob): Promise<void> {
+export interface ExecutePollJobOptions {
+  // Override of POLL_JOB_MAX_DURATION_MINUTES (tests).
+  maxDurationMs?: number;
+}
+
+export async function executePollJob(job: IPollJob, options: ExecutePollJobOptions = {}): Promise<void> {
   const triggeredBy: TriggeredBy = job.requestedBy === 'scheduler' ? 'scheduler' : job.requestedBy;
   const resultRunIds: Types.ObjectId[] = [];
+
+  // The time limit: when it fires, every run of this job stops where it is
+  // (requests in flight are aborted too) and is recorded as failed.
+  const maxDurationMs = options.maxDurationMs ?? pollJobMaxDurationMs();
+  const deadline = new AbortController();
+  const deadlineTimer = setTimeout(() => deadline.abort(new Error(timedOutMessage(maxDurationMs))), maxDurationMs);
+  const runOptions: PollRunOptions = { signal: deadline.signal };
 
   // Proves to reapStalePollJobs / getPollStatus that this job is still being
   // worked on, however long the (AI-assisted) ingestion takes.
@@ -151,7 +206,7 @@ export async function executePollJob(job: IPollJob): Promise<void> {
 
   try {
     if (job.scope === 'all') {
-      const runs = await pollAllEnabledSites(triggeredBy);
+      const runs = await pollAllEnabledSites(triggeredBy, runOptions);
       resultRunIds.push(...runs.map(r => r._id));
     } else {
       if (!job.siteId) throw new Error('Job scope is "site" but siteId is missing');
@@ -162,26 +217,34 @@ export async function executePollJob(job: IPollJob): Promise<void> {
       if (!site.enabled) throw new Error(`${site.name} was disabled before this poll started -- skipped.`);
 
       if (job.source === 'rss' || job.source === 'both') {
-        const run = await runRssPoll(site, triggeredBy);
+        const run = await runRssPoll(site, triggeredBy, runOptions);
         resultRunIds.push(run._id);
       }
-      if (job.source === 'data_go_th' || job.source === 'both') {
-        const run = await runDataGoThEnrichment(site, triggeredBy);
+      if ((job.source === 'data_go_th' || job.source === 'both') && !deadline.signal.aborted) {
+        const run = await runDataGoThEnrichment(site, triggeredBy, runOptions);
         resultRunIds.push(run._id);
       }
     }
 
-    job.status = 'done';
     job.resultRunIds = resultRunIds;
+    if (deadline.signal.aborted) {
+      job.status = 'failed';
+      job.error = timedOutMessage(maxDurationMs);
+      logger.warn('pollJob', `Job ${job._id.toString()} stopped: ${job.error}`);
+    } else {
+      job.status = 'done';
+    }
   } catch (err) {
     job.status = 'failed';
-    job.error = err instanceof Error ? err.message : String(err);
+    job.error = deadline.signal.aborted ? timedOutMessage(maxDurationMs) : err instanceof Error ? err.message : String(err);
     logger.error('pollJob', `Job ${job._id.toString()} failed`, err);
   } finally {
     clearInterval(heartbeat);
+    clearTimeout(deadlineTimer);
   }
 
   job.finishedAt = new Date();
+  job.manualLock = undefined; // Poll Now is free again
   await job.save();
 }
 
@@ -193,7 +256,7 @@ const EXPIRED_JOB_MESSAGE = 'Expired: no worker picked this job up within an hou
 // Closes the runs a dead job left behind. Without this, a run stuck in
 // 'running' makes ingestion.service's isAlreadyRunning() refuse every future
 // poll of that site.
-async function abandonRunsOf(job: IPollJob, now: Date): Promise<void> {
+async function abandonRunsOf(job: IPollJob, now: Date, message = ABANDONED_RUN_MESSAGE): Promise<void> {
   const filter: FilterQuery<IIngestionRun> = {
     status: 'running',
     startedAt: { $gte: job.claimedAt ?? job.createdAt }
@@ -202,7 +265,7 @@ async function abandonRunsOf(job: IPollJob, now: Date): Promise<void> {
 
   await IngestionRun.updateMany(filter, {
     $set: { status: 'failed', finishedAt: now },
-    $push: { errorLog: ABANDONED_RUN_MESSAGE }
+    $push: { errorLog: message }
   });
 }
 
@@ -228,7 +291,7 @@ export async function reapStalePollJobs(): Promise<number> {
     // the find and this update isn't wrongly failed.
     const result = await PollJob.updateOne(
       { _id: job._id, ...staleRunningFilter },
-      { $set: { status: 'failed', finishedAt: now, error: ABANDONED_JOB_MESSAGE } }
+      { $set: { status: 'failed', finishedAt: now, error: ABANDONED_JOB_MESSAGE }, $unset: { manualLock: 1 } }
     );
     if (result.modifiedCount === 0) continue;
 
@@ -237,9 +300,27 @@ export async function reapStalePollJobs(): Promise<number> {
     logger.warn('pollJob', `Closed abandoned poll job ${job._id.toString()} (no heartbeat since ${(job.heartbeatAt ?? job.claimedAt ?? job.createdAt).toISOString()})`);
   }
 
+  // Still heartbeating but far past the time limit: the worker is alive but the
+  // job never stopped (executePollJob normally ends it AT the limit).
+  const maxDurationMs = pollJobMaxDurationMs();
+  const overdueFilter: FilterQuery<IPollJob> = {
+    status: 'running',
+    claimedAt: { $lt: new Date(nowMs - maxDurationMs - POLL_JOB_TIMEOUT_GRACE_MS) }
+  };
+  for (const job of await PollJob.find(overdueFilter)) {
+    const result = await PollJob.updateOne(
+      { _id: job._id, ...overdueFilter },
+      { $set: { status: 'failed', finishedAt: now, error: timedOutMessage(maxDurationMs) }, $unset: { manualLock: 1 } }
+    );
+    if (result.modifiedCount === 0) continue;
+    await abandonRunsOf(job, now, timedOutMessage(maxDurationMs));
+    closed += 1;
+    logger.warn('pollJob', `Closed poll job ${job._id.toString()}: ${timedOutMessage(maxDurationMs)}`);
+  }
+
   const expired = await PollJob.updateMany(
     { status: 'queued', createdAt: { $lt: new Date(nowMs - POLL_JOB_QUEUE_EXPIRY_MS) } },
-    { $set: { status: 'failed', finishedAt: now, error: EXPIRED_JOB_MESSAGE } }
+    { $set: { status: 'failed', finishedAt: now, error: EXPIRED_JOB_MESSAGE }, $unset: { manualLock: 1 } }
   );
   closed += expired.modifiedCount;
 

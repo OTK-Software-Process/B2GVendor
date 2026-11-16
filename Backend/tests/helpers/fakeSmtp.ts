@@ -7,13 +7,26 @@ import { env } from '../../src/config/env';
 // No STARTTLS and no AUTH are offered, so nodemailer sends in plain text.
 export interface FakeSmtp {
   messages: string[];
+  // When each message was accepted (Date.now()), same order as `messages`.
+  acceptedAt: number[];
+  // Most messages being delivered at the same time (fully sent, not yet accepted).
+  maxInFlightMessages: number;
   close(): Promise<void>;
+}
+
+export interface FakeSmtpOptions {
+  // Wait this long before accepting each message -- a real provider takes tens
+  // to hundreds of milliseconds per message.
+  acceptDelayMs?: number;
 }
 
 type SmtpSettings = { SMTP_HOST?: string; SMTP_PORT?: number; SMTP_USER?: string; SMTP_PASS?: string };
 
-export async function startFakeSmtp(): Promise<FakeSmtp> {
+export async function startFakeSmtp(options: FakeSmtpOptions = {}): Promise<FakeSmtp> {
   const messages: string[] = [];
+  const acceptedAt: number[] = [];
+  let inFlight = 0;
+  const stats = { maxInFlightMessages: 0 };
   const server = net.createServer(socket => {
     let buffer = '';
     let data: string[] | null = null;
@@ -27,9 +40,18 @@ export async function startFakeSmtp(): Promise<FakeSmtp> {
         buffer = buffer.slice(end + 2);
         if (data) {
           if (line === '.') {
-            messages.push(data.join('\n'));
+            const message = data.join('\n');
             data = null;
-            reply('250 queued');
+            inFlight += 1;
+            stats.maxInFlightMessages = Math.max(stats.maxInFlightMessages, inFlight);
+            const accept = (): void => {
+              inFlight -= 1;
+              messages.push(message);
+              acceptedAt.push(Date.now());
+              reply('250 queued');
+            };
+            if (options.acceptDelayMs) setTimeout(accept, options.acceptDelayMs);
+            else accept();
           } else {
             data.push(line.startsWith('.') ? line.slice(1) : line); // undo dot-stuffing
           }
@@ -56,6 +78,10 @@ export async function startFakeSmtp(): Promise<FakeSmtp> {
 
   return {
     messages,
+    acceptedAt,
+    get maxInFlightMessages() {
+      return stats.maxInFlightMessages;
+    },
     close: () =>
       new Promise<void>(resolve => {
         settings.SMTP_HOST = undefined;

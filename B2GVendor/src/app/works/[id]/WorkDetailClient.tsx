@@ -1,0 +1,261 @@
+'use client';
+
+import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { PublicShell } from '@/components/PublicShell';
+import { StatusBadge } from '@/components/StatusBadge';
+import { FollowTagButton } from '@/components/FollowTagButton';
+import { TORDownloadList } from '@/components/TORDownloadList';
+import { BudgetText, budgetLabel } from '@/components/BudgetText';
+import { DeadlineText } from '@/components/DeadlineText';
+import { EgpPageLinks } from '@/components/EgpPageLinks';
+import { fiscalYearHint } from '@/components/FiscalYearText';
+import { LoadingSkeleton } from '@/components/LoadingSkeleton';
+import { ErrorRetry } from '@/components/ErrorRetry';
+import { useApp } from '@/context/AppContext';
+import { BackendWork, fetchWorkById, toWorkItem } from '@/lib/backend';
+import { canManageTags } from '@/lib/adminAccess';
+import { useSearchHref } from '@/lib/useSearchHref';
+import { WorkItem } from '@/lib/mock-data';
+import {
+  FileText,
+  History,
+  ArrowLeft,
+  Share2,
+  Tag,
+  Edit3
+} from 'lucide-react';
+
+interface WorkDetailClientProps {
+  id: string;
+  // The work, fetched by the server page (null if it couldn't: then it is
+  // loaded here, and a work that really doesn't exist shows the error below).
+  initialWork: BackendWork | null;
+}
+
+export function WorkDetailClient({ id, initialWork }: WorkDetailClientProps) {
+  const { lang, role, account } = useApp();
+  const searchHref = useSearchHref(); // back to the search results WITH the filters the user left on
+
+  const [work, setWork] = useState<WorkItem | null>(() => (initialWork ? toWorkItem(initialWork) : null));
+  const [isLoading, setIsLoading] = useState(!initialWork);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Already rendered by the server.
+    if (initialWork && initialWork._id === id) return;
+    let cancelled = false;
+
+    async function run() {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const w = await fetchWorkById(id);
+        if (!cancelled) setWork(toWorkItem(w));
+      } catch {
+        if (!cancelled) setError(lang === 'en' ? 'This work is no longer available.' : 'ไม่พบรายการนี้ หรือถูกลบไปแล้ว');
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    }
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, lang, initialWork]);
+
+  if (isLoading) {
+    return (
+      <PublicShell>
+        <div className="max-w-4xl mx-auto pb-12">
+          <LoadingSkeleton count={3} />
+        </div>
+      </PublicShell>
+    );
+  }
+
+  if (error || !work) {
+    return (
+      <PublicShell>
+        <div className="max-w-4xl mx-auto pb-12">
+          <ErrorRetry message={error ?? (lang === 'en' ? 'This work is no longer available.' : 'ไม่พบรายการนี้')} onRetry={() => window.location.reload()} />
+        </div>
+      </PublicShell>
+    );
+  }
+
+  return (
+    <PublicShell>
+      <div className="max-w-4xl mx-auto space-y-8 pb-12">
+        {/* Back Link & Deep Link Indicator */}
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <Link
+            href={searchHref}
+            className="inline-flex items-center gap-2 text-xs font-bold text-slate-600 hover:text-emerald-600 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>{lang === 'en' ? 'Back to Search Results' : 'กลับสู่รายการค้นหา'}</span>
+          </Link>
+
+          {canManageTags(role, account?.permissions) && (
+            <Link
+              href={`/admin/works/${work.id}/tags`}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl bg-sky-50 text-sky-700 hover:bg-sky-100 transition-colors"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+              <span>{lang === 'en' ? 'Curate Tags in Admin' : 'จัดระเบียบแท็กใน Admin'}</span>
+            </Link>
+          )}
+        </div>
+
+        {/* Main Work Header */}
+        <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 space-y-6">
+          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-4">
+            <div className="flex items-center gap-3">
+              <StatusBadge status={work.status} size="lg" />
+              <span className="text-xs font-mono font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-lg">
+                ID: {work.id}
+              </span>
+            </div>
+
+            <button
+              onClick={() => {
+                navigator.clipboard?.writeText(window.location.href);
+                alert(lang === 'en' ? 'Deep-link copied to clipboard!' : 'คัดลอกลิงก์ตรงสำหรับแจ้งเตือนแล้ว!');
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border border-slate-200 hover:bg-slate-50"
+            >
+              <Share2 className="w-3.5 h-3.5 text-emerald-600" />
+              <span>{lang === 'en' ? 'Share Deep-Link' : 'แชร์ Deep-Link'}</span>
+            </button>
+          </div>
+
+          <div>
+            <h1 className="text-xl sm:text-3xl font-extrabold text-slate-900 leading-snug">
+              {work.title}
+            </h1>
+            {work.description && (
+              <p className="text-xs sm:text-sm text-slate-600 mt-3 leading-relaxed">
+                {work.description}
+              </p>
+            )}
+          </div>
+
+          {/* Key Metrics Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/60">
+              <span className="text-xs text-slate-400 font-medium block">{lang === 'en' ? 'Government Site' : 'หน่วยงานภาครัฐ'}</span>
+              <span className="text-sm font-bold text-sky-700">{work.siteName}</span>
+            </div>
+            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/60">
+              <span className="text-xs text-slate-400 font-medium block">{budgetLabel(work.budgetBasis, lang)}</span>
+              <BudgetText budget={work.budget} reason={work.budgetMissingReason} basis={work.budgetBasis} className="text-lg font-bold text-emerald-700" showExplanation />
+            </div>
+            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/60">
+              {work.agencyId ? (
+                <>
+                  <span className="text-xs text-slate-400 font-medium block">{lang === 'en' ? 'Agency' : 'หน่วยงานเจ้าของโครงการ'}</span>
+                  <Link href={`/agencies/${work.agencyId}`} className="text-sm font-bold text-slate-900 hover:text-emerald-600 truncate block">
+                    {work.agencyName}
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <span className="text-xs text-slate-400 font-medium block">{lang === 'en' ? 'Published' : 'วันที่ประกาศ'}</span>
+                  <span className="text-sm font-bold text-slate-900">{work.publishDate || '—'}</span>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Procurement facts: bid deadline, fiscal year, method -- each shown only when known */}
+          {(work.deadlineAt || work.fiscalYear || work.methodLabel) && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {work.deadlineAt && (
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/60">
+                  <DeadlineText work={work} variant="block" align="left" dateClassName="text-lg font-bold text-slate-900" />
+                </div>
+              )}
+              {work.fiscalYear && (
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/60">
+                  <span className="text-xs text-slate-400 font-medium block">{lang === 'en' ? 'Fiscal year' : 'ปีงบประมาณ'}</span>
+                  <span className="text-lg font-bold text-slate-900">
+                    {work.fiscalYear}
+                    {work.fiscalYearEstimated && <span className="text-slate-400" aria-label={lang === 'en' ? 'estimated' : 'โดยประมาณ'}> ≈</span>}
+                  </span>
+                  {work.fiscalYearEstimated && (
+                    <span className="block text-xs text-slate-400 mt-1 leading-snug">{fiscalYearHint(true, lang)}</span>
+                  )}
+                </div>
+              )}
+              {work.methodLabel && (
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/60">
+                  <span className="text-xs text-slate-400 font-medium block">{lang === 'en' ? 'Procurement method' : 'วิธีการจัดซื้อจัดจ้าง'}</span>
+                  <span className="text-sm font-bold text-slate-900 leading-snug">{work.methodLabel}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Applied Tags Section */}
+          <div className="pt-2">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2.5 flex items-center gap-1.5">
+              <Tag className="w-3.5 h-3.5 text-emerald-600" />
+              <span>{lang === 'en' ? 'Tags Applied to this Work (Click to Follow):' : 'แท็กประจำโครงการนี้ (คลิกเพื่อติดตาม):'}</span>
+            </h4>
+            <div className="flex flex-wrap gap-2">
+              {work.tags.length > 0 ? (
+                work.tags.map(tag => (
+                  <FollowTagButton key={tag.id} tagId={tag.id} tagName={tag.name} variant="badge" size="sm" />
+                ))
+              ) : (
+                <span className="text-xs text-slate-400">{lang === 'en' ? 'No tags yet' : 'ยังไม่มีแท็ก'}</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* TOR Downloads Component */}
+        {work.torFiles.length > 0 ? (
+          <TORDownloadList files={work.torFiles} egpPages={work.egpPages} projectId={work.projectId} />
+        ) : (
+          <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200 space-y-3 text-sm text-slate-500">
+            <div className="flex items-center gap-3">
+              <FileText className="w-5 h-5 text-slate-300 shrink-0" />
+              <span>{lang === 'en' ? 'No TOR document has been ingested for this work yet.' : 'ยังไม่มีเอกสาร TOR สำหรับรายการนี้'}</span>
+            </div>
+            <EgpPageLinks links={work.egpPages ?? []} projectId={work.projectId} />
+          </div>
+        )}
+
+        {/* Status Change Timeline */}
+        <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 space-y-6">
+          <div className="flex items-center gap-2">
+            <History className="w-5 h-5 text-emerald-600" />
+            <h3 className="font-bold text-lg text-slate-900">
+              {lang === 'en' ? 'Status History & Change Detection' : 'ประวัติการอัปเดตและตรวจจับการเปลี่ยนแปลง'}
+            </h3>
+          </div>
+
+          <div className="relative pl-6 border-l-2 border-slate-200 space-y-6">
+            {work.history.map((item, idx) => (
+              <div key={idx} className="relative">
+                <div className="absolute -left-[31px] top-1 w-3.5 h-3.5 rounded-full bg-emerald-600 border-2 border-white" />
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-mono text-slate-400">{item.date}</span>
+                    <StatusBadge status={item.status} size="sm" />
+                  </div>
+                  <p className="text-xs sm:text-sm text-slate-700 font-medium">
+                    {item.note}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </PublicShell>
+  );
+}

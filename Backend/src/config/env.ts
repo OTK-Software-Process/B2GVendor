@@ -20,6 +20,12 @@ const envSchema = z.object({
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
   MAIL_FROM: z.string().default('B2G Vendor <no-reply@b2gvendor.local>'),
+  // How many instant-notification emails are sent at the same time. One by one,
+  // a popular tag (hundreds of followers) times a poll's new works took longer
+  // than the ~5 minutes instant notifications are promised in (see
+  // tests/integration/notification-latency.check.ts). Keep it within what the
+  // SMTP provider allows per connection burst.
+  EMAIL_SEND_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(5),
 
   // --- Data ingestion (N1) ---
   EGP_RSS_BASE_URL: z
@@ -54,6 +60,13 @@ const envSchema = z.object({
 
   // How often (ms) the worker checks for queued PollJob rows.
   POLL_JOB_CLAIM_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
+  // A poll job (one site, or "all sites") that is still going after this many
+  // minutes is stopped and logged as failed, so a stuck government server can't
+  // hold the "Poll Now" lock for ever. Default 2 h = the shortest schedule interval.
+  POLL_JOB_MAX_DURATION_MINUTES: z.coerce.number().positive().default(120),
+  // Time limit for ONE request to the e-GP feed or data.go.th. Without it a server
+  // that accepts the connection and never answers blocks the whole poll.
+  INGESTION_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
   // (The scheduled-poll interval is NOT an env var: an admin sets it from the
   // UI -- default 24h, minimum 2h -- see config/polling.ts and
   // models/ingestionSettings.model.ts.)
@@ -97,6 +110,15 @@ const envSchema = z.object({
   GOOGLE_CLOUD_LOCATION: z.string().default('asia-southeast1'),
   VERTEX_AI_MODEL: z.string().default('gemini-2.0-flash-001'),
   GOOGLE_APPLICATION_CREDENTIALS: z.string().optional()
+}).superRefine((value, ctx) => {
+  // Links are HTTPS in production: APP_URL is what every emailed link
+  // (verification, password reset, notifications, unsubscribe) is built from,
+  // and in production the session cookie is Secure, so a plain-http frontend
+  // couldn't sign anyone in anyway. Refuse to start rather than mail out
+  // plain-http links.
+  if (value.NODE_ENV === 'production' && !/^https:\/\//i.test(value.APP_URL)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['APP_URL'], message: 'APP_URL must be an https:// address in production' });
+  }
 });
 
 export type Env = z.infer<typeof envSchema>;
