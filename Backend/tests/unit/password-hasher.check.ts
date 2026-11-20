@@ -1,6 +1,7 @@
+import { createHmac } from 'node:crypto';
 import os from 'node:os';
 import bcrypt from 'bcryptjs';
-import { hashPassword, verifyPassword } from '../../src/utils/passwordHasher';
+import { hashPassword, needsRehash, PASSWORD_HASH_PREFIX, verifyPassword } from '../../src/utils/passwordHasher';
 
 // The password worker pool (src/utils/passwordHasher.ts): hashes made in the
 // workers are ordinary bcrypt hashes (old hashes keep working, new ones verify
@@ -33,10 +34,25 @@ async function main(): Promise<void> {
   const ROUNDS = 12;
 
   const pooled = await hashPassword('Correct-Horse-1', ROUNDS);
-  record(/^\$2[aby]\$12\$/.test(pooled) && bcrypt.getRounds(pooled) === ROUNDS, 'a hash made in the pool is a standard 12-round bcrypt hash', pooled.slice(0, 7));
-  record(bcrypt.compareSync('Correct-Horse-1', pooled), 'plain bcryptjs verifies a pool-made hash');
+  const inner = pooled.slice(PASSWORD_HASH_PREFIX.length);
+  record(pooled.startsWith(PASSWORD_HASH_PREFIX) && /^\$2[aby]\$12\$/.test(inner) && bcrypt.getRounds(inner) === ROUNDS, 'a hash made in the pool is "bcrypt-sha256$" + a 12-round bcrypt hash', pooled.slice(0, 22));
+  const prehashed = createHmac('sha256', inner.slice(0, 29)).update('Correct-Horse-1', 'utf8').digest('base64');
+  record(bcrypt.compareSync(prehashed, inner) && !bcrypt.compareSync('Correct-Horse-1', inner), 'what bcrypt holds is the HMAC-SHA256 of the password keyed by its own salt (44 characters), not the password');
   const legacy = bcrypt.hashSync('Correct-Horse-1', ROUNDS);
   record(await verifyPassword('Correct-Horse-1', legacy), 'the pool verifies a hash made the old way (existing accounts keep working)');
+
+  // ASVS V6.2.9: long passwords, Thai included, are hashed whole -- bcrypt alone
+  // cut its input at 72 bytes, so two passwords sharing the first 72 bytes matched.
+  const thai64 = 'ก'.repeat(64); // 192 bytes
+  const thaiHash = await hashPassword(thai64, ROUNDS);
+  record(await verifyPassword(thai64, thaiHash) && !(await verifyPassword('ก'.repeat(63) + 'ข', thaiHash)), '64 Thai characters (192 bytes) verify, and changing only the last one is refused');
+  const longA = 'a'.repeat(100) + 'X';
+  const longHash = await hashPassword(longA, ROUNDS);
+  record(!(await verifyPassword('a'.repeat(100) + 'Y', longHash)), 'two 101-character passwords that differ only after byte 72 do not match (bcrypt alone would accept it)');
+  record(!(await verifyPassword('a'.repeat(72) + 'tail', bcrypt.hashSync('a'.repeat(72), 4))), 'a legacy hash never accepts a password longer than 72 bytes (no silent truncation)');
+
+  // ASVS V11.2.2: which stored hashes get replaced at the next successful sign-in.
+  record(needsRehash(legacy, ROUNDS) && !needsRehash(pooled, ROUNDS) && needsRehash(pooled, 13), 'needsRehash: an old-scheme hash, or a cost other than BCRYPT_ROUNDS, is due for an upgrade; a current one is not');
   record(!(await verifyPassword('wrong-password', pooled)), 'a wrong password is refused');
   const bad = await verifyPassword('x', 'not-a-bcrypt-hash').then(v => `resolved ${v}`, () => 'rejected');
   record(bad === 'resolved false' || bad === 'rejected', 'a malformed hash never verifies', bad);

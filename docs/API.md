@@ -180,7 +180,7 @@ or vanish between pages. `/admin/accounts` and `/admin/staff` add a `summary` of
 | 400 | `VALIDATION_ERROR` | A field failed its rule; `fields` says which and why |
 | 400 | `BAD_REQUEST` | The request itself is wrong (broken JSON, passwords that do not match, a breached password) |
 | 400 | `TOKEN_INVALID` | An email or reset link that has expired or was already used |
-| 401 | `NOT_AUTHENTICATED` | No session, or it expired or was revoked |
+| 401 | `NOT_AUTHENTICATED` | No session, or it expired, timed out from inactivity (30 minutes for staff, 24 hours for vendors) or was revoked |
 | 401 | `INVALID_CREDENTIALS` | Wrong email or password (also a wrong *current* password on change) |
 | 403 | `FORBIDDEN` | Signed in, but not allowed here |
 | 403 | `ACCOUNT_SUSPENDED` | The account has been suspended |
@@ -281,7 +281,7 @@ sequenceDiagram
 | :--- | :--- |
 | `name` | Required, at most 150 characters. Letters, hyphens, and apostrophes, with at most one space |
 | `email` | Required, a valid address with no spaces; stored lower-case |
-| `password` | At least 8 characters, with a letter and a digit, at most 72 bytes, and not in a known breach |
+| `password` | 8 to 128 characters of any kind (no letter/digit rule), not made mostly of the site's name or the person's own details, and not in a known breach (Security.md §12) |
 | `type` | `individual` (default) or `business`. Fixed after sign-up |
 | `businessProfile` | Required for `business`: `companyName` (at most 200) and `taxId` (exactly 13 digits) |
 
@@ -460,9 +460,12 @@ The password hash, the sign-in lock fields, and the internal id are never includ
 | `GET /account/profile` | The account, as above |
 | `PATCH /account/profile` | Any of `name`, `phone` (a Thai number, `+66` or `0` first), `businessProfile` (`companyName`, 13-digit `taxId`). **Email and account type cannot be changed.** Strict: an unknown field is `400` |
 | `GET /account/session` | The account's most recently active session: browser, OS, masked IP address, last-active time |
+| `GET /account/sessions` | Every live session of the account: `[{ id, browser, os, ipAddress (masked), lastActiveAt, isCurrent }]` |
+| `POST /account/sessions/:id/revoke` | `{ password }` — ends one of the account's own sessions. The password is checked against the sign-in lock; another account's session is `404` |
+| `POST /account/sessions/revoke-others` | `{ password }` — ends every session but this one; answers `{ revoked }` |
 | `GET /account/notification-settings` | `{ emailNotificationsEnabled, notificationFrequency, pausedTagIds }` |
 | `PATCH /account/notification-settings` | `{ emailNotificationsEnabled?: boolean, notificationFrequency?: "instant" or "daily" }` |
-| `POST /account/change-password` | `{ currentPassword, newPassword, confirmNewPassword }`. The current password is checked against the sign-in lock, so a stolen session cannot guess it without limit. Ends **every other** session; the current one stays |
+| `POST /account/change-password` | `{ currentPassword, newPassword, confirmNewPassword }`. The current password is checked against the sign-in lock, so a stolen session cannot guess it without limit. Ends **every other** session; the current one stays. The owner is emailed a notice |
 
 ### Following tags (use case 6.2.5)
 
@@ -555,6 +558,7 @@ Only ever acts on vendor accounts: an Admin or Super Admin id is reported as `40
 | `PATCH /admin/accounts/:id` | `{ name?, phone? (null clears it), businessProfile? }`. Email and account type are identity and cannot change; a business profile only on a business account |
 | `PATCH /admin/accounts/:id/suspend` · `/reactivate` | Suspending ends every session at once, so a later reactivation does not bring old sign-ins back |
 | `POST /admin/accounts/:id/password-link` | Sends the vendor a fresh set-or-reset link. Refused for a suspended account |
+| `POST /admin/accounts/:id/sign-out` | Ends every session of the vendor ("sign out everywhere") without suspending it. Answers `{ revoked }`; recorded in the audit log |
 | `DELETE /admin/accounts/:id` | **Permanent.** Removes the account, its sessions, follows, notifications, and outstanding links. Answers `{ id, email }` |
 
 ### 6.3 Admin accounts ✅ (Super Admin only)

@@ -1,5 +1,7 @@
 import { randomBytes } from 'crypto';
-import { hashPassword, verifyPassword } from '../utils/passwordHasher';
+import { hashPassword, needsRehash, verifyPassword } from '../utils/passwordHasher';
+import { assertPasswordNotGuessable } from '../utils/passwordPolicy';
+import { audit } from './audit.service';
 import { Request } from 'express';
 import { env } from '../config/env';
 import { Account, IAccount } from '../models/account.model';
@@ -61,6 +63,13 @@ export async function registerAccount(
     throw AppError.serviceUnavailable('Email verification is not configured.');
   }
 
+  // Cheap local check first, then the breach lookup (both before any write).
+  assertPasswordNotGuessable(input.password, {
+    email: input.email,
+    name: input.name,
+    companyName: input.businessProfile?.companyName,
+    taxId: input.businessProfile?.taxId
+  });
   await assertPasswordNotPwned(input.password);
 
   let account: IAccount;
@@ -122,6 +131,24 @@ export async function verifyEmailAddress(rawToken: string): Promise<void> {
   }
 }
 
+/**
+ * ASVS V11.2.2: the one moment the plain password is known to be right is a
+ * successful sign-in, so that is when a hash in the old scheme (plain bcrypt) or
+ * with an outdated cost is replaced. Written straight to the database -- not
+ * through save(), which would count as a password change (passwordChangedAt,
+ * the "your password was changed" email). Bookkeeping: not audited. A failure
+ * here never blocks the sign-in; the next one tries again.
+ */
+async function upgradePasswordHash(accountId: IAccount['_id'], stored: string, plain: string): Promise<void> {
+  if (!needsRehash(stored, env.BCRYPT_ROUNDS)) return;
+  try {
+    const upgraded = await hashPassword(plain, env.BCRYPT_ROUNDS);
+    await audit.withoutAuto(() => Account.updateOne({ _id: accountId, passwordHash: stored }, { $set: { passwordHash: upgraded } }).exec());
+  } catch {
+    // keep the old hash; it still verifies
+  }
+}
+
 export async function loginWithPassword(
   input: { email: string; password: string },
   req: Request
@@ -155,6 +182,7 @@ export async function loginWithPassword(
     throw AppError.invalidCredentials();
   }
   await clearFailedLogins(account._id);
+  await upgradePasswordHash(account._id, account.passwordHash, input.password);
 
   if (account.status === 'suspended') {
     throw AppError.accountSuspended();

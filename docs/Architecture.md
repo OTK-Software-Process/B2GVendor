@@ -704,7 +704,8 @@ flowchart TB
 - **Behind a proxy:** in production the API sets `trust proxy` to 1 and marks the cookie `Secure`.
 - ⬜ The target for a real deployment (SRS §5.3 *Infrastructure Hardening*, *Data Encryption in
   Transit*): TLS and an HTTP-to-HTTPS redirect, MongoDB with authentication and no public port,
-  containers running as a non-root user, and a dependency scan on every change. The Compose file today
+  containers running as a non-root user. (The dependency scan already runs on every change: CI job
+  *Dependencies*, with an SBOM per build.) The Compose file today
   is the local stack: Mongo is unauthenticated and published on `27017`, and the API runs over plain
   HTTP.
 
@@ -740,7 +741,7 @@ notes of the SRS requirement it names.
 | Tags and notifications (FR-3.x) | Follow, pause, unfollow, in-app and email notifications, daily digest, tag vocabulary | ✅ — agency tags are not assigned automatically (FR-3.2) 🔨; no-login email unsubscribe (FR-3.7) ⬜ |
 | Search and browse (FR-4.x) | Thai-aware search, filters, sorts, status badges, site directory | 🔨 — extracted TOR text is not indexed; budget and date-range filters are in the API but not yet on the search page |
 | Work detail and TOR (FR-5.x) | Detail page, status history, PDF download, hash dedupe | ✅ — HTTPS depends on the production deployment 🔨 |
-| Security (SRS §5.3) | CSRF, headers, validation, lockout, hashing, rate limits on sign-in, sign-up and reset | ✅ — TLS, Mongo authentication, non-root containers, dependency scan, session idle timeout, rate limits on search and poll ⬜ |
+| Security (SRS §5.3) | CSRF, headers, validation, lockout, hashing, rate limits on sign-in, sign-up and reset | ✅ — and the dependency audit + SBOM in CI, session idle timeout, rate limits on search and poll. ⬜ TLS, Mongo authentication, non-root containers |
 | Verification (SRS §5.6) | Per-area `check:*` scripts against throwaway databases | 🔨 — CI, browser and accessibility tests, load tests ⬜ |
 
 ### Open decisions

@@ -57,7 +57,8 @@ export default function ResetPasswordPage() {
     } catch (error) {
       if (error instanceof ApiError) {
         const message = localizeAuthError(error.message, lang);
-        setFieldError(error.fields?.newPassword ?? error.fields?.confirmNewPassword ?? message);
+        const field = error.fields?.newPassword ?? error.fields?.confirmNewPassword;
+        setFieldError(field ? localizeAuthError(field, lang) : message);
         setFormError(message);
       } else {
         setFormError(lang === 'en' ? 'Something went wrong. Please try again.' : 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง');

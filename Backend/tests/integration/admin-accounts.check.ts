@@ -332,8 +332,8 @@ async function main(): Promise<void> {
   if (rawSetupToken) {
     const setupPassword = await call('POST', '/auth/reset-password', undefined, {
       token: rawSetupToken,
-      newPassword: 'SetupPassword123',
-      confirmNewPassword: 'SetupPassword123'
+      newPassword: 'Kangaroo-Lantern-77',
+      confirmNewPassword: 'Kangaroo-Lantern-77'
     });
     record(setupPassword.status === 200, 'the emailed setup link lets the vendor set a password', String(setupPassword.status));
   }

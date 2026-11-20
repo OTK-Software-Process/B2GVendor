@@ -12,6 +12,12 @@ const envSchema = z.object({
   // In production the name always carries the __Host- prefix (see config/cookie.ts).
   SESSION_COOKIE_NAME: z.string().default('b2g_session'),
   SESSION_TTL_DAYS: z.coerce.number().int().positive().default(7),
+  // Inactivity timeouts (ASVS V7.3.1, docs/Security.md section 4). A session
+  // that makes no request for this long is ended and must sign in again.
+  // Staff accounts change configuration and other people's accounts, so they
+  // time out much sooner than vendors, who only manage their own follows.
+  SESSION_IDLE_MINUTES_STAFF: z.coerce.number().int().min(1).default(30),
+  SESSION_IDLE_MINUTES_VENDOR: z.coerce.number().int().min(1).default(1440),
   COOKIE_SAMESITE: z.enum(['lax', 'strict', 'none']).default('lax'),
 
   BCRYPT_ROUNDS: z.coerce.number().int().min(10).max(15).default(12),

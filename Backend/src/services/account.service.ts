@@ -2,8 +2,11 @@ import { Account, IAccount, NotificationFrequency } from "../models/account.mode
 import { AppError } from "../utils/AppError";
 import { Session } from "../models/session.model";
 import {
+  listActiveSessions,
   revokeAllSessions,
   revokeOtherSessions,
+  revokeSessionById,
+  SessionView,
   toSessionView,
 } from "./session.service";
 import {
@@ -12,8 +15,11 @@ import {
   issueToken,
   validateToken,
 } from "./token.service";
-import { isEmailConfigured, sendPasswordResetEmail } from "./email.service";
+import { isEmailConfigured, sendPasswordChangedEmail, sendPasswordResetEmail } from "./email.service";
+import { logger } from "../utils/logger";
+import { maskEmail } from "../utils/privacy";
 import { assertPasswordNotPwned } from "../integrations/haveIBeenPwned.client";
+import { assertPasswordNotGuessable } from "../utils/passwordPolicy";
 import { clearFailedLogins, reserveLoginAttempt } from "./loginLockout.service";
 
 export async function getProfile(accountId: string): Promise<IAccount> {
@@ -68,10 +74,37 @@ export async function changePassword(
   }
   await clearFailedLogins(account._id);
 
+  assertPasswordNotGuessable(newPassword, ownerOf(account), "newPassword");
   await assertPasswordNotPwned(newPassword);
   account.passwordHash = newPassword;
   await account.save();
   await revokeOtherSessions(accountId, currentSessionId);
+  await notifyPasswordChanged(account, "changed");
+}
+
+// The words of this account that a password must not be made of (utils/passwordPolicy.ts).
+function ownerOf(account: { email: string; name: string; businessProfile?: { companyName?: string; taxId?: string } | null }) {
+  return {
+    email: account.email,
+    name: account.name,
+    companyName: account.businessProfile?.companyName,
+    taxId: account.businessProfile?.taxId,
+  };
+}
+
+/**
+ * ASVS V6.3.7: tell the owner, by email, that their password changed -- so a
+ * change they did not make (a stolen session, a hijacked reset) does not go
+ * unnoticed. Best effort: the change itself has already happened and must not
+ * be undone because a notice could not be sent.
+ */
+async function notifyPasswordChanged(account: { email: string; name: string }, how: "changed" | "reset"): Promise<void> {
+  if (!isEmailConfigured()) return;
+  try {
+    await sendPasswordChangedEmail(account.email, account.name, how);
+  } catch (error) {
+    logger.warn("account", `Could not send the password-changed notice to ${maskEmail(account.email)}`, error);
+  }
 }
 
 export async function forgotPassword(email: string): Promise<void> {
@@ -105,7 +138,9 @@ export async function resetPassword(
   token: string,
   newPassword: string,
 ): Promise<void> {
-  await validateToken(token, "password_reset");
+  const tokenAccountId = await validateToken(token, "password_reset");
+  const owner = await Account.findById(tokenAccountId).select("email name businessProfile");
+  if (owner) assertPasswordNotGuessable(newPassword, ownerOf(owner), "newPassword");
   await assertPasswordNotPwned(newPassword);
   const accountId = await consumeToken(token, "password_reset");
 
@@ -119,6 +154,40 @@ export async function resetPassword(
   // Proving control of the mailbox lifts a sign-in lockout.
   await clearFailedLogins(account._id);
   await revokeAllSessions(accountId);
+  await notifyPasswordChanged(account, "reset");
+}
+
+// ----------------------------------------------------------- sessions (ASVS V7.5.2)
+
+/** Every live session of the account: browser, OS, masked address, last active, which one is this. */
+export function listSessions(accountId: string, currentSessionId: string): Promise<SessionView[]> {
+  return listActiveSessions(accountId, currentSessionId);
+}
+
+/**
+ * Ending another session needs the password again: someone who only holds a
+ * stolen session must not be able to throw the owner out. The check counts
+ * toward the per-account sign-in lock, like change-password.
+ */
+async function confirmPassword(accountId: string, password: string): Promise<void> {
+  const account = await Account.findById(accountId).select("+passwordHash");
+  if (!account) throw AppError.notFound("Account not found.");
+  const attempt = await reserveLoginAttempt(account._id);
+  if (!attempt.allowed) throw AppError.accountLocked(attempt.retryAfterSeconds);
+  if (!(await account.comparePassword(password))) throw AppError.invalidCredentials();
+  await clearFailedLogins(account._id);
+}
+
+export async function revokeSession(accountId: string, sessionId: string, password: string): Promise<{ revoked: boolean }> {
+  await confirmPassword(accountId, password);
+  const session = await Session.findOne({ _id: sessionId, accountId, revokedAt: { $exists: false } });
+  if (!session) throw AppError.notFound("No such session.");
+  return { revoked: await revokeSessionById(session._id) };
+}
+
+export async function revokeOtherSessionsWithPassword(accountId: string, currentSessionId: string, password: string): Promise<{ revoked: number }> {
+  await confirmPassword(accountId, password);
+  return { revoked: await revokeOtherSessions(accountId, currentSessionId) };
 }
 
 export interface NotificationSettingsUpdate {

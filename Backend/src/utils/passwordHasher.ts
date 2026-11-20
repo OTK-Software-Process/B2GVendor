@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import os from 'node:os';
 import { Worker } from 'node:worker_threads';
 import bcrypt from 'bcryptjs';
@@ -120,7 +121,7 @@ function dispatch(): void {
 }
 
 function runInline(task: Task): void {
-  const done = task.op === 'hash' ? bcrypt.hash(task.a, task.b as number) : bcrypt.compare(task.a, task.b as string);
+  const done = task.op === 'hash' ? bcrypt.hash(task.a, task.b) /* a salt string (or a cost) */ : bcrypt.compare(task.a, task.b as string);
   done.then(task.resolve, task.reject);
 }
 
@@ -133,12 +134,58 @@ function submit<T>(op: Op, a: string, b: string | number): Promise<T> {
   });
 }
 
-/** bcrypt hash of `plain` with `rounds` cost, computed off the main thread. */
-export function hashPassword(plain: string, rounds: number): Promise<string> {
-  return submit<string>('hash', plain, rounds);
+// ---------------------------------------------------------------- the scheme
+//
+// bcrypt reads only the first 72 BYTES of its input: a longer password is cut
+// short, and 64 Thai characters (3 bytes each) did not fit at all, so the policy
+// had to stop at 72 bytes (ASVS V6.2.9). Passwords are therefore pre-hashed:
+//
+//   stored = "bcrypt-sha256$" + bcrypt( base64( HMAC-SHA256(key = bcrypt salt, password) ), salt )
+//
+// The HMAC turns any password into 44 ASCII characters, well inside bcrypt's
+// limit, and keying it with the per-password bcrypt salt means a leaked list of
+// plain SHA-256 password hashes can't be tested against our hashes directly
+// ("hash shucking"). This is the same construction as passlib's bcrypt_sha256 v2.
+//
+// Hashes made before 2026-11-20 are plain bcrypt ("$2b$..."): they still verify,
+// and loginWithPassword() upgrades each one at its next successful sign-in
+// (needsRehash below, ASVS V11.2.2).
+
+export const PASSWORD_HASH_PREFIX = 'bcrypt-sha256$';
+const LEGACY_MAX_BYTES = 72;
+
+function prehash(plain: string, salt: string): string {
+  return createHmac('sha256', salt).update(plain, 'utf8').digest('base64');
 }
 
-/** Whether `plain` matches the bcrypt `hash`, computed off the main thread. */
-export function verifyPassword(plain: string, hash: string): Promise<boolean> {
-  return submit<boolean>('compare', plain, hash);
+/** Hash of `plain` in the current scheme with `rounds` bcrypt cost, computed off the main thread. */
+export async function hashPassword(plain: string, rounds: number): Promise<string> {
+  const salt = bcrypt.genSaltSync(rounds); // random 128-bit salt, "$2b$<rounds>$" + 22 chars
+  return PASSWORD_HASH_PREFIX + (await submit<string>('hash', prehash(plain, salt), salt));
+}
+
+/** Whether `plain` matches a stored hash of either scheme, computed off the main thread. */
+export function verifyPassword(plain: string, stored: string): Promise<boolean> {
+  if (stored.startsWith(PASSWORD_HASH_PREFIX)) {
+    const inner = stored.slice(PASSWORD_HASH_PREFIX.length);
+    return submit<boolean>('compare', prehash(plain, inner.slice(0, 29)), inner);
+  }
+  // A legacy plain-bcrypt hash only ever held a password of at most 72 bytes.
+  // Refuse a longer one outright rather than let bcrypt compare its first 72 bytes.
+  if (Buffer.byteLength(plain, 'utf8') > LEGACY_MAX_BYTES) return Promise.resolve(false);
+  return submit<boolean>('compare', plain, stored);
+}
+
+/**
+ * Whether a stored hash should be replaced at the next successful sign-in: it
+ * uses the old scheme, or a bcrypt cost other than the configured BCRYPT_ROUNDS
+ * (crypto agility, ASVS V11.2.2: raising the cost upgrades every account in time).
+ */
+export function needsRehash(stored: string, rounds: number): boolean {
+  if (!stored.startsWith(PASSWORD_HASH_PREFIX)) return true;
+  try {
+    return bcrypt.getRounds(stored.slice(PASSWORD_HASH_PREFIX.length)) !== rounds;
+  } catch {
+    return true;
+  }
 }

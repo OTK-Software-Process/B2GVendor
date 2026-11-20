@@ -15,4 +15,5 @@ adminAccountRouter.patch('/:id', validate(updateVendorSchema), asyncHandler(admi
 adminAccountRouter.patch('/:id/suspend', asyncHandler(adminAccountController.suspend));
 adminAccountRouter.patch('/:id/reactivate', asyncHandler(adminAccountController.reactivate));
 adminAccountRouter.post('/:id/password-link', asyncHandler(adminAccountController.sendPasswordLink));
+adminAccountRouter.post('/:id/sign-out', asyncHandler(adminAccountController.signOutEverywhere));
 adminAccountRouter.delete('/:id', asyncHandler(adminAccountController.remove));

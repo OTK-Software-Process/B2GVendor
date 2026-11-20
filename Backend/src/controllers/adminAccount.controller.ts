@@ -27,6 +27,10 @@ export async function reactivate(req: Request, res: Response): Promise<void> {
   ok(res, await adminAccountService.reactivateVendor(req.params.id));
 }
 
+export async function signOutEverywhere(req: Request, res: Response): Promise<void> {
+  ok(res, await adminAccountService.signOutVendorEverywhere(req.params.id));
+}
+
 export async function sendPasswordLink(req: Request, res: Response): Promise<void> {
   ok(res, await adminAccountService.sendVendorPasswordLink(req.params.id));
 }

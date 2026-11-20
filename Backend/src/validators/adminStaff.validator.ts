@@ -5,7 +5,7 @@ import { nameSchema, phoneSchema } from './adminAccount.validator';
 // What an Admin is allowed to do -- the same three role names the rest of the
 // admin panel is gated by (see PERMISSIONS in account.model.ts).
 export const permissionSchema = z.enum(PERMISSIONS, {
-  errorMap: () => ({ message: 'Choose Poll Admin, Tag Admin or Poll and Tag Admin' })
+  error: () => 'Choose Poll Admin, Tag Admin or Poll and Tag Admin'
 });
 
 export const listStaffQuerySchema = z

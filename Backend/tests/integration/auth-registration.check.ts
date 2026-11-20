@@ -142,15 +142,14 @@ async function main(): Promise<void> {
       'the business profile is persisted without changing its tax ID or company name'
     );
 
+    // The rules since 2026-11-20 (utils/passwordPolicy.ts): 8-128 characters of
+    // ANY kind (no letter/digit rule, ASVS V6.2.5), not mostly context words
+    // (ASVS V6.2.11). Composition is no longer a reason to refuse.
     const passwordCases = [
       { email: 'password-short@example.co.th', password: 'Abcde1f', ip: '198.51.100.12' },
-      { email: 'password-no-letter@example.co.th', password: '12345678', ip: '198.51.100.13' },
-      { email: 'password-no-number@example.co.th', password: 'Abcdefgh', ip: '198.51.100.14' },
-      {
-        email: 'password-73-bytes@example.co.th',
-        password: `${'A'.repeat(70)}1é`,
-        ip: '198.51.100.15'
-      }
+      { email: 'password-129@example.co.th', password: 'a'.repeat(129), ip: '198.51.100.13' },
+      { email: 'password-sitename@example.co.th', password: 'B2GVendor2026!', ip: '198.51.100.14' },
+      { email: 'kittisak.srisuk@example.co.th', password: 'Kittisak1234', ip: '198.51.100.15' }
     ];
     for (const testCase of passwordCases) {
       const response = await post(
@@ -167,6 +166,13 @@ async function main(): Promise<void> {
         JSON.stringify(response.json)
       );
       record(!(await Account.exists({ email: testCase.email })), `no account is created for ${testCase.email}`);
+    }
+
+    // Composition rules are gone: letters only, digits only and spaces are all fine.
+    for (const [i, free] of ['correcthorsebatterystaple', '73519086', 'four plain words here'].entries()) {
+      const email = `free-${i}@example.co.th`;
+      const accepted = await post('/auth/register', body(email, { password: free, confirmPassword: free }), `198.51.100.${40 + i}`);
+      record(accepted.status === 201 && !!(await Account.exists({ email })), `registration accepts a password of any composition (${JSON.stringify(free)}) -- ASVS V6.2.5`, JSON.stringify(accepted.json));
     }
 
     const maxLengthEmail = 'password-72-bytes@example.co.th';
@@ -186,7 +192,7 @@ async function main(): Promise<void> {
     );
 
     const breachedEmail = 'breached-password@example.co.th';
-    const breachedPassword = 'BreachedPass123';
+    const breachedPassword = 'Sunflower-Orbit-42';
     HIBP.setBreachedPasswords([breachedPassword]);
     const breached = await post(
       '/auth/register',
@@ -213,6 +219,7 @@ async function main(): Promise<void> {
     record(!(await Account.exists({ email: hibpDownEmail })), 'HIBP unavailability creates no account');
 
     const smtpFailureEmail = 'smtp-unavailable@example.co.th';
+    const unusedTokensBefore = await Token.countDocuments({ purpose: 'email_verification', usedAt: { $exists: false } });
     smtp.rejectNextMessage();
     const smtpFailure = await post('/auth/register', body(smtpFailureEmail), '198.51.100.19');
     record(
@@ -225,7 +232,7 @@ async function main(): Promise<void> {
       (await Token.countDocuments({
         purpose: 'email_verification',
         usedAt: { $exists: false }
-      })) === 2,
+      })) === unusedTokensBefore,
       'failed SMTP delivery removes its verification token'
     );
 

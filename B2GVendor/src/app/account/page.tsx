@@ -4,19 +4,11 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { PublicShell } from '@/components/PublicShell';
+import { SessionList } from '@/components/SessionList';
 import { useApp } from '@/context/AppContext';
 import { api } from '@/lib/api';
 import type { AccountView } from '@/context/AppContext';
 import { User, Building, Lock, ShieldCheck, Save } from 'lucide-react';
-
-interface CurrentSessionView {
-  browser: string;
-  os: string;
-  ipAddress?: string;
-  location?: string;
-  lastActiveAt?: string | Date;
-  isCurrent: boolean;
-}
 
 function sanitizeName(raw: string): string {
   const noBadChars = raw.replace(/[^\p{L}\p{M}\s'-]/gu, '');
@@ -39,7 +31,6 @@ export default function AccountProfilePage() {
   const [savedNotice, setSavedNotice] = useState(false);
   const [errorNotice, setErrorNotice] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-  const [currentSession, setCurrentSession] = useState<CurrentSessionView | null>(null);
 
   useEffect(() => {
     api.get<AccountView>('/account/profile')
@@ -54,9 +45,6 @@ export default function AccountProfilePage() {
       })
       .catch((error: Error) => setErrorNotice(error.message));
 
-    api.get<CurrentSessionView>('/account/session')
-      .then((session) => setCurrentSession(session))
-      .catch(() => setCurrentSession(null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -258,24 +246,7 @@ export default function AccountProfilePage() {
                 </button>
               </div>
 
-              <div className="pt-2 border-t border-slate-100 space-y-2">
-                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                  {lang === 'en' ? 'Active Sessions' : 'เซสชันที่เชื่อมต่ออยู่'}
-                </h4>
-                <div className="text-xs space-y-1 bg-slate-50 p-3 rounded-xl">
-                  <p className="font-bold text-slate-900">
-                    {currentSession
-                      ? `${currentSession.os} ${currentSession.browser}`
-                      : lang === 'en'
-                        ? 'Current device'
-                        : 'อุปกรณ์ที่ใช้อยู่'}
-                    {currentSession?.isCurrent ? ` • ${lang === 'en' ? 'Current Session' : 'เซสชันปัจจุบัน'}` : ''}
-                  </p>
-                  <p className="text-slate-400">
-                    IP: {currentSession?.ipAddress ?? (lang === 'en' ? 'Unavailable' : 'ไม่สามารถระบุได้')} • {(lang === 'en' ? 'Current location: ' : 'ตำแหน่งปัจจุบัน: ')}{currentSession?.location ?? (lang === 'en' ? 'Unavailable' : 'ไม่สามารถระบุได้')}
-                  </p>
-                </div>
-              </div>
+              <SessionList lang={lang} />
             </div>
           </div>
         </form>

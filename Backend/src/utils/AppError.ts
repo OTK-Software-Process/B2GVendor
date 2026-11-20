@@ -74,8 +74,8 @@ export class AppError extends Error {
     );
   }
 
-  static notAuthenticated(): AppError {
-    return new AppError(401, 'NOT_AUTHENTICATED', 'You are not signed in.');
+  static notAuthenticated(message = 'You are not signed in.'): AppError {
+    return new AppError(401, 'NOT_AUTHENTICATED', message);
   }
 
   static forbidden(message = 'You do not have permission to do that.'): AppError {

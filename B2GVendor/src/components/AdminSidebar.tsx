@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
 import { adminRoleName, canAccessAdminPath, canManagePolling, permissionProfile } from '@/lib/adminAccess';
 import {
@@ -17,13 +17,23 @@ import {
   ArrowLeft,
   Menu,
   X,
-  Lock
+  Lock,
+  LogOut
 } from 'lucide-react';
 
 export function AdminSidebar() {
   const pathname = usePathname();
-  const { lang, role, account, isPolling, triggerPollNow } = useApp();
+  const router = useRouter();
+  const { lang, role, account, isPolling, triggerPollNow, signOut } = useApp();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+
+  // ASVS V7.4.4: every admin page has a visible way to sign out.
+  const handleSignOut = async () => {
+    setSigningOut(true);
+    await signOut();
+    router.replace('/login');
+  };
   const canPoll = canManagePolling(role, account?.permissions);
 
   const navGroups = [
@@ -134,6 +144,25 @@ export function AdminSidebar() {
             </div>
           </div>
         ))}
+      </div>
+
+      {/* Who is signed in, and the way out */}
+      <div className="p-4 border-t border-slate-100 space-y-2">
+        {account && (
+          <div className="px-1 text-[11px] leading-tight">
+            <p className="font-bold text-slate-700 truncate">{account.name}</p>
+            <p className="text-slate-400 truncate">{account.email}</p>
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={handleSignOut}
+          disabled={signingOut}
+          className="w-full py-2 px-3 rounded-xl border border-slate-200 text-slate-600 hover:text-rose-700 hover:border-rose-200 hover:bg-rose-50 font-bold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-60"
+        >
+          <LogOut className="w-3.5 h-3.5" />
+          <span>{signingOut ? (lang === 'en' ? 'Signing out...' : 'กำลังออกจากระบบ...') : (lang === 'en' ? 'Sign out' : 'ออกจากระบบ')}</span>
+        </button>
       </div>
 
       {/* Footer Info */}

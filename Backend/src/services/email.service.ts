@@ -132,6 +132,34 @@ export async function sendEmailVerificationEmail(
 }
 
 /**
+ * ASVS V6.3.7: sent after every password change and reset, so the owner notices
+ * a change they did not make. It carries no link that changes anything -- only
+ * the way to the forgot-password page, to take the account back.
+ */
+export async function sendPasswordChangedEmail(to: string, name: string, how: 'changed' | 'reset'): Promise<void> {
+  const resetUrl = `${env.APP_URL}/forgot-password`;
+  const when = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', dateStyle: 'long', timeStyle: 'short' });
+  const thaiHow = how === 'reset' ? 'ตั้งรหัสผ่านใหม่ผ่านลิงก์ทางอีเมล' : 'เปลี่ยนรหัสผ่านในหน้าบัญชี';
+  const englishHow = how === 'reset' ? 'reset through an emailed link' : 'changed from the account page';
+
+  await send({
+    to,
+    subject: 'รหัสผ่านของคุณถูกเปลี่ยนแล้ว | Your B2G Vendor password was changed',
+    text:
+      `สวัสดีคุณ ${name}\n\nรหัสผ่านบัญชี B2G Vendor ของคุณถูก${thaiHow}เมื่อ ${when} และอุปกรณ์อื่นถูกออกจากระบบแล้ว ` +
+      `หากไม่ใช่คุณ กรุณาตั้งรหัสผ่านใหม่ทันทีที่ ${resetUrl}\n\n` +
+      `Your B2G Vendor password was ${englishHow} on ${when} (Bangkok time), and your other devices were signed out. ` +
+      `If this was not you, reset your password now: ${resetUrl}`,
+    html: layout(
+      'รหัสผ่านของคุณถูกเปลี่ยนแล้ว',
+      `สวัสดีคุณ ${name} — รหัสผ่านบัญชี B2G Vendor ของคุณถูก${thaiHow}เมื่อ ${when} และอุปกรณ์อื่นถูกออกจากระบบแล้ว หากเป็นคุณ ไม่ต้องดำเนินการใด ๆ หากไม่ใช่คุณ กรุณาตั้งรหัสผ่านใหม่ทันที`,
+      'ตั้งรหัสผ่านใหม่',
+      resetUrl
+    )
+  });
+}
+
+/**
  * Sent instead of a verification email when someone signs up with an email that
  * already has an account. The sign-up itself answers exactly as for a new
  * address (ASVS V6.3.8), so only the owner of the mailbox learns the account
@@ -145,12 +173,8 @@ export async function sendAccountExistsEmail(to: string, name: string): Promise<
     to,
     subject: 'มีการสมัครด้วยอีเมลของคุณ | Someone tried to sign up with your email',
     text:
-      `สวัสดีคุณ ${name}
-
-มีผู้พยายามสมัครบัญชี B2G Vendor ด้วยอีเมลนี้ ซึ่งมีบัญชีอยู่แล้ว ` +
-      `หากเป็นคุณ เข้าสู่ระบบได้ที่ ${loginUrl} หรือตั้งรหัสผ่านใหม่ที่ ${resetUrl}
-
-` +
+      `สวัสดีคุณ ${name}\n\nมีผู้พยายามสมัครบัญชี B2G Vendor ด้วยอีเมลนี้ ซึ่งมีบัญชีอยู่แล้ว ` +
+      `หากเป็นคุณ เข้าสู่ระบบได้ที่ ${loginUrl} หรือตั้งรหัสผ่านใหม่ที่ ${resetUrl}\n\n` +
       `Someone tried to create a B2G Vendor account with this email, which already has one. ` +
       `If it was you, sign in or reset your password. If not, you can ignore this email -- nothing has changed.`,
     html: layout(

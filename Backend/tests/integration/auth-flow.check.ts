@@ -96,7 +96,7 @@ async function main(): Promise<void> {
     emailVerified: false
   });
   record(!!storedAccount, 'the account exists in MongoDB');
-  record(!!storedAccount.passwordHash.startsWith('$2b$12$'), 'the stored password is bcrypt-hashed, not plaintext');
+  record(/^bcrypt-sha256\$\$2b\$12\$/.test(storedAccount.passwordHash), 'the stored password is hashed (HMAC-SHA256 pre-hash + bcrypt cost 12), not plaintext');
   record(storedAccount.passwordHash !== registerBody.password, 'the stored password is not the plaintext password');
 
   const unverifiedLogin = await post('/auth/login', { email: registerBody.email, password: registerBody.password });

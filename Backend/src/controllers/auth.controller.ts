@@ -32,6 +32,14 @@ export async function login(req: Request, res: Response): Promise<void> {
 
   const { account, rawToken } = await loginWithPassword(input, req);
 
+  // ASVS V7.2.4: signing in always starts a NEW session -- and the one this
+  // browser already held (same account or another) is ended on the server, so
+  // an old token copied before the sign-in is worthless afterwards.
+  const previous = req.cookies?.[SESSION_COOKIE_NAME];
+  if (typeof previous === 'string' && previous.length > 0) {
+    await revokeSessionByRawToken(previous);
+  }
+
   res.cookie(SESSION_COOKIE_NAME, rawToken, sessionCookieOptions);
   ok(res, account.toJSON());
 }

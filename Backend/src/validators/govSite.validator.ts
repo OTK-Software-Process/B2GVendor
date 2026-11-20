@@ -34,7 +34,7 @@ const digitsToNumber = (value: unknown) => (typeof value === 'string' && /^\d{1,
 const pollIntervalMinutesSchema = z.preprocess(
   digitsToNumber,
   z
-    .number({ invalid_type_error: 'Polling interval must be a whole number of minutes.' })
+    .number({ error: issue => (issue.input === undefined ? undefined : 'Polling interval must be a whole number of minutes.') })
     .int('Polling interval must be a whole number of minutes.')
     .min(MIN_POLL_INTERVAL_MINUTES, 'Polling interval cannot be lower than 2 hours.')
     .max(MAX_POLL_INTERVAL_MINUTES, 'Polling interval cannot be longer than 30 days.')
@@ -43,7 +43,7 @@ const pollIntervalMinutesSchema = z.preprocess(
 const requestsPerMinuteSchema = z.preprocess(
   digitsToNumber,
   z
-    .number({ invalid_type_error: 'requestsPerMinute must be a whole number' })
+    .number({ error: issue => (issue.input === undefined ? undefined : 'requestsPerMinute must be a whole number') })
     .int('requestsPerMinute must be a whole number')
     .min(1, 'requestsPerMinute must be at least 1')
     .max(600, 'requestsPerMinute can be at most 600')
@@ -105,7 +105,7 @@ export type CreateGovSiteInput = z.infer<typeof createGovSiteSchema>;
 export const updateGovSiteSchema = createGovSiteSchema
   .partial()
   .extend({
-    enabled: z.boolean({ invalid_type_error: 'enabled must be true or false' }).optional(),
+    enabled: z.boolean({ error: issue => (issue.input === undefined ? undefined : 'enabled must be true or false') }).optional(),
     // null = drop the override and follow the global schedule again.
     pollIntervalMinutes: pollIntervalMinutesSchema.nullable().optional(),
     // null = stop using this data.go.th setting.

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { passwordSchema } from '../utils/passwordPolicy';
 
 export const NAME_REGEX = /^[\p{L}][\p{L}\p{M}'-]*(?: [\p{L}][\p{L}\p{M}'-]*)?$/u;
 
@@ -21,15 +22,8 @@ export const registerSchema = z
       .toLowerCase()
       .regex(/^\S+$/, 'Email cannot contain spaces')
       .email('Invalid email address'),
-    password: z
-      .string()
-      .min(8, 'Password must be at least 8 characters')
-      .regex(/[A-Za-z]/, 'Password must contain at least one letter')
-      .regex(/\d/, 'Password must contain at least one number')
-      .refine(
-        password => Buffer.byteLength(password, 'utf8') <= 72,
-        'Password must be at most 72 bytes'
-      ),
+    // Any characters, 8-128 of them (utils/passwordPolicy.ts).
+    password: passwordSchema,
     confirmPassword: z.string(),
     type: z.enum(['individual', 'business']).default('individual'),
     businessProfile: businessProfileSchema.optional()

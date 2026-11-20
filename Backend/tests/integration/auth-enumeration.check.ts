@@ -5,6 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import { Request } from 'express';
 import bcrypt from 'bcryptjs';
+import { createHmac } from 'node:crypto';
 import mongoose from 'mongoose';
 import { env } from '../../src/config/env';
 import { Account } from '../../src/models/account.model';
@@ -78,7 +79,8 @@ async function main(): Promise<void> {
     Account.create({ email, passwordHash: PASSWORD, name: 'Test User', type: 'individual', status });
   const active = await mk('active@example.com', 'active');
   const suspended = await mk('suspended@example.com', 'suspended');
-  const hashOf = async (id: unknown) => (await Account.findById(id).select('+passwordHash'))!.passwordHash;
+  // The bcrypt part of a stored hash ("bcrypt-sha256$" + bcrypt, utils/passwordHasher.ts) -- what bcrypt.compare sees.
+  const hashOf = async (id: unknown) => (await Account.findById(id).select('+passwordHash'))!.passwordHash.replace(/^bcrypt-sha256\$/, '');
   const activeHash = await hashOf(active._id);
   const suspendedHash = await hashOf(suspended._id);
 
@@ -130,7 +132,7 @@ async function main(): Promise<void> {
   const suspendedWrongCall = await bcryptCallsFor('suspended, wrong password', attempt('suspended@example.com', WRONG), 'INVALID_CREDENTIALS');
   const suspendedRightCall = await bcryptCallsFor('suspended, right password', attempt('suspended@example.com', PASSWORD), 'ACCOUNT_SUSPENDED');
   record(activeCall?.hash === activeHash && suspendedWrongCall?.hash === suspendedHash && suspendedRightCall?.hash === suspendedHash, 'a real account is compared against its own hash');
-  record(!!unknownCall && unknownCall.hash !== activeHash && unknownCall.hash !== suspendedHash && unknownCall.plain === PASSWORD, 'an unknown email is compared (the submitted password) against a hash that belongs to nobody');
+  record(!!unknownCall && unknownCall.hash !== activeHash && unknownCall.hash !== suspendedHash && unknownCall.plain === createHmac('sha256', unknownCall.hash.slice(0, 29)).update(PASSWORD).digest('base64'), 'an unknown email is compared (the submitted password, pre-hashed) against a hash that belongs to nobody');
   record(!!unknownCall && bcrypt.getRounds(unknownCall.hash) === env.BCRYPT_ROUNDS && bcrypt.getRounds(activeHash) === env.BCRYPT_ROUNDS, `the dummy hash has the same cost as real ones (${env.BCRYPT_ROUNDS} rounds), so it takes as long`, `${unknownCall ? bcrypt.getRounds(unknownCall.hash) : 'n/a'}`);
   await clearFailedLogins(active._id);
   resetSpy();

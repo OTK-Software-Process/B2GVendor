@@ -17,6 +17,7 @@ import {
   fetchVendors,
   reactivateVendor,
   sendVendorPasswordLink,
+  signOutVendorAccount,
   suspendVendor,
   updateVendor
 } from '@/lib/backend';
@@ -33,7 +34,8 @@ import {
   ChevronLeft,
   ChevronRight,
   AlertTriangle,
-  Loader2
+  Loader2,
+  LogOut
 } from 'lucide-react';
 
 const PAGE_SIZE = 20;
@@ -63,6 +65,7 @@ function VendorFormModal({
   const [taxId, setTaxId] = useState(vendor?.businessProfile?.taxId ?? '');
   const [saving, setSaving] = useState(false);
   const [sendingLink, setSendingLink] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [linkNotice, setLinkNotice] = useState<{ ok: boolean; text: string } | null>(null);
@@ -131,6 +134,25 @@ function VendorFormModal({
       setLinkNotice({ ok: false, text: err instanceof Error ? err.message : t('เกิดข้อผิดพลาด', 'Something went wrong') });
     } finally {
       setSendingLink(false);
+    }
+  };
+
+  // ASVS V7.4.5: end every session of this vendor (lost phone, shared computer)
+  // without suspending the account.
+  const signOutEverywhere = async () => {
+    if (!vendor) return;
+    setSigningOut(true);
+    setLinkNotice(null);
+    try {
+      const { revoked } = await signOutVendorAccount(vendor.id);
+      setLinkNotice({
+        ok: true,
+        text: revoked > 0 ? t(`ออกจากระบบ ${revoked} เซสชันแล้ว`, `Signed out ${revoked} session(s).`) : t('ไม่มีเซสชันที่ใช้งานอยู่', 'There were no active sessions.')
+      });
+    } catch (err) {
+      setLinkNotice({ ok: false, text: err instanceof Error ? err.message : t('เกิดข้อผิดพลาด', 'Something went wrong') });
+    } finally {
+      setSigningOut(false);
     }
   };
 
@@ -214,15 +236,26 @@ function VendorFormModal({
 
         {isEdit && (
           <div className="border-t border-slate-100 pt-4 space-y-2">
-            <button
-              type="button"
-              onClick={() => void sendLink()}
-              disabled={sendingLink || vendor.status === 'suspended'}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-            >
-              {sendingLink ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Mail className="w-3.5 h-3.5" />}
-              {t('ส่งลิงก์ตั้งรหัสผ่าน', 'Send password link')}
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void sendLink()}
+                disabled={sendingLink || signingOut || vendor.status === 'suspended'}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              >
+                {sendingLink ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Mail className="w-3.5 h-3.5" />}
+                {t('ส่งลิงก์ตั้งรหัสผ่าน', 'Send password link')}
+              </button>
+              <button
+                type="button"
+                onClick={() => void signOutEverywhere()}
+                disabled={sendingLink || signingOut}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              >
+                {signingOut ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogOut className="w-3.5 h-3.5" />}
+                {t('ออกจากระบบทุกอุปกรณ์', 'Sign out everywhere')}
+              </button>
+            </div>
             {vendor.status === 'suspended' && (
               <p className="text-[11px] text-slate-500">{t('บัญชีถูกระงับ — เปิดใช้งานก่อนจึงจะส่งลิงก์ได้', 'Suspended account — reactivate it before sending a link.')}</p>
             )}

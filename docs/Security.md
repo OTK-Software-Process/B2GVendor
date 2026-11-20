@@ -12,13 +12,15 @@ answers. The plan and its status live in `OWASP_ASVS_5.0_B2GVendor_Plan.xlsx` at
 1. [External connections](#1-external-connections) — V13.1.1
 2. [Cryptography inventory](#2-cryptography-inventory) — V11.1.2
 3. [Keys and secrets](#3-keys-and-secrets) — V11.1.1
-4. [Sessions](#4-sessions) — V7.1.2
+4. [Sessions](#4-sessions) — V7.1.1, V7.1.2
 5. [Field-level access rules](#5-field-level-access-rules) — V8.1.2
 6. [Data classification](#6-data-classification) — V14.1.1
 7. [Protection requirements per class](#7-protection-requirements-per-class) — V14.1.2, V14.2.4
 8. [Retention schedule](#8-retention-schedule) — V14.2.7
 9. [Costly functionality](#9-costly-functionality) — V15.1.3
 10. [Dangerous functionality](#10-dangerous-functionality) — V15.1.5
+11. [Dependencies](#11-dependencies) — V15.1.1, V15.1.2, V15.1.4, V15.2.1
+12. [Password policy](#12-password-policy) — V6.1.2, V6.2.5, V6.2.9, V6.2.11, V6.3.7
 
 ---
 
@@ -52,7 +54,8 @@ Every cryptographic algorithm in use (ASVS V11.1.2). All of it comes from Node's
 
 | What | Algorithm | Where | Notes |
 | :--- | :--- | :--- | :--- |
-| Passwords | bcrypt, cost `BCRYPT_ROUNDS` (12) | `models/account.model.ts`, `utils/passwordHasher.ts` | Hashing runs in a worker-thread pool. Input limit 72 bytes (bcrypt's) |
+| Passwords | HMAC-SHA256 pre-hash keyed by the bcrypt salt, then bcrypt cost `BCRYPT_ROUNDS` (12); stored as `bcrypt-sha256$` + the bcrypt hash | `utils/passwordHasher.ts` | The pre-hash turns any password into 44 characters, so length is not cut at bcrypt's 72 bytes; keying it with the salt stops "hash shucking". Hashing runs in a worker-thread pool |
+| Old password hashes | plain bcrypt (before 2026-11-20) | `utils/passwordHasher.ts`, `services/auth.service.ts` | Still verify (never past 72 bytes), and are replaced by the current scheme at the next successful sign-in, as is any hash whose cost differs from `BCRYPT_ROUNDS` |
 | Unknown-email sign-ins | bcrypt against a random dummy hash | `services/auth.service.ts` | Makes an unknown email cost the same time as a real one |
 | Session tokens | 32 random bytes (`crypto.randomBytes`), stored as SHA-256 | `models/session.model.ts` | The cookie holds the raw token; the database only its hash |
 | Email links (verify, reset, unsubscribe) | 32 random bytes, stored as SHA-256 | `models/token.model.ts` | Single-use (verify, reset); sent after the `#` of the link |
@@ -89,17 +92,26 @@ Rules:
   nothing is cached elsewhere. After a suspected leak, rotate first, then look for misuse.
 - Session and link tokens are not keys: they are random, stored only as hashes, and ended by
   revoking them (logout, password change, reset, "sign out everywhere") rather than by rotation.
-- Raising `BCRYPT_ROUNDS` applies to every password hashed from then on. ⬜ Re-hashing existing
-  passwords at their next sign-in (V11.2.2) is not built yet.
+- Raising `BCRYPT_ROUNDS` applies to every password hashed from then on, and each existing password
+  is re-hashed at its owner's next successful sign-in (V11.2.2). The same mechanism moved every
+  account off plain bcrypt onto the pre-hashed scheme (§2), without anyone resetting a password.
 
 ## 4. Sessions
 
-(ASVS V7.1.2; idle timeout V7.1.1 / V7.3.1 ⬜)
+(ASVS V7.1.1, V7.1.2, V7.2.4, V7.3.1, V7.4.4, V7.4.5, V7.5.2)
 
 - **How many at once:** unlimited per account. Each sign-in on a browser or device creates its own
   session; signing in on a phone does not sign out the laptop.
-- **Lifetime:** `SESSION_TTL_DAYS`, 7 days from sign-in, then the session is refused and deleted by a
-  TTL index. ⬜ No inactivity timeout yet.
+- **Absolute lifetime:** `SESSION_TTL_DAYS`, 7 days from sign-in, then the session is refused and
+  deleted by a TTL index. Re-authentication is needed after that, whatever the activity.
+- **Inactivity timeout:** a session that makes no request for `SESSION_IDLE_MINUTES_STAFF` (30
+  minutes) for Admin and Super Admin accounts, or `SESSION_IDLE_MINUTES_VENDOR` (24 hours) for vendors,
+  is revoked on the server and the next request answers `401` "Your session ended after a period of
+  inactivity". Staff time out sooner because they change configuration and other people's accounts;
+  a vendor only manages their own follows and profile. The admin screens' background "is a poll
+  running?" check (`GET /admin/ingestion/status`) does not count as activity, so an admin tab left
+  open still times out.
+- **Signing in:** always issues a new token, and ends the session the same browser already held.
 - **Ending sessions:**
 
   | Event | Sessions ended |
@@ -107,12 +119,21 @@ Rules:
   | Sign out | This one |
   | Change password | Every other session of the account (the current one stays) |
   | Reset password by email | Every session of the account |
+  | Signing in again in the same browser | The session that browser held before |
+  | Inactivity past the timeout | That session |
+  | "Sign out" on one device in the account page (password asked again) | That device's session |
+  | "Sign out all other devices" in the account page (password asked again) | Every other session of the account |
   | Super Admin "Sign out everywhere" on an admin | Every session of that admin |
+  | Any Admin "Sign out everywhere" on a vendor | Every session of that vendor |
   | Suspension | All of them are refused on their next request |
   | Account deleted | All of them are deleted |
 
-- **What the user sees:** `GET /account/session` shows the most recently active session (browser, OS,
-  masked IP address). ⬜ A full list with revoke (V7.5.2) is not built yet.
+- **What the user sees:** the account page lists every signed-in device (`GET /account/sessions`:
+  browser, OS, masked IP address, last active, which one is this) with a sign-out button for each and
+  one for all the others. Ending a session asks for the password again, and wrong passwords count
+  toward the account's sign-in lock, so a stolen session cannot throw the owner out.
+- **Signing out:** a "Sign out" button on every public page (navbar) and in the admin console's
+  sidebar, which also shows who is signed in.
 - **Cookie:** `HttpOnly`, `SameSite=Lax`, `Secure` and named `__Host-b2g_session` in production (the
   prefix forbids a `Domain` attribute and requires `Secure` and `Path=/`). Logging out also sends
   `Clear-Site-Data: "cache", "storage"`.
@@ -229,3 +250,75 @@ Places where the application handles untrusted input in a way that could hurt it
 | Regular expressions from search text | ReDoS | Input escaped, length-capped, linear patterns (no nested repetition) |
 | Request bodies merged into objects | Prototype pollution, NoSQL operator injection | `$`-prefixed, dotted, `__proto__`, `constructor` and `prototype` keys dropped before validation; strict schemas |
 | Log lines with request data | Format-string and log injection | Request text is passed as an argument to a fixed `%s` format; CSP reports logged as JSON |
+
+## 11. Dependencies
+
+Third-party components: how quickly a known vulnerability must be fixed, how we know what we ship,
+and which components need extra care (ASVS V15.1.1, V15.1.2, V15.1.4, V15.2.1).
+
+### Fix windows
+
+A published advisory for a dependency we ship is fixed, by upgrading or replacing it, within:
+
+| Severity (npm audit / GHSA) | Fixed within | How it is enforced |
+| :--- | :--- | :--- |
+| Critical | 7 days | CI fails on any pull request or push to `main` while it is present |
+| High | 30 days | CI fails, as for critical |
+| Moderate | 90 days | Reported by CI; tracked as an issue |
+| Low | Next planned release | Reported by CI |
+
+CI (`.github/workflows/ci.yml`, job *Dependencies*) runs `npm audit --audit-level=high` for both apps
+on every pull request, every push to `main`, and every Monday, so an advisory published for code we
+already ship is noticed even when nobody is working on it. When no fixed version exists, the
+dependency is pinned to a safe version with an npm `overrides` entry (as for `uuid` under
+Google's `gaxios` in `Backend/package.json`) or replaced.
+
+**State on 2026-11-20:** `npm audit` reports 0 vulnerabilities in both apps, after upgrading next
+16.4.6 (critical RCE), express 4.22.3, mongoose 8.24.10, morgan 1.12.1, zod 4, nodemailer 10,
+node-cron 4 and fast-xml-parser 5, and pinning `uuid` 11.1.1 under gaxios.
+
+### Software bill of materials
+
+Every CI run produces a CycloneDX 1.5 SBOM of each app as installed from its lockfile
+(`npm sbom --sbom-format cyclonedx`), kept as the build artifacts `sbom-Backend` and `sbom-B2GVendor`
+for 90 days; every push to `main` is a release. Dependencies come only from the public npm registry,
+pinned with integrity hashes in `package-lock.json` and installed with `npm ci`.
+
+### Risky components
+
+Components that parse untrusted input, have a history of serious advisories, or are poorly
+maintained. They are upgraded first and reviewed whenever they change.
+
+| Component | Why it is risky | How we contain it |
+| :--- | :--- | :--- |
+| `pdf-parse` 1.1.1 | Parses untrusted PDFs with a bundled pdf.js from 2017-2018; the 1.x line is no longer developed | Runs only in the ingestion worker, never the API; only files with a real `%PDF-` signature, at most 100 MB; text only. Replace with pdf-parse 2 or `pdfjs-dist` in a sandboxed process when possible |
+| `adm-zip` | Unpacks untrusted ZIPs; seven advisories in 0.6.0 alone | Entry, PDF-count and size limits checked against declared sizes before inflating; nothing is written to disk under an entry's own name |
+| `fast-xml-parser` | Parses the untrusted e-GP feed; repeated advisories (prototype pollution, ReDoS, entity expansion, quadratic CPU) | Attributes ignored, only the e-GP feed host, request time limit |
+| `nodemailer` | Builds SMTP traffic; header- and command-injection advisories | Fixed templates; recipients only from our own database; every value HTML-escaped |
+| `next` | Large attack surface on the public internet; critical advisories in 2026 | Patched within the 7-day window; CI blocks releases with known high/critical issues |
+| `@google-cloud/vertexai`, OpenRouter (via `fetch`) | Send untrusted TOR text to a third party; pulls an older Google auth stack | Off unless `AI_TAGGING_ENABLED=true`; input capped and fenced, output validated (§10) |
+| `express` 4 | The 4.x line is in maintenance (5.x is current) | Kept on the latest 4.x patch; moving to 5.x is the next major upgrade |
+
+## 12. Password policy
+
+(ASVS V6.1.2, V6.2.5, V6.2.9, V6.2.11, V6.3.7; code in `Backend/src/utils/passwordPolicy.ts`)
+
+- **Length:** 8 to 128 characters, counted as Unicode characters, so 64 Thai characters (192 bytes)
+  are fine. No composition rule: letters, digits, spaces, symbols and Thai are all allowed, and none
+  is required. Long passphrases are encouraged.
+- **Breached passwords:** refused, using the Have I Been Pwned range API (§1).
+- **Context-specific words:** a password is refused when, after taking out every word below that it
+  contains, fewer than 8 characters of its own are left. So `B2GVendor2026!` or `Somchai1234` (for
+  Somchai) are refused, while a long phrase that happens to contain "vendor" is fine. The words:
+  - the product and its subject: `b2gvendor`, `b2g`, `vendor`, `egp`, `gprocurement`,
+    `procurement`, `datagoth`, `tor`, `จัดซื้อจัดจ้าง`, `จัดซื้อ`, `จัดจ้าง`, `ภาครัฐ`, `ราชการ`,
+    `ประกวดราคา`;
+  - role and generic words: `admin`, `superadmin`, `administrator`, `password`, `รหัสผ่าน`;
+  - the person's own details: the email address's name and domain label, each part of their name,
+    their company name and tax ID.
+
+  Words are compared case-insensitively after Unicode NFKC normalisation, ignoring spaces and
+  symbols. The same check runs at sign-up, password change, password reset and admin seeding.
+- **Notice:** every password change and reset emails the owner (time, how it was changed, and a
+  link to reset it if it was not them). Re-hashing at sign-in (§2) is not a change and sends nothing.
+- **Hashing:** see §2. A password is never logged, returned or stored in a replayable form.

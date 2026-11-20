@@ -3,6 +3,7 @@ import { z } from "zod";
 import * as accountController from "../controllers/account.controller";
 import { passwordResetLimiter } from "../middlewares/rateLimit.middleware";
 import { validate } from "../middlewares/validate.middleware";
+import { passwordSchema } from "../utils/passwordPolicy";
 
 const forgotPasswordSchema = z
   .object({
@@ -18,15 +19,7 @@ const forgotPasswordSchema = z
 const resetPasswordSchema = z
   .object({
     token: z.string().min(1),
-    newPassword: z
-      .string()
-      .min(8)
-      .regex(/[A-Za-z]/, "Password must contain at least one letter")
-      .regex(/\d/, "Password must contain at least one number")
-      .refine(
-        (password) => Buffer.byteLength(password, "utf8") <= 72,
-        "Password must be at most 72 bytes",
-      ),
+    newPassword: passwordSchema,
     confirmNewPassword: z.string(),
   })
   .strict();

@@ -233,6 +233,16 @@ export async function sendVendorPasswordLink(id: string): Promise<SetupEmailResu
   return result;
 }
 
+// ASVS V7.4.5: any Admin can end every session of a vendor account -- a lost
+// phone, a shared computer, a suspected takeover -- without suspending it.
+export async function signOutVendorEverywhere(id: string): Promise<{ revoked: number }> {
+  const account = await findVendor(id);
+  const revoked = await revokeAllSessions(account._id);
+  // Sessions are not an audited model (they churn on every sign-in), so record the action by hand.
+  await audit.log({ action: 'account.sign_out_all', entity: account, metadata: { role: account.role, sessionsRevoked: revoked } });
+  return { revoked };
+}
+
 // Shared by vendor and admin deletion. Dependents go first so a failure
 // part-way leaves a still-deletable account, never orphaned rows pointing at
 // nothing.

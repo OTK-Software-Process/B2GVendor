@@ -946,6 +946,34 @@ export function sendVendorPasswordLink(id: string): Promise<BackendSetupEmailRes
   return api.post<BackendSetupEmailResult>(`/admin/accounts/${encodeURIComponent(id)}/password-link`);
 }
 
+// Ends every session of a vendor account (any Admin).
+export function signOutVendorAccount(id: string): Promise<{ revoked: number }> {
+  return api.post<{ revoked: number }>(`/admin/accounts/${encodeURIComponent(id)}/sign-out`);
+}
+
+// The signed-in account's own sessions (account page). Ending one asks for the password again.
+export interface BackendSessionView {
+  id: string;
+  browser: string;
+  os: string;
+  ipAddress?: string;
+  location?: string;
+  lastActiveAt: string;
+  isCurrent: boolean;
+}
+
+export function fetchMySessions(): Promise<BackendSessionView[]> {
+  return api.get<BackendSessionView[]>('/account/sessions');
+}
+
+export function revokeMySession(id: string, password: string): Promise<{ revoked: boolean }> {
+  return api.post<{ revoked: boolean }>(`/account/sessions/${encodeURIComponent(id)}/revoke`, { password });
+}
+
+export function revokeMyOtherSessions(password: string): Promise<{ revoked: number }> {
+  return api.post<{ revoked: number }>('/account/sessions/revoke-others', { password });
+}
+
 export function deleteVendor(id: string): Promise<{ id: string; email: string }> {
   return api.del<{ id: string; email: string }>(`/admin/accounts/${encodeURIComponent(id)}`);
 }
