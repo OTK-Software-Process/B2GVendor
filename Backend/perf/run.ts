@@ -127,7 +127,12 @@ async function main(): Promise<void> {
         AI_TAGGING_ENABLED: 'false',
         EGP_RSS_BASE_URL: 'http://127.0.0.1:9/egp-is-not-reachable-from-perf',
         DATA_GO_TH_BASE_URL: 'http://127.0.0.1:9/data-go-th-is-not-reachable-from-perf',
-        TOR_STORAGE_DIR: path.join(scratch, 'tor')
+        TOR_STORAGE_DIR: path.join(scratch, 'tor'),
+        // A load test measures capacity, not the per-address limits: k6 sends
+        // every request from one address, which the search and Poll Now
+        // limiters (ASVS V2.4.1) would otherwise refuse after a minute.
+        SEARCH_RATE_LIMIT_PER_MINUTE: process.env.PERF_SEARCH_RATE_LIMIT ?? '1000000',
+        POLL_RATE_LIMIT_PER_MINUTE: process.env.PERF_POLL_RATE_LIMIT ?? '1000000'
       },
       stdio: ['ignore', logFd, logFd]
     });

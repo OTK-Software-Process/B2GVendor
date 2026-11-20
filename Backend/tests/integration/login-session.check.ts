@@ -251,9 +251,18 @@ async function main(): Promise<void> {
         else reject(new Error(`probe produced no result: ${output.slice(0, 400)}`));
       });
     });
+  // In production the cookie carries the __Host- prefix (config/cookie.ts), so look for either name.
   const flags = (cookies: string[]) => {
-    const c = cookies.map(cookieAttrs).find(x => x.name === SESSION_COOKIE_NAME);
-    return { httpOnly: !!c?.attrs.has('httponly'), secure: !!c?.attrs.has('secure'), sameSite: c?.attrs.get('samesite'), maxAge: Number(c?.attrs.get('max-age')) };
+    const c = cookies.map(cookieAttrs).find(x => x.name === SESSION_COOKIE_NAME || x.name === `__Host-${SESSION_COOKIE_NAME}`);
+    return {
+      name: c?.name,
+      httpOnly: !!c?.attrs.has('httponly'),
+      secure: !!c?.attrs.has('secure'),
+      sameSite: c?.attrs.get('samesite'),
+      maxAge: Number(c?.attrs.get('max-age')),
+      path: c?.attrs.get('path'),
+      domain: c?.attrs.get('domain')
+    };
   };
 
   // A production config must use an https APP_URL (the server refuses to start otherwise).
@@ -263,8 +272,14 @@ async function main(): Promise<void> {
   record(prod.nodeEnv === 'production' && prod.loginStatus === 200, 'production: the app signs in normally in production mode');
   record(prodLogin.httpOnly && prodLogin.secure && prodLogin.sameSite === 'Lax', 'production: the session cookie is HttpOnly + Secure + SameSite=Lax', JSON.stringify(prodLogin));
   record(prodLogout.httpOnly && prodLogout.secure && prodLogout.sameSite === 'Lax', 'production: the logout (clearing) cookie is Secure too', JSON.stringify(prodLogout));
+  record(
+    prodLogin.name === `__Host-${SESSION_COOKIE_NAME}` && prodLogout.name === prodLogin.name && prodLogin.path === '/' && prodLogin.domain === undefined,
+    'production: the cookie is named __Host-... with Path=/ and no Domain, so a browser binds it to this exact host (ASVS V3.3.1, V3.3.3)',
+    JSON.stringify(prodLogin)
+  );
   const none = await probe({ NODE_ENV: 'development', COOKIE_SAMESITE: 'none' });
   const noneLogin = flags(none.loginCookies);
+  record(noneLogin.name === SESSION_COOKIE_NAME, 'development: the cookie keeps its plain name (__Host- needs HTTPS)', String(noneLogin.name));
   record(noneLogin.sameSite === 'None' && noneLogin.secure && noneLogin.httpOnly, 'SameSite=None: the cookie is forced to Secure (browsers reject it otherwise), still HttpOnly', JSON.stringify(noneLogin));
   record(flags(none.logoutCookies).secure, 'SameSite=None: the clearing cookie is Secure as well');
   const strictShort = await probe({ NODE_ENV: 'development', COOKIE_SAMESITE: 'strict', SESSION_TTL_DAYS: '1' });
@@ -436,7 +451,10 @@ async function main(): Promise<void> {
   // ===================================================== 6. per-IP login limiter (10 per 15 minutes)
   fresh();
   const rate = await mk('rate@example.com');
-  const sessionsBeforeRate = await Session.countDocuments({});
+  // Live sessions only: MongoDB's TTL job (every 60 s) may delete the session expired
+  // earlier in this check at any moment, which made a count of ALL sessions flaky.
+  const liveSessions = () => Session.countDocuments({ expiresAt: { $gt: new Date() } });
+  const sessionsBeforeRate = await liveSessions();
   const mixed: Res[] = [];
   for (const attemptBody of [
     ['nobody1@example.com', PASSWORD], ['nobody2@example.com', PASSWORD], ['nobody3@example.com', PASSWORD],
@@ -452,7 +470,7 @@ async function main(): Promise<void> {
   const countBefore = (await state(rate._id)).failedLoginCount ?? 0;
   const eleventh = await login('rate@example.com', PASSWORD);
   record(eleventh.status === 429 && code(eleventh) === 'RATE_LIMITED' && !sessionCookie(eleventh), 'rate limit: the 11th request is refused with 429 RATE_LIMITED, even with the correct password', eleventh.text);
-  record((await Session.countDocuments({})) === sessionsBeforeRate + 2 && (((await state(rate._id)).failedLoginCount ?? 0) === countBefore), 'rate limit: the refused request never reached the login logic (no session made, no failure counted)');
+  record((await liveSessions()) === sessionsBeforeRate + 2 && (((await state(rate._id)).failedLoginCount ?? 0) === countBefore), 'rate limit: the refused request never reached the login logic (no session made, no failure counted)');
   const retry = Number(eleventh.headers.get('retry-after'));
   record(retry >= 1 && retry <= 900, 'rate limit: the 429 carries Retry-After', `${retry}s`);
   record(!/rate@|password|account/i.test(eleventh.json.error.message), 'rate limit: the message is generic', eleventh.json.error.message);

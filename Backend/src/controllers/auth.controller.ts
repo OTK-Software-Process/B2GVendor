@@ -44,6 +44,10 @@ export async function logout(req: Request, res: Response): Promise<void> {
   }
 
   res.clearCookie(SESSION_COOKIE_NAME, clearSessionCookieOptions);
+  // Tell the browser to drop anything it kept for this origin (ASVS V14.3.1).
+  // Not "cookies": that would clear every cookie of the whole site, and the
+  // session cookie is already cleared just above.
+  res.set('Clear-Site-Data', '"cache", "storage"');
   ok(res, { loggedOut: true });
 }
 

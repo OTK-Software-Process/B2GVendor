@@ -4,6 +4,12 @@ import { Tag } from '../models/tag.model';
 import { GovSite } from '../models/govSite.model';
 import { AppError } from '../utils/AppError';
 import { buildThaiSearchRegex, splitSearchTerms } from '../utils/thaiSearch';
+import { env } from '../config/env';
+
+// Every search query carries a time limit (ASVS V15.2.2): a pathological search
+// is stopped by MongoDB itself after SEARCH_MAX_TIME_MS and answered 503 (see
+// error.middleware.ts) instead of tying up the database for everyone else.
+const searchTimeLimit = (): number => env.SEARCH_MAX_TIME_MS;
 
 // Best-effort full-text + facet query against a plain Mongo instance -- NOT
 // MongoDB Atlas Search. Atlas Search ($search/$searchMeta over an Atlas
@@ -79,7 +85,10 @@ async function listWorksInTwoGroups(
   // (the free-text search is an $or, the tag filter an $and), never replace it.
   const firstQuery = { $and: [query, first.filter] };
   const restQuery = { $and: [query, rest.filter] };
-  const [firstTotal, restTotal] = await Promise.all([Work.countDocuments(firstQuery), Work.countDocuments(restQuery)]);
+  const [firstTotal, restTotal] = await Promise.all([
+    Work.countDocuments(firstQuery).maxTimeMS(searchTimeLimit()),
+    Work.countDocuments(restQuery).maxTimeMS(searchTimeLimit())
+  ]);
 
   const skip = (page - 1) * pageSize;
   const items: IWork[] = [];
@@ -87,6 +96,7 @@ async function listWorksInTwoGroups(
   if (skip < firstTotal) {
     items.push(
       ...(await Work.find(firstQuery)
+        .maxTimeMS(searchTimeLimit())
         .sort(first.sort)
         .skip(skip)
         .limit(pageSize)
@@ -100,6 +110,7 @@ async function listWorksInTwoGroups(
   if (remaining > 0) {
     items.push(
       ...(await Work.find(restQuery)
+        .maxTimeMS(searchTimeLimit())
         .sort(rest.sort)
         .skip(Math.max(0, skip - firstTotal))
         .limit(remaining)
@@ -259,13 +270,14 @@ export async function listWorks(filter: ListWorksFilter = {}): Promise<ListWorks
 
   const [items, total] = await Promise.all([
     Work.find(query)
+      .maxTimeMS(searchTimeLimit())
       .sort(SORTS[filter.sort ?? 'date'])
       .skip((page - 1) * pageSize)
       .limit(pageSize)
       .select('-excludedTags')
       .populate(POPULATE_SITE)
       .populate(POPULATE_TAGS),
-    Work.countDocuments(query)
+    Work.countDocuments(query).maxTimeMS(searchTimeLimit())
   ]);
 
   return { items, total, page, pageSize };

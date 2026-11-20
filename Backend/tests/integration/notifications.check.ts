@@ -291,7 +291,7 @@ async function main(): Promise<void> {
       'instant email escapes the account name and links to its work'
     );
     const unsubscribeToken = instantMessages[0]
-      ? htmlBody(instantMessages[0]).match(/\/unsubscribe\/([a-f0-9]{64})/)?.[1]
+      ? htmlBody(instantMessages[0]).match(/\/unsubscribe#token=([a-f0-9]{64})/)?.[1]
       : undefined;
     const unsubscribeResponse = unsubscribeToken
       ? await call('POST', '/account/unsubscribe', undefined, { token: unsubscribeToken })

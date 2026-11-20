@@ -34,7 +34,7 @@ function verificationToken(smtp: FakeSmtp, email: string): string | undefined {
     .replace(/=([a-f\d]{2})/gi, (_match, byte: string) =>
       String.fromCharCode(Number.parseInt(byte, 16))
     );
-  return decoded?.match(/verify-email\/([a-f\d]{64})/i)?.[1];
+  return decoded?.match(/verify-email#token=([a-f\d]{64})/i)?.[1];
 }
 
 async function main(): Promise<void> {
@@ -231,10 +231,10 @@ async function main(): Promise<void> {
 
     const duplicate = await post('/auth/register', body(individualEmail), '198.51.100.10');
     record(
-      duplicate.status === 409 &&
-        duplicate.json?.error?.code === 'REGISTRATION_FAILED' &&
-        !duplicate.json.error.fields?.email,
-      'a duplicate email returns 409 REGISTRATION_FAILED without identifying the email field',
+      duplicate.status === 201 &&
+        duplicate.json?.data?.emailVerificationRequired === true &&
+        !duplicate.json?.error,
+      'a duplicate email gets the same 201 "check your email" answer as a new one (ASVS V6.3.8)',
       JSON.stringify(duplicate.json)
     );
 

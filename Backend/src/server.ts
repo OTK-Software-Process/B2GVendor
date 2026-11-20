@@ -2,6 +2,9 @@ import { createApp } from './app';
 import { verifyAuditSetup } from './audit/install';
 import { connectDb } from './config/db';
 import { env } from './config/env';
+import { installProcessHandlers } from './utils/processHandlers';
+
+installProcessHandlers('api');
 
 async function main(): Promise<void> {
   await connectDb();

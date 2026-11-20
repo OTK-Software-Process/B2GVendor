@@ -1,3 +1,4 @@
+import { headers } from 'next/headers';
 import { buildQuery, type BackendGovSite, type BackendWork, type ListWorksParams, type ListWorksResponse } from './backend';
 
 // Data for the PUBLIC pages, fetched on the server while the page renders, so
@@ -16,11 +17,24 @@ import { buildQuery, type BackendGovSite, type BackendWork, type ListWorksParams
 const SERVER_API_BASE = process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api/v1';
 const SERVER_FETCH_TIMEOUT_MS = 1500;
 
+// The API rate-limits search per client address. Every server-side render comes
+// from THIS server's address, so without this all visitors would share one
+// budget; the visitor's address is passed on the way a reverse proxy would
+// (the API only trusts it in production, behind its one trusted proxy hop).
+async function visitorAddressHeader(): Promise<Record<string, string>> {
+  try {
+    const forwarded = (await headers()).get('x-forwarded-for');
+    return forwarded ? { 'X-Forwarded-For': forwarded.slice(0, 256) } : {};
+  } catch {
+    return {}; // not inside a request (build time)
+  }
+}
+
 async function serverGet<T>(path: string): Promise<T | null> {
   try {
     const res = await fetch(`${SERVER_API_BASE}${path}`, {
       cache: 'no-store',
-      headers: { Accept: 'application/json' },
+      headers: { Accept: 'application/json', ...(await visitorAddressHeader()) },
       signal: AbortSignal.timeout(SERVER_FETCH_TIMEOUT_MS)
     });
     if (!res.ok) return null;

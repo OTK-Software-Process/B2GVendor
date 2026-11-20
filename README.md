@@ -14,6 +14,9 @@ Backend/      Express + TypeScript API + a separate ingestion-worker process. Re
               (OpenRouter or Vertex AI), notifications + email, auth, admin endpoints.
 testAPI/      Exploration scripts for the real government data sources (not part of the shipped app).
 docker-compose.yml   Runs mongo + backend + ingestion-worker + frontend together.
+docs/         API.md (every route), Architecture.md, Security.md (connections, crypto, secrets,
+              data classes and retention -- the OWASP ASVS documentation).
+OWASP_ASVS_5.0_B2GVendor_Plan.xlsx   The ASVS 5.0 plan: what we do, its status, and what is done.
 ```
 
 ## Prerequisites

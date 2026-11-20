@@ -11,7 +11,7 @@ import { apiRouter } from './routes';
 import { errorHandler, notFoundHandler } from './middlewares/error.middleware';
 import { sanitizeInput } from './middlewares/sanitize.middleware';
 import { csrfProtection } from './middlewares/csrf.middleware';
-import { securityHeaders } from './middlewares/securityHeaders.middleware';
+import { noStoreExceptPublicReads, securityHeaders } from './middlewares/securityHeaders.middleware';
 import { auditContextMiddleware } from './middlewares/auditContext.middleware';
 
 export function createApp() {
@@ -52,7 +52,7 @@ export function createApp() {
   app.use(auditContextMiddleware);
 
   app.use('/health', healthRouter);
-  app.use('/api/v1', apiRouter);
+  app.use('/api/v1', noStoreExceptPublicReads(), apiRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

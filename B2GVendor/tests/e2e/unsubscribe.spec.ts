@@ -12,7 +12,8 @@ test('unsubscribe link sends its token to the backend without login', async ({ p
     })
   );
 
-  await page.goto(`/unsubscribe/${token}`);
+  // The token is behind the # (never sent to a server).
+  await page.goto(`/unsubscribe#token=${token}`);
   await expect(page.locator('h1')).toBeVisible();
   await expect(page.getByRole('button')).toBeVisible();
 
@@ -33,4 +34,10 @@ test('unsubscribe link sends its token to the backend without login', async ({ p
   expect(JSON.parse(request.postData() ?? '{}')).toEqual({ token });
   expect(request.headers().cookie).toBeUndefined();
   await expect(page.getByRole('heading', { level: 2 })).toBeVisible();
+});
+
+test('an old /unsubscribe/<token> link moves its token behind the #', async ({ page }) => {
+  await page.goto(`/unsubscribe/${token}`);
+  await page.waitForURL(url => url.pathname === '/unsubscribe' && url.hash === `#token=${token}`);
+  await expect(page.locator('h1')).toBeVisible();
 });

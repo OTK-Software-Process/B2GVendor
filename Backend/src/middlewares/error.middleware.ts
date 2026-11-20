@@ -14,6 +14,12 @@ function isDuplicateKeyError(err: unknown): err is DuplicateKeyError {
   return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 11000;
 }
 
+// MongoDB stopped a query at its maxTimeMS (code 50, MaxTimeMSExpired) -- in
+// practice a search that would have run too long (ASVS V15.2.2).
+function isQueryTimeLimitError(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 50;
+}
+
 function mongooseValidationFields(err: mongoose.Error.ValidationError): FieldErrors {
   const fields: FieldErrors = {};
   for (const [path, issue] of Object.entries(err.errors)) {
@@ -72,6 +78,12 @@ export function errorHandler(
       return fail(res, conflict.status, conflict.code, conflict.message, conflict.fields);
     }
     return fail(res, 409, 'VALIDATION_ERROR', 'That value is already in use.');
+  }
+
+  if (isQueryTimeLimitError(err)) {
+    logger.warn('error', `${req.method} ${req.originalUrl.split('?')[0]} stopped at its time limit`);
+    const slow = AppError.serviceUnavailable('The search took too long. Please narrow it down and try again.');
+    return fail(res, slow.status, slow.code, slow.message);
   }
 
   logger.error('error', `${req.method} ${req.originalUrl}`, err);

@@ -48,9 +48,12 @@ async function main(): Promise<void> {
   };
 
   if (process.env.PROBE_RATE_LIMIT === '1') {
-    // Unknown emails: cheap to count, and they never touch an account.
+    // Unknown emails: cheap to count, and they never touch an account. A NEW one
+    // each time: an unknown email is locked after 4 failures like a real account
+    // (ASVS V6.3.8), which would turn these 401s into 423s and hide the limiter.
+    let unknownEmail = 0;
     const attempt = async (forwardedFor?: string) =>
-      (await post('/auth/login', { email: 'nobody@example.com', password: PASSWORD }, forwardedFor ? { 'X-Forwarded-For': forwardedFor } : {})).status;
+      (await post('/auth/login', { email: `nobody${(unknownEmail += 1)}@example.com`, password: PASSWORD }, forwardedFor ? { 'X-Forwarded-For': forwardedFor } : {})).status;
     const burst = async (forwardedFor: string, count: number) => {
       const statuses: number[] = [];
       for (let i = 0; i < count; i += 1) statuses.push(await attempt(forwardedFor));

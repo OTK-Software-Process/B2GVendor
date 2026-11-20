@@ -1,38 +1,10 @@
 import type { NextConfig } from "next";
 
-const isDev = process.env.NODE_ENV === "development";
+const isProduction = process.env.NODE_ENV === "production";
 
-// The browser talks to exactly one other origin: the Backend API. Same value
-// lib/api.ts and lib/backend.ts use; NEXT_PUBLIC_API_URL is fixed at build
-// time, which is also when these headers are built.
-const apiOrigin = new URL(process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api/v1").origin;
-
-// No nonces: a nonce forces every page to render per request. Next.js's inline
-// bootstrap scripts therefore need 'unsafe-inline'; everything else is locked to
-// this origin (next/font self-hosts the Google fonts at build time). 'unsafe-eval'
-// is only for React's dev tooling.
-// See node_modules/next/dist/docs/01-app/02-guides/content-security-policy.md
-const csp = [
-  "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
-  "font-src 'self'",
-  // 'self' covers Next's own RSC/prefetch requests and the dev HMR socket.
-  `connect-src 'self' ${apiOrigin}`,
-  "object-src 'none'",
-  "frame-src 'none'",
-  "worker-src 'self' blob:",
-  "base-uri 'self'",
-  "form-action 'self'",
-  "frame-ancestors 'none'",
-  // Only when the API is served over HTTPS -- on a plain-http stack (docker
-  // compose on localhost) it would rewrite the API calls to https and break them.
-  ...(apiOrigin.startsWith("https:") ? ["upgrade-insecure-requests"] : []),
-].join("; ");
-
+// The Content-Security-Policy is NOT here: it carries a fresh nonce on every
+// request, so it is set per request in src/proxy.ts.
 const securityHeaders = [
-  { key: "Content-Security-Policy", value: csp },
   // Links out to e-GP carry our origin only, never the page path/query.
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   // The app uses none of these browser features; no embedded page may either.
@@ -42,9 +14,20 @@ const securityHeaders = [
       "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), " +
       "magnetometer=(), gyroscope=(), accelerometer=(), display-capture=(), browsing-topics=()",
   },
-  // frame-ancestors above for current browsers; X-Frame-Options for older ones.
+  // frame-ancestors in the CSP for current browsers; X-Frame-Options for older ones.
   { key: "X-Frame-Options", value: "DENY" },
   { key: "X-Content-Type-Options", value: "nosniff" },
+  // A page opened from ours (or one that opened ours) gets no handle on this
+  // window (ASVS V3.4.8). The app opens no pop-ups that need one.
+  { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+  // The endpoint the CSP's report-to directive names (src/app/csp-report/route.ts).
+  { key: "Reporting-Endpoints", value: 'csp-endpoint="/csp-report"' },
+  // HTTPS only, for a year (ASVS V3.4.1). Sent by production builds only; a
+  // browser ignores it on a plain-http response (docker compose on localhost),
+  // so it only takes effect once the site is really served over HTTPS.
+  ...(isProduction
+    ? [{ key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" }]
+    : []),
 ];
 
 const nextConfig: NextConfig = {

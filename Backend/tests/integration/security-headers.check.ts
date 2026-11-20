@@ -28,7 +28,7 @@ function expectProtected(label: string, h: Headers, opts: { hsts: boolean }): vo
   record(h.get('content-security-policy') === "frame-ancestors 'none'", `${label}: Content-Security-Policy is exactly frame-ancestors 'none'`, String(h.get('content-security-policy')));
   record(h.get('x-frame-options') === 'DENY', `${label}: X-Frame-Options is DENY (matches frame-ancestors 'none')`, String(h.get('x-frame-options')));
   const hsts = h.get('strict-transport-security');
-  if (opts.hsts) record(hsts === 'max-age=15552000; includeSubDomains', `${label}: HSTS is sent (180 days, includeSubDomains)`, String(hsts));
+  if (opts.hsts) record(hsts === 'max-age=31536000; includeSubDomains', `${label}: HSTS is sent (1 year, includeSubDomains)`, String(hsts));
   else record(hsts === null, `${label}: no HSTS outside production`, String(hsts));
 }
 

@@ -68,6 +68,19 @@ function stripReasoning(text: string): string {
   return closeTag === -1 ? text : text.slice(closeTag + '</think>'.length);
 }
 
+// What the model may return, enforced here whatever the prompt said (ASVS V1.3.3):
+// a prompt-injected document can change what the model WRITES, never what the
+// application ACCEPTS.
+export const MAX_AI_TAGS = 5;
+export const MAX_AI_DESCRIPTION_CHARS = 2000;
+// 1 trillion baht: above any real procurement; a bigger "price" is noise or an attack.
+export const MAX_AI_BUDGET = 1_000_000_000_000;
+
+/** Parses and validates a model's answer. Exported for the prompt-injection checks. */
+export function parseAnalysisResponse(text: string, candidates: TagCandidate[]): DocumentAnalysisResult {
+  return parseResult(text, candidates);
+}
+
 function parseResult(text: string, candidates: TagCandidate[]): DocumentAnalysisResult {
   try {
     const match = stripReasoning(text).match(/\{[\s\S]*\}/);
@@ -75,18 +88,20 @@ function parseResult(text: string, candidates: TagCandidate[]): DocumentAnalysis
 
     const parsed = JSON.parse(match[0]);
     const validIds = new Set(candidates.map(c => c.id));
-    const tagIds = Array.isArray(parsed.tagIds)
-      ? parsed.tagIds.filter((id: unknown): id is string => typeof id === 'string' && validIds.has(id))
+    const tagIds: string[] = Array.isArray(parsed.tagIds)
+      ? [...new Set<string>(parsed.tagIds.filter((id: unknown): id is string => typeof id === 'string' && validIds.has(id)))].slice(0, MAX_AI_TAGS)
       : [];
-    const description =
-      typeof parsed.description === 'string' && parsed.description.trim().length > 0
-        ? parsed.description.trim().slice(0, 2000)
-        : null;
+    const cleanDescription =
+      typeof parsed.description === 'string'
+        ? parsed.description.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, ' ').trim()
+        : '';
+    const description = cleanDescription.length > 0 ? cleanDescription.slice(0, MAX_AI_DESCRIPTION_CHARS) : null;
     // Coerce defensively -- models are inconsistent about emitting a numeric
     // literal vs. a numeric string (e.g. "1250000" vs 1250000). Reject
     // anything non-finite or <= 0 rather than trusting it as a real price.
     const budgetNumber = Number(parsed.budget);
-    const budget = typeof parsed.budget !== 'object' && Number.isFinite(budgetNumber) && budgetNumber > 0 ? budgetNumber : null;
+    const budget =
+      typeof parsed.budget !== 'object' && Number.isFinite(budgetNumber) && budgetNumber > 0 && budgetNumber <= MAX_AI_BUDGET ? budgetNumber : null;
     const newTag = parseNewTag(parsed.newTag, candidates);
 
     return { description, tagIds, budget, budgetBasis: null, budgetSource: budget ? 'ai' : null, newTag };

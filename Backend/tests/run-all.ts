@@ -32,7 +32,8 @@ import { startThrowawayMongo, MongoServer } from './helpers/throwawayMongo';
 //   - AI tagging is off and no AI key is passed through;
 //   - the e-GP feed and data.go.th point at a closed local port, so a check that
 //     forgets to start its own mock server fails instead of hitting the live sites;
-//   - downloaded TOR files go to a temp folder per check.
+//   - downloaded TOR files go to a temp folder per check;
+//   - the search and Poll Now rate limits are lifted (rate-limits.check.ts tests them).
 
 const backendRoot = path.resolve(__dirname, '..');
 
@@ -121,6 +122,11 @@ async function runCheck(check: Check, mongo: MongoServer, emptyEnvFile: string, 
     EGP_RSS_BASE_URL: 'http://127.0.0.1:9/egp-rss-is-not-reachable-from-tests',
     DATA_GO_TH_BASE_URL: 'http://127.0.0.1:9/data-go-th-is-not-reachable-from-tests',
     TOR_STORAGE_DIR: torDir,
+    // The search and Poll Now limiters count per address, and every check sends
+    // all its requests from 127.0.0.1. They are tested on their own in
+    // rate-limits.check.ts, which sets its own low values.
+    SEARCH_RATE_LIMIT_PER_MINUTE: '1000000',
+    POLL_RATE_LIMIT_PER_MINUTE: '1000000',
     FORCE_COLOR: '0'
   });
 

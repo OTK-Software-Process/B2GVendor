@@ -527,7 +527,7 @@ This section defines the measures required to protect user data, identity, and s
 - **Authentication Hardening** *(Implemented)*: The system shall resist guessing and account discovery on sign-in and sign-up:
   - After 4 failed sign-ins in a row an account is locked, first for 1 minute and then for twice as long after each further failure, up to 30 minutes (`ACCOUNT_LOCKED`); a successful sign-in or a password reset clears the count.
   - An unknown email, a wrong password and a wrong password on a suspended account get an identical answer and take a similar time (a dummy bcrypt comparison is run for unknown emails). That an account is suspended or unverified is revealed only after the correct password.
-  - A sign-up with a taken email is refused with a generic `REGISTRATION_FAILED` message that does not say the email is the reason.
+  - A sign-up with a taken email receives the same response as a new sign-up; the address's owner is emailed that someone tried to sign up instead of receiving a verification link. A sign-in to an email with no account is counted and locked like one to a real account.
   - Password policy, breach check and email verification per FR-1.8 and FR-1.9.
 
 - **Session Management** *(Partial)*: Sessions shall be server-side and revocable.

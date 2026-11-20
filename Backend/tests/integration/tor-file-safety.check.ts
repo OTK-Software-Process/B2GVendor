@@ -146,7 +146,7 @@ async function main(): Promise<void> {
   record((await fs.readdir(storageDir)).length === 0, '...and writes nothing');
 
   const saved = await saveTorFile(pdf('stored'), 'evil.html');
-  record(/^[0-9a-f]{24}\.pdf$/.test(saved.storageKey) && saved.filename === 'evil.pdf', 'a PDF named .html is stored as <hash>.pdf with a .pdf display name', JSON.stringify(saved));
+  record(/^[0-9a-f]{64}\.pdf$/.test(saved.storageKey) && saved.filename === 'evil.pdf', 'a PDF named .html is stored as <full sha256>.pdf with a .pdf display name', JSON.stringify(saved));
   const again = await saveTorFile(pdf('stored'), 'other-name.pdf');
   record(again.storageKey === saved.storageKey, 'the same content keeps the same key (dedup unchanged)');
   record(await isStoredPdf(saved.storageKey), 'isStoredPdf: a stored PDF');

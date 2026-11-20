@@ -85,7 +85,7 @@ A signed-in caller carries a **session cookie**, set by `POST /auth/login` and c
 
 | Attribute | Value |
 | :--- | :--- |
-| Name | `SESSION_COOKIE_NAME`, `b2g_session` by default |
+| Name | `SESSION_COOKIE_NAME`, `b2g_session` by default. In production always `__Host-` + that name (`__Host-b2g_session`), so the browser binds it to this exact host: `Secure`, `Path=/`, no `Domain` |
 | Flags | `HttpOnly`; `SameSite=Lax` by default (`COOKIE_SAMESITE`); `Secure` in production |
 | Lifetime | `SESSION_TTL_DAYS`, 7 by default |
 | Value | A random token. The server keeps only its hash, so the session can be revoked |
@@ -134,11 +134,24 @@ even parsed:
 A failure is `403 CSRF_BLOCKED` or `415 UNSUPPORTED_MEDIA_TYPE`. `GET`, `HEAD`, and `OPTIONS` are not
 checked.
 
+### Caching
+
+Every response carries `Cache-Control: no-store` **except** the public reads (`GET /works`, `/tags`,
+`/gov-sites` and what is under them), so nothing personal is kept by a browser cache or a proxy.
+
+### Links in emails
+
+Every emailed link puts its one-time token **after the `#`** — `/verify-email#token=…`,
+`/reset-password#token=…`, `/unsubscribe#token=…` — because a URL fragment is never sent to any server
+and so cannot end up in a log. The page reads it in the browser and posts it in the request body. Old
+`/<page>/<token>` links from earlier emails still work: the page moves the token behind the `#` at once.
+
 ### Input
 
 - Bodies and queries are validated against **strict** schemas. An unknown field is a `400
   VALIDATION_ERROR`, never ignored, and nothing is changed when any field is bad.
-- Any body key that starts with `$` or contains a `.` is dropped before validation.
+- Any body key that starts with `$`, contains a `.`, or is `__proto__`, `constructor` or `prototype` is
+  dropped before validation.
 - Text is trimmed; emails are lower-cased. The body limit is 1 MB (`413 PAYLOAD_TOO_LARGE`); a body that
   is not JSON is `400 BAD_REQUEST`.
 - Numbers in a query string are plain digits (`budgetMin=500000`), not `1e3` or `0x10`.
@@ -176,35 +189,40 @@ or vanish between pages. `/admin/accounts` and `/admin/staff` add a `summary` of
 | 404 | `NOT_FOUND` | No such record; also a malformed id on a route that does not validate it |
 | 409 | `CONFLICT` | The action clashes with current state (a poll already running, a site name, `deptId`, or short code already in use) |
 | 409 | `DUPLICATE_TAG` · `NEAR_DUPLICATE_TAG` | A tag with that name exists · a similar one does and the Admin has not confirmed |
-| 409 | `REGISTRATION_FAILED` | Sign-up refused, deliberately without saying why |
 | 409 | `EMAIL_ALREADY_REGISTERED` | An Admin tried to create an account with a taken email |
 | 413 | `PAYLOAD_TOO_LARGE` | The body is over 1 MB |
 | 415 | `UNSUPPORTED_MEDIA_TYPE` | A change was not sent as `application/json` |
 | 423 | `ACCOUNT_LOCKED` | Too many failed sign-ins; `details.retryAfterSeconds` says when to try again |
-| 429 | `RATE_LIMITED` | Too many requests from this address; the `RateLimit` headers say when to retry |
+| 429 | `RATE_LIMITED` | Too many requests from this address (or, for Poll Now, this admin); the `RateLimit` headers say when to retry |
 | 500 | `INTERNAL_ERROR` | A server fault. In production the message is fixed text; details go to the log |
-| 503 | `SERVICE_UNAVAILABLE` | A dependency is missing: email is not configured, or the password check is down |
+| 503 | `SERVICE_UNAVAILABLE` | A dependency is missing (email is not configured, the password check is down), or a search ran past its time limit |
 
 A duplicate-key conflict that no service handled itself surfaces as `409 VALIDATION_ERROR` with the
 message "That value is already in use."
 
 ### Rate limiting and lockout
 
-Three limits count requests **per client address**:
+Five limits count requests, per client address unless stated:
 
 | Route | Limit |
 | :--- | :--- |
 | `POST /auth/login` | 10 per 15 minutes |
 | `POST /auth/register` | 5 per hour |
 | `POST /auth/forgot-password` and `/auth/reset-password`, together | 5 per hour |
+| `GET /works` (search) | `SEARCH_RATE_LIMIT_PER_MINUTE`, 120 per minute |
+| `POST /admin/gov-sites/poll-all` and `/:id/poll` | `POLL_RATE_LIMIT_PER_MINUTE`, 10 per minute **per admin account** |
+
+The website's server-side renders pass the visitor's address on in `X-Forwarded-For`, so visitors do
+not share one budget (the API trusts that header only in production, behind one proxy hop). A search
+also stops in MongoDB after `SEARCH_MAX_TIME_MS` (5 s) and then answers `503`.
 
 The standard `RateLimit` and `RateLimit-Policy` headers (IETF draft 7) report what is left. On top of
 that, wrong passwords are counted **per account**, wherever they come from, on sign-in and on change
 password: the first 4 failures cost nothing; after that the account is locked for 1 minute, then
 twice as long after each further failure, up to 30 minutes (`423 ACCOUNT_LOCKED`). A correct sign-in,
-or a password reset, clears the count. Failures older than 24 hours are forgotten.
-
-Search and the poll routes are **not** rate-limited yet (SRS §5.3, *Injection and Rate Limiting*).
+or a password reset, clears the count. Failures older than 24 hours are forgotten. An email with **no**
+account is counted and locked in exactly the same way (by a hash of the address), so a `423` does not
+reveal that an account exists.
 
 ---
 
@@ -242,7 +260,7 @@ sequenceDiagram
 | `POST /auth/register` | none | Creates a self-registered account and emails a verification link |
 | `POST /auth/verify-email` | none | `{ token }` — marks the email verified. The link is single-use and lasts 24 hours |
 | `POST /auth/login` | none | Starts a session; the cookie is the response's `Set-Cookie` |
-| `POST /auth/logout` | session | Revokes the session and clears the cookie |
+| `POST /auth/logout` | session | Revokes the session, clears the cookie and sends `Clear-Site-Data: "cache", "storage"` |
 | `GET /auth/me` | session | The signed-in account |
 | `POST /auth/forgot-password` | none | `{ email }` — emails a reset link. Answers `200` with the same message whether or not the email has an account; `500` when email is not configured or the send fails |
 | `POST /auth/reset-password` | none | `{ token, newPassword, confirmNewPassword }` — the link is single-use and lasts 1 hour. Ends **every** session of the account and lifts a sign-in lock |
@@ -270,9 +288,10 @@ sequenceDiagram
 An account cannot sign in until its email is verified, so registration needs email to be configured:
 without `SMTP_HOST` it answers `503 SERVICE_UNAVAILABLE`. The breached-password check sends only the
 first five characters of the password's hash; a password found in a breach is `400 BAD_REQUEST`, and if
-that service cannot be reached the answer is `503`. A taken email answers the same generic
-`409 REGISTRATION_FAILED` as any other refusal, so the route cannot be used to discover who has an
-account.
+that service cannot be reached the answer is `503`. A **taken** email gets exactly the same `201`
+answer as a new one, after the same work, so the route cannot be used to discover who has an account;
+instead of a verification link, the address's owner is emailed that someone tried to sign up, with
+links to sign in and to reset the password.
 
 ### `POST /auth/login`
 
@@ -481,11 +500,12 @@ server time).
 late), and is `null` rather than `0` when unknown. `status` here is the notification's own vocabulary:
 `INVITATION` (planned or draft TOR), `BIDDING`, `EVALUATION` (amended), `AWARDED`, `CANCELLED`.
 
-### Email unsubscribe ⬜
+### Email unsubscribe ✅
 
-A signed link in every notification email that switches email off without signing in (SRS FR-3.7). Not
-built: the `/unsubscribe/[token]` page exists in the web app but does not call the API yet, and the
-emails carry no token. Today a user turns email off with `PATCH /account/notification-settings`.
+Every notification email links to `/unsubscribe#token=…` (SRS FR-3.7). The page posts
+`POST /account/unsubscribe` with `{ token }` — no session needed — which turns email notifications off
+for that account. The token is long-lived (it must keep working in old emails) and only ever does this
+one thing. A signed-in user can also switch email off with `PATCH /account/notification-settings`.
 
 ---
 

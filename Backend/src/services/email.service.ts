@@ -1,6 +1,7 @@
 import nodemailer, { Transporter } from 'nodemailer';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
+import { maskEmail, tokenLink } from '../utils/privacy';
 
 let transporter: Transporter | null = null;
 
@@ -52,7 +53,7 @@ async function send(mail: Mail): Promise<void> {
   }
 
   await activeTransporter.sendMail({ from: env.MAIL_FROM, ...mail });
-  logger.info('email', `sent "${mail.subject}" to ${mail.to}`);
+  logger.info('email', `sent "${mail.subject}" to ${maskEmail(mail.to)}`);
 }
 
 function layout(heading: string, body: string, buttonLabel: string, url: string, footerHtml = ''): string {
@@ -75,7 +76,7 @@ export async function sendPasswordResetEmail(
   name: string,
   rawToken: string
 ): Promise<void> {
-  const url = `${env.APP_URL}/reset-password/${rawToken}`;
+  const url = tokenLink(env.APP_URL, 'reset-password', rawToken);
 
   await send({
     to,
@@ -95,7 +96,7 @@ export async function sendPasswordSetupEmail(
   name: string,
   rawToken: string
 ): Promise<void> {
-  const url = `${env.APP_URL}/reset-password/${rawToken}`;
+  const url = tokenLink(env.APP_URL, 'reset-password', rawToken);
 
   await send({
     to,
@@ -115,7 +116,7 @@ export async function sendEmailVerificationEmail(
   name: string,
   rawToken: string
 ): Promise<void> {
-  const url = `${env.APP_URL}/verify-email/${encodeURIComponent(rawToken)}`;
+  const url = tokenLink(env.APP_URL, 'verify-email', rawToken);
 
   await send({
     to,
@@ -130,6 +131,38 @@ export async function sendEmailVerificationEmail(
   });
 }
 
+/**
+ * Sent instead of a verification email when someone signs up with an email that
+ * already has an account. The sign-up itself answers exactly as for a new
+ * address (ASVS V6.3.8), so only the owner of the mailbox learns the account
+ * exists -- and is pointed to sign-in and password reset.
+ */
+export async function sendAccountExistsEmail(to: string, name: string): Promise<void> {
+  const loginUrl = `${env.APP_URL}/login`;
+  const resetUrl = `${env.APP_URL}/forgot-password`;
+
+  await send({
+    to,
+    subject: 'มีการสมัครด้วยอีเมลของคุณ | Someone tried to sign up with your email',
+    text:
+      `สวัสดีคุณ ${name}
+
+มีผู้พยายามสมัครบัญชี B2G Vendor ด้วยอีเมลนี้ ซึ่งมีบัญชีอยู่แล้ว ` +
+      `หากเป็นคุณ เข้าสู่ระบบได้ที่ ${loginUrl} หรือตั้งรหัสผ่านใหม่ที่ ${resetUrl}
+
+` +
+      `Someone tried to create a B2G Vendor account with this email, which already has one. ` +
+      `If it was you, sign in or reset your password. If not, you can ignore this email -- nothing has changed.`,
+    html: layout(
+      'มีการสมัครด้วยอีเมลของคุณ',
+      `สวัสดีคุณ ${name} — มีผู้พยายามสมัครบัญชี B2G Vendor ด้วยอีเมลนี้ ซึ่งมีบัญชีอยู่แล้ว หากเป็นคุณ กรุณาเข้าสู่ระบบ หรือตั้งรหัสผ่านใหม่หากจำไม่ได้ หากไม่ใช่คุณ ไม่ต้องดำเนินการใด ๆ บัญชีของคุณไม่มีการเปลี่ยนแปลง`,
+      'เข้าสู่ระบบ',
+      loginUrl,
+      `<p style="margin:16px 0 0;font-size:12px;color:#64748b;">Forgot your password? <a href="${escapeHtml(resetUrl)}" style="color:#0284c7;">Reset it here</a>.</p>`
+    )
+  });
+}
+
 export async function sendNewWorkMatchEmail(
   to: string,
   name: string,
@@ -138,7 +171,7 @@ export async function sendNewWorkMatchEmail(
   unsubscribeToken: string,
 ): Promise<void> {
   const url = `${env.APP_URL}/works/${encodeURIComponent(work)}`;
-  const unsubscribeUrl = `${env.APP_URL}/unsubscribe/${encodeURIComponent(unsubscribeToken)}`;
+  const unsubscribeUrl = tokenLink(env.APP_URL, 'unsubscribe', unsubscribeToken);
   const unsubscribeFooter = `<p style="margin:24px 0 0;font-size:12px;color:#64748b;">To stop these emails, <a href="${escapeHtml(unsubscribeUrl)}" style="color:#0284c7;">unsubscribe here</a>.</p>`;
 
   await send({
@@ -168,7 +201,7 @@ export interface DailyDigestItem {
 // work), so it builds its own HTML rather than reusing layout()'s
 // single-button shape.
 export async function sendDailyDigestEmail(to: string, name: string, items: DailyDigestItem[], unsubscribeToken: string): Promise<void> {
-  const unsubscribeUrl = `${env.APP_URL}/unsubscribe/${encodeURIComponent(unsubscribeToken)}`;
+  const unsubscribeUrl = tokenLink(env.APP_URL, 'unsubscribe', unsubscribeToken);
   const rows = items
     .map(item => {
       const url = `${env.APP_URL}/works/${encodeURIComponent(item.workId)}`;

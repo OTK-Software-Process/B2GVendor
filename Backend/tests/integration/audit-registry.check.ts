@@ -113,7 +113,7 @@ async function main(): Promise<void> {
   r = await rows();
   record(link.status === 200 && r.length === 1 && r[0].action === 'account.password_link_sent', 'sending a password link -> exactly one row "account.password_link_sent"', r.map(x => x.action).join());
   record(r[0].metadata?.emailSent === false && r[0].metadata?.reason === 'smtp_not_configured' && r[0].entityLabel === 'v1@example.com', '...records whether the email actually went out');
-  record(!JSON.stringify(r).match(/reset-password\/|tokenHash/i), '...and never the link or token itself');
+  record(!JSON.stringify(r).match(/reset-password(\/|#token=)|tokenHash/i), '...and never the link or token itself');
   r.forEach(x => seenActions.add(x.action));
 
   await clearLog();

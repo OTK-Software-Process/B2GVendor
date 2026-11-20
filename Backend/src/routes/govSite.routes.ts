@@ -5,6 +5,7 @@ import { createGovSiteSchema, updateGovSiteSchema, pollSiteSchema, verifyDeptIdS
 import { requireSuperAdmin } from '../middlewares/requireRole';
 import { requirePollAccess } from '../middlewares/requirePermission';
 import { asyncHandler } from '../utils/asyncHandler';
+import { pollLimiter } from '../middlewares/rateLimit.middleware';
 
 // Fully public -- E4/FR-E4.1: a Visitor browses the government site
 // directory (and drills into a site's works) without logging in. Mutating
@@ -30,5 +31,5 @@ adminGovSiteRouter.get('/dept-id-suggestions', requireSuperAdmin, validate(sugge
 // create/edit (this is part of source configuration, not polling control).
 adminGovSiteRouter.post('/verify-dept-id', requireSuperAdmin, validate(verifyDeptIdSchema), asyncHandler(govSiteController.verifyDeptId));
 
-adminGovSiteRouter.post('/poll-all', requirePollAccess, asyncHandler(govSiteController.pollAll));
-adminGovSiteRouter.post('/:id/poll', requirePollAccess, validate(govSiteParamsSchema, 'params'), validate(pollSiteSchema), asyncHandler(govSiteController.pollOne));
+adminGovSiteRouter.post('/poll-all', requirePollAccess, pollLimiter, asyncHandler(govSiteController.pollAll));
+adminGovSiteRouter.post('/:id/poll', requirePollAccess, pollLimiter, validate(govSiteParamsSchema, 'params'), validate(pollSiteSchema), asyncHandler(govSiteController.pollOne));

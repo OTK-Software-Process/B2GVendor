@@ -5,10 +5,10 @@ import { env } from '../config/env';
 import { Account, IAccount } from '../models/account.model';
 import { createSession, SessionContext } from './session.service';
 import { AppError } from '../utils/AppError';
-import { clearFailedLogins, reserveLoginAttempt } from './loginLockout.service';
+import { clearFailedLogins, reserveLoginAttempt, reserveUnknownEmailAttempt } from './loginLockout.service';
 import { assertPasswordNotPwned } from '../integrations/haveIBeenPwned.client';
 import { invalidateTokens, issueToken, consumeToken } from './token.service';
-import { isEmailConfigured, sendEmailVerificationEmail } from './email.service';
+import { isEmailConfigured, sendAccountExistsEmail, sendEmailVerificationEmail } from './email.service';
 
 export interface AuthResult {
   account: IAccount;
@@ -43,6 +43,11 @@ function isDuplicateEmailError(err: unknown): boolean {
   return !!e && e.code === 11000 && !!e.keyPattern && 'email' in e.keyPattern;
 }
 
+/**
+ * Creates an unverified account and emails its verification link. Resolves to
+ * null when the email already had an account: the caller must answer exactly
+ * as it does for a new one.
+ */
 export async function registerAccount(
   input: {
     name: string;
@@ -51,7 +56,7 @@ export async function registerAccount(
     type: 'individual' | 'business';
     businessProfile?: { companyName: string; taxId: string };
   }
-): Promise<IAccount> {
+): Promise<IAccount | null> {
   if (!isEmailConfigured()) {
     throw AppError.serviceUnavailable('Email verification is not configured.');
   }
@@ -72,9 +77,20 @@ export async function registerAccount(
       emailVerified: false
     });
   } catch (err) {
-    // Anyone can call this endpoint, so it must not confirm which emails have an account.
-    if (isDuplicateEmailError(err)) throw AppError.registrationFailed();
-    throw err;
+    if (!isDuplicateEmailError(err)) throw err;
+    // Anyone can call this endpoint, so it must not confirm which emails have an
+    // account (ASVS V6.3.8): a taken email gets the SAME answer as a new one --
+    // 201 "check your email" -- after the same work (hash, then one email). The
+    // email that goes out tells the owner someone tried, and how to sign in.
+    const existing = await Account.findOne({ email: input.email }).select('name email');
+    if (existing) {
+      try {
+        await sendAccountExistsEmail(existing.email, existing.name);
+      } catch {
+        throw AppError.serviceUnavailable('Email verification could not be sent. Please try again later.');
+      }
+    }
+    return null;
   }
 
   let tokenIssued = false;
@@ -113,14 +129,21 @@ export async function loginWithPassword(
   const account = await Account.findOne({ email: input.email }).select('+passwordHash');
 
   if (!account) {
+    // An address with no account is counted and locked exactly like a real one,
+    // and pays for the same bcrypt compare: the answer (401, or 423 once
+    // "locked") and its timing never reveal whether the account exists (V6.3.8).
+    const unknown = await reserveUnknownEmailAttempt(input.email);
     await verifyPassword(input.password, await getDummyHash());
+    if (!unknown.allowed) throw AppError.accountLocked(unknown.retryAfterSeconds);
     throw AppError.invalidCredentials();
   }
 
   // Counted per account (the IP limiter alone is beaten by rotating IPs). A
-  // locked account is refused without checking the password at all.
+  // locked account is refused without checking its password -- but after a
+  // dummy compare, so the refusal takes as long as any other answer.
   const attempt = await reserveLoginAttempt(account._id);
   if (!attempt.allowed) {
+    await verifyPassword(input.password, await getDummyHash());
     throw AppError.accountLocked(attempt.retryAfterSeconds);
   }
 

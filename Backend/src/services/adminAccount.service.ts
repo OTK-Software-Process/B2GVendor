@@ -7,6 +7,7 @@ import { Session } from '../models/session.model';
 import { Token } from '../models/token.model';
 import { AppError } from '../utils/AppError';
 import { logger } from '../utils/logger';
+import { maskEmail } from '../utils/privacy';
 import { isEmailConfigured, sendPasswordResetEmail, sendPasswordSetupEmail } from './email.service';
 import { audit } from './audit.service';
 import { revokeAllSessions } from './session.service';
@@ -161,7 +162,7 @@ export async function sendPasswordLink(account: IAccount): Promise<SetupEmailRes
     return { sent: true };
   } catch (err) {
     if (tokenIssued) await invalidateTokens(account._id, 'password_reset');
-    logger.warn('admin-accounts', `Failed to send password link to ${account.email}`, err);
+    logger.warn('admin-accounts', `Failed to send password link to ${maskEmail(account.email)}`, err);
     return { sent: false, reason: isEmailConfigured() ? 'send_failed' : 'smtp_not_configured' };
   }
 }

@@ -252,7 +252,7 @@ flowchart LR
 
 | Path | Holds |
 | :--- | :--- |
-| `app/` | Routes: `search`, `works/[id]`, `agencies`, `login`, `register`, `verify-email`, `forgot-password`, `reset-password`, `change-password`, `account/*`, `unsubscribe/[token]`, and `admin/*` (dashboard, ingestion and run history, source-config, tags, works, accounts, users, audit-log) |
+| `app/` | Routes: `search`, `works/[id]`, `agencies`, `login`, `register`, `verify-email`, `forgot-password`, `reset-password`, `change-password`, `account/*`, `unsubscribe` (each token page reads its token from the `#` fragment; `[token]` paths redirect old links), `csp-report`, and `admin/*` (dashboard, ingestion and run history, source-config, tags, works, accounts, users, audit-log) |
 | `components/` | `Navbar`, `WorkCard`, `FilterBar`, `StatusBadge`, `TORDownloadList`, `FollowTagButton`, `Pagination`, loading / empty / retry states, and the admin pieces (`AdminSidebar`, `PollStatusBanner`, `ScheduleForm`, `AuditChanges`) |
 | `context/AppContext.tsx` | The signed-in account and role, the Thai / English switch, and the lists every screen needs (sites, tags, poll status). Drops to the signed-out state when any call reports a dead session |
 | `lib/api.ts` | The only wrapper around `fetch`: base URL from `NEXT_PUBLIC_API_URL`, cookies included, the response envelope unwrapped into a typed `ApiError` |
@@ -619,7 +619,7 @@ not do — because those are the ones a well-meaning change quietly breaks.
 | Super Admin accounts cannot be created, changed or deleted through the panel | Managing staff is the highest-risk action, so promoting or removing a Super Admin stays a deliberate out-of-band act | `findManageableAdmin` refuses with 403; Super Admins come from `seed:superadmin` only |
 | Every state-changing request passes an origin and JSON check before it is parsed | Cross-site request forgery against a cookie session | `csrfProtection`, mounted before `express.json`, on the same origin list as CORS |
 | Every body is validated against a strict schema and `$` / dotted keys are dropped | Mass assignment and NoSQL operator injection | `validate()` with `.strict()` schemas, and `sanitizeInput` |
-| Sign-in and sign-up never reveal whether an email has an account | Account enumeration | A dummy bcrypt for unknown emails; the same answer for an unknown email and a wrong password; generic `REGISTRATION_FAILED`; a suspended or unverified state is told only after the right password |
+| Sign-in and sign-up never reveal whether an email has an account | Account enumeration | A dummy bcrypt for unknown emails; the same answer for an unknown email and a wrong password; a taken email at sign-up answers like a new one; an unknown email is locked like a real account; a suspended or unverified state is told only after the right password |
 | Wrong passwords are counted per account, including on change-password | Attackers who rotate IPs, or hold a stolen session, must still be slowed | `reserveLoginAttempt`: 4 free failures, then locks of 1, 2, 4 … up to 30 minutes |
 | Passwords, session tokens and link tokens are stored only as hashes | A database leak cannot be replayed | `passwordHash` is `select: false`; `tokenHash` on sessions and tokens |
 | Only genuine PDFs are stored and served, always typed `application/pdf`, by content-hash key | A remote server's file name or type must never decide what we serve | `saveTorFile` checks the `%PDF-` signature; `isStoredPdf` and `safePdfFilename` on download |

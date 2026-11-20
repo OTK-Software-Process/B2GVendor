@@ -35,7 +35,7 @@ console.warn = (...args: unknown[]) => {
 };
 function lastResetToken(): string | null {
   for (let i = capturedLogs.length - 1; i >= 0; i--) {
-    const m = capturedLogs[i].match(/reset-password\/([A-Za-z0-9_-]+)/);
+    const m = capturedLogs[i].match(/reset-password(?:\/|#token=)([A-Za-z0-9_-]+)/);
     if (m) return m[1];
   }
   return null;

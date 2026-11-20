@@ -10,6 +10,7 @@ import { isEmailConfigured, sendNewWorkMatchEmail, sendDailyDigestEmail } from '
 import { issueToken } from './token.service';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
+import { maskEmail } from '../utils/privacy';
 
 // Runs `worker` over `items`, at most `limit` at a time.
 async function forEachWithConcurrency<T>(items: T[], limit: number, worker: (item: T) => Promise<void>): Promise<void> {
@@ -189,7 +190,7 @@ export async function notifyNewWorkMatches(work: IWork, tagIds: Types.ObjectId[]
         const unsubscribeToken = await issueToken(accountId, 'email_unsubscribe', { replaceExisting: false });
         await sendNewWorkMatchEmail(email, name, work._id.toString(), matchedTagNames, unsubscribeToken);
       } catch (err) {
-        logger.warn('notification', `Failed to notify ${email} about work ${work.projectId}`, err);
+        logger.warn('notification', `Failed to notify ${maskEmail(email)} about work ${work.projectId}`, err);
       }
     });
   } catch (err) {
@@ -232,7 +233,7 @@ export async function sendDailyDigests(): Promise<number> {
       await Notification.updateMany({ _id: { $in: pending.map(n => n._id) } }, { $set: { includedInDigest: true } });
       sent += 1;
     } catch (err) {
-      logger.warn('notification', `Failed to send daily digest to ${account.email}`, err);
+      logger.warn('notification', `Failed to send daily digest to ${maskEmail(account.email)}`, err);
     }
   }
 

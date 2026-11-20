@@ -9,11 +9,24 @@ const envSchema = z.object({
 
   APP_URL: z.string().url().default('http://localhost:3000'),
 
+  // In production the name always carries the __Host- prefix (see config/cookie.ts).
   SESSION_COOKIE_NAME: z.string().default('b2g_session'),
   SESSION_TTL_DAYS: z.coerce.number().int().positive().default(7),
   COOKIE_SAMESITE: z.enum(['lax', 'strict', 'none']).default('lax'),
 
   BCRYPT_ROUNDS: z.coerce.number().int().min(10).max(15).default(12),
+
+  // --- Anti-automation (ASVS V2.4.1, V15.2.2) ---
+  // Public search (GET /works) per client address per minute. A person paging
+  // and filtering stays far below it; a scraper is slowed. The website's own
+  // server-side renders forward the visitor's address, so they don't share one
+  // budget (B2GVendor/src/lib/serverApi.ts).
+  SEARCH_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(120),
+  // Poll Now requests per admin account per minute (the poll lock already
+  // allows only one poll at a time; this stops a client hammering the route).
+  POLL_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(10),
+  // Longest one search query may run in MongoDB before it is stopped (503).
+  SEARCH_MAX_TIME_MS: z.coerce.number().int().min(100).default(5000),
 
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().optional(),
