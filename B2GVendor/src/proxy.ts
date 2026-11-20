@@ -35,11 +35,11 @@ function contentSecurityPolicy(nonce: string): string {
     "base-uri 'none'",
     "form-action 'self'",
     "frame-ancestors 'none'",
-    // Where violations are reported (ASVS V3.4.7): report-to for current
-    // browsers (endpoint named in the Reporting-Endpoints header, next.config.ts),
-    // report-uri for the ones that only know the older form.
+    // Where violations are reported (ASVS V3.4.7). report-uri ONLY: tested in
+    // Chromium, adding report-to makes it ignore report-uri, and its newer
+    // Reporting API never delivered to this endpoint (2026-11-20 gap check), so no
+    // report arrived at all. report-uri is sent at once by every major browser.
     'report-uri /csp-report',
-    'report-to csp-endpoint',
     // Only when the API is served over HTTPS -- on a plain-http stack (docker
     // compose on localhost) it would rewrite the API calls to https and break them.
     ...(apiOrigin.startsWith('https:') ? ['upgrade-insecure-requests'] : [])

@@ -1,5 +1,6 @@
 // Where browsers report Content-Security-Policy violations (ASVS V3.4.7): the
-// CSP in src/proxy.ts names this path in both report-uri and report-to.
+// CSP in src/proxy.ts names this path in its report-uri (the newer report-to
+// format is accepted too, for browsers or future policies that send it).
 //
 // Each report becomes ONE log line, so a blocked injected script, a broken
 // third-party embed or a policy that is too strict shows up in the website's
