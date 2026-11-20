@@ -133,8 +133,8 @@ async function main(): Promise<void> {
   await fs.writeFile(throwFile, `import { installProcessHandlers } from '${handlers}';\ninstallProcessHandlers('probe');\nsetInterval(() => undefined, 1000);\nsetTimeout(() => { throw new Error('thrown in a timer'); }, 10);\n`);
   const rejected = await runTsx(rejectFile, {});
   const thrown = await runTsx(throwFile, {});
-  record(rejected.code === 1 && /\[process\] probe: unhandled promise rejection -- exiting/.test(rejected.output) && rejected.output.includes('lost promise'), 'V16.5.4: an unhandled promise rejection is logged with its error and the process exits with code 1', `code ${rejected.code}`);
-  record(thrown.code === 1 && /\[process\] probe: uncaught exception -- exiting/.test(thrown.output) && thrown.output.includes('thrown in a timer'), 'V16.5.4: an exception thrown outside any request is logged and the process exits with code 1 (Docker restarts it)', `code ${thrown.code}`);
+  record(rejected.code === 1 && /"scope":"process","msg":"probe: unhandled promise rejection -- exiting"/.test(rejected.output) && rejected.output.includes('lost promise'), 'V16.5.4: an unhandled promise rejection is logged with its error and the process exits with code 1', `code ${rejected.code}`);
+  record(thrown.code === 1 && /"scope":"process","msg":"probe: uncaught exception -- exiting"/.test(thrown.output) && thrown.output.includes('thrown in a timer'), 'V16.5.4: an exception thrown outside any request is logged and the process exits with code 1 (Docker restarts it)', `code ${thrown.code}`);
   const serverSrc = await fs.readFile(path.join(backendRoot, 'src/server.ts'), 'utf8');
   const workerSrc = await fs.readFile(path.join(backendRoot, 'src/worker.ts'), 'utf8');
   record(serverSrc.includes("installProcessHandlers('api')") && workerSrc.includes("installProcessHandlers('ingestion-worker')"), 'V16.5.4: both the API and the ingestion worker install it');

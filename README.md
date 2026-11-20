@@ -215,10 +215,11 @@ docker compose up --build
 ```
 
 - Frontend: http://localhost:3000
-- Backend: http://localhost:4000/api/v1
+- Backend: http://localhost:4000/api/v1 (through the `proxy` gateway; the API container has no port of its own)
 - MongoDB: localhost:27017 (local dev only — point `MONGODB_URI` at Atlas for anything real)
+- Security alerts: http://127.0.0.1:9093 (Alertmanager)
 
-This starts all four services (`mongo`, `backend`, `ingestion-worker`, `frontend`) together — the worker container is what does real, continuous polling, same as running `npm run dev:worker` manually. Seed data the same way as above, just via `docker compose exec backend npm run seed:all` (and `seed:superadmin`) once the containers are up.
+This starts the app (`mongo`, `backend`, `ingestion-worker`, `frontend`) and its security services: `proxy` (egress filter + API gateway), `clamav` (scans every downloaded TOR file; give Docker at least 3 GB of memory — ClamAV alone uses about 1.5 GB, and its first start downloads ~250 MB of signatures, during which TOR files wait for the next poll), and the log stack `loki` + `alloy` + `alertmanager` (docs/Security.md §13). The worker container is what does real, continuous polling, same as running `npm run dev:worker` manually. If your SMTP provider is not Gmail, add its host to `docker/proxy/allowed-domains.txt`, or mail cannot leave the internal network. Seed data the same way as above, just via `docker compose exec backend npm run seed:all` (and `seed:superadmin`) once the containers are up.
 
 Stop everything with `docker compose down` (add `-v` to also drop the Mongo volume). Ports are configurable via the root `.env` (`FRONTEND_PORT`, `BACKEND_PORT`, `MONGO_PORT`) if any of the defaults are already taken on your machine.
 

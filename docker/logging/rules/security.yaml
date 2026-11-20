@@ -1,0 +1,53 @@
+# Security alert rules, evaluated by Loki's ruler every minute and sent to
+# Alertmanager (ASVS V16.4.3). The events are those the backend logs
+# (docs/Security.md section 13); `service` is the docker compose service name.
+groups:
+  - name: b2g-security
+    rules:
+      - alert: ManyFailedSignIns
+        expr: sum(count_over_time({service="backend"} | json | event="auth.login.failure" [5m])) > 20
+        labels: { severity: warning }
+        annotations:
+          summary: More than 20 failed sign-ins in 5 minutes (password guessing or credential stuffing?)
+
+      - alert: AccountLockouts
+        expr: sum(count_over_time({service="backend"} | json | event="auth.lockout" [15m])) > 3
+        labels: { severity: warning }
+        annotations:
+          summary: More than 3 accounts locked in 15 minutes
+
+      - alert: CsrfBlocked
+        expr: sum(count_over_time({service="backend"} | json | event="csrf.blocked" [10m])) > 5
+        labels: { severity: warning }
+        annotations:
+          summary: Cross-site requests are being refused (an attack, or a misconfigured CORS_ORIGIN)
+
+      - alert: InjectionProbe
+        expr: sum(count_over_time({service="backend"} | json | event="input.dangerous_keys_dropped" [10m])) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: Requests with $-operator or __proto__ keys (NoSQL injection / prototype pollution attempts)
+
+      - alert: OutboundBlocked
+        expr: sum(count_over_time({service=~"backend|ingestion-worker"} | json | event="outbound.blocked" [10m])) > 0
+        labels: { severity: critical }
+        annotations:
+          summary: The application refused to call a host off its allow-list (possible SSRF through the feed)
+
+      - alert: EgressDenied
+        expr: sum(count_over_time({service="proxy"} |= "TCP_DENIED" [10m])) > 0
+        labels: { severity: critical }
+        annotations:
+          summary: The egress proxy refused a connection from the API or worker
+
+      - alert: MalwareInTorFile
+        expr: sum(count_over_time({service="ingestion-worker"} | json | event="tor.malware_found" [15m])) > 0
+        labels: { severity: critical }
+        annotations:
+          summary: The antivirus found malware in a downloaded TOR file (not stored)
+
+      - alert: ServerErrors
+        expr: sum(count_over_time({service="backend"} | json | event="http.request" | status >= 500 [5m])) > 10
+        labels: { severity: warning }
+        annotations:
+          summary: More than 10 server errors (5xx) in 5 minutes

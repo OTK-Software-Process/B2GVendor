@@ -1,4 +1,5 @@
 import { randomBytes } from 'crypto';
+import { logger } from '../utils/logger';
 import { Types } from 'mongoose';
 import { Account, AccountRole, IAccount, Permission, adminPermissionProfile } from '../models/account.model';
 import { Session } from '../models/session.model';
@@ -222,6 +223,7 @@ export async function reactivateAdmin(id: string): Promise<StaffView> {
 export async function signOutAdminEverywhere(id: string): Promise<{ revoked: number }> {
   const account = await findManageableAdmin(id);
   const revoked = await revokeAllSessions(account._id);
+  logger.security('info', 'auth.session.revoked', { reason: 'admin_sign_out_everywhere', targetAccountId: String(account._id), targetRole: account.role, count: revoked });
   // Sessions are not an audited model (they churn on every sign-in), so record the action by hand.
   await audit.log({ action: 'account.sign_out_all', entity: account, metadata: { role: account.role, sessionsRevoked: revoked } });
   return { revoked };

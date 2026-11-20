@@ -73,6 +73,9 @@ Every route except `/health` answers in one shape:
              "fields": { "email": "Invalid email address" } } }
 ```
 
+Every response carries an `X-Request-Id` header: the id under which the request appears in the logs
+(Security.md §13). Quote it when reporting an error.
+
 A creation answers `201` (register, a new site, tag, vendor, admin, or poll job); everything else
 answers `200`, including following a tag. `fields` maps a request field to the reason it was refused,
 using a dotted path for nested input (`announceTypes.0`). `details` carries machine-readable context

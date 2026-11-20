@@ -2,6 +2,7 @@ import nodemailer, { Transporter } from 'nodemailer';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
 import { maskEmail, tokenLink } from '../utils/privacy';
+import { proxyUrl } from '../config/egressProxy';
 
 let transporter: Transporter | null = null;
 
@@ -13,7 +14,10 @@ function getTransporter(): Transporter | null {
       host: env.SMTP_HOST,
       port: env.SMTP_PORT ?? 587,
       secure: (env.SMTP_PORT ?? 587) === 465,
-      auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASS } : undefined
+      auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASS } : undefined,
+      // In the container stack the only way out is the egress proxy (config/egressProxy.ts):
+      // SMTP goes through it as an HTTP CONNECT tunnel, to the SMTP host only.
+      ...(proxyUrl() ? { proxy: proxyUrl() } : {})
     });
   }
 

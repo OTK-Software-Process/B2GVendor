@@ -67,6 +67,7 @@
     "check:rate-limits": "tsx tests/integration/rate-limits.check.ts",
     "check:security-hardening": "tsx tests/integration/security-hardening.check.ts",
     "check:password-session": "tsx tests/integration/password-session.check.ts",
+    "check:logging-outbound": "tsx tests/integration/logging-outbound.check.ts",
     "seed:admins": "tsx src/scripts/seedAdmin.ts",
     "seed:superadmin": "tsx src/scripts/seedSuperAdmin.ts",
     "seed:gov-sites": "tsx src/scripts/seedGovSites.ts",
@@ -85,10 +86,10 @@
     "fast-xml-parser": "^5.12.1",
     "helmet": "^8.3.0",
     "mongoose": "^8.24.10",
-    "morgan": "^1.12.1",
     "node-cron": "^4.6.0",
     "nodemailer": "^10.6.1",
     "pdf-parse": "^1.1.1",
+    "undici": "^7.30.2",
     "zod": "^4.6.7"
   },
   "devDependencies": {
@@ -96,7 +97,6 @@
     "@types/cookie-parser": "^1.4.8",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
-    "@types/morgan": "^1.9.9",
     "@types/node": "^22.10.2",
     "@types/pdf-parse": "^1.1.5",
     "tsx": "^4.19.2",

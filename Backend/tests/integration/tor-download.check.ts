@@ -274,7 +274,7 @@ async function main(): Promise<void> {
     record(devDetail.json?.data?.torFiles?.[5]?.sourceUrl?.startsWith('http://') === true, 'outside production the API returns the link exactly as stored');
 
     const src = readFileSync(path.join(__dirname, '../../src/integrations/egpRss.client.ts'), 'utf8');
-    record(src.includes('fetch(toHttpsLink(url)') && src.includes('let currentUrl = toHttpsLink(url)'), 'the worker fetches TOR files and announcement pages through the same upgrade (wiring)');
+    record((src.match(/outboundFetch\('egp', toHttpsLink\(url\)/g) ?? []).length >= 2, 'the worker fetches TOR files and announcement pages through the same upgrade, on the e-GP allow-list (wiring)');
 
     // The production app, in a child process (NODE_ENV is fixed at start-up).
     const backendRoot = path.join(__dirname, '../..');

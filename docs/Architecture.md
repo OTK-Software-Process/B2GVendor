@@ -121,6 +121,13 @@ flowchart TB
     class mongo,files,egp,dgt,ai,smtp,hibp store
 ```
 
+**Security services around them (docker-compose.yml):** `proxy` (Squid) is both the API's only way
+to the internet — the API and the worker sit on an `internal` network with no route out — and the
+gateway that publishes the API on port 4000. `clamav` scans every TOR file the worker downloads.
+`loki`, `alloy` and `alertmanager` are the log store, the log shipper and the alert router, on their
+own `logging` network that the application containers cannot reach. Security.md §1 and §13 have the
+details.
+
 **Why the worker is its own service rather than a thread in the API:** restarting or redeploying the
 API must not kill a poll in flight, and a failing poll should be visible in its own logs. The two
 never call each other. "Poll Now" only inserts a `PollJob` row; the worker claims it atomically
@@ -203,14 +210,17 @@ flowchart LR
 **The order of the middleware** is part of the design (`app.ts`), because a request that fails an early
 step never reaches a later one:
 
+0. `accessLog` — one JSON line per request when it finishes (Security.md §13). First, so refused
+   requests are logged too.
 1. `securityHeaders` — Helmet: `nosniff`, `X-Frame-Options: DENY`, `frame-ancestors 'none'`, HSTS in
-   production. First, so even errors and CORS preflights carry them.
+   production. Before everything else, so even errors and CORS preflights carry them.
 2. `cors` — the listed frontend origins only, with credentials.
 3. `csrfProtection` — before the body parser, so a refused request is never parsed.
 4. `express.json` — 1 MB limit.
-5. `sanitizeInput` — drops any body key that starts with `$` or contains a dot.
-6. `cookieParser`, `morgan`, then `auditContext`, which opens the actor / IP / request-id context that
-   audit entries read for the rest of the request.
+5. `sanitizeInput` — drops any body key that starts with `$`, contains a dot, or is `__proto__`,
+   `constructor` or `prototype`, and logs the attempt.
+6. `cookieParser`, then `auditContext`, which opens the actor / IP / request-id context that audit
+   entries and log lines read for the rest of the request, and returns the id in `X-Request-Id`.
 7. The routes, then `notFoundHandler`, then `errorHandler`, which turns every `AppError` (and Mongoose,
    duplicate-key and body-parser errors) into one response shape.
 

@@ -90,6 +90,14 @@ const envSchema = z.object({
   // UI -- default 24h, minimum 2h -- see config/polling.ts and
   // models/ingestionSettings.model.ts.)
 
+  // Antivirus (ASVS V5.4.3): ClamAV's clamd, which scans every downloaded TOR
+  // file before it is unpacked, parsed or stored. docker compose sets the host;
+  // without it (local npm run dev) files are not scanned and that is logged.
+  CLAMAV_HOST: z.string().optional(),
+  CLAMAV_PORT: z.coerce.number().int().positive().default(3310),
+  // A 100 MB archive takes a while; a stuck daemon must not hold the poll for ever.
+  CLAMAV_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+
   // Local disk path for downloaded TOR PDFs (FR-N1.6). Swap for a real
   // object-storage bucket later without changing the ingestion pipeline's
   // call shape -- see services/fileStorage.service.ts.

@@ -4,6 +4,7 @@ import { revokeSessionByRawToken } from '../services/session.service';
 import { created, ok } from '../utils/apiResponse';
 import { SESSION_COOKIE_NAME, sessionCookieOptions, clearSessionCookieOptions } from '../config/cookie';
 import { RegisterInput, LoginInput } from '../validators/auth.validator';
+import { logger } from '../utils/logger';
 import { IAccount } from '../models/account.model';
 
 export async function register(req: Request, res: Response): Promise<void> {
@@ -36,8 +37,8 @@ export async function login(req: Request, res: Response): Promise<void> {
   // browser already held (same account or another) is ended on the server, so
   // an old token copied before the sign-in is worthless afterwards.
   const previous = req.cookies?.[SESSION_COOKIE_NAME];
-  if (typeof previous === 'string' && previous.length > 0) {
-    await revokeSessionByRawToken(previous);
+  if (typeof previous === 'string' && previous.length > 0 && (await revokeSessionByRawToken(previous))) {
+    logger.security('info', 'auth.session.revoked', { reason: 'new_sign_in', accountId: String(account._id) });
   }
 
   res.cookie(SESSION_COOKIE_NAME, rawToken, sessionCookieOptions);
@@ -50,6 +51,7 @@ export async function logout(req: Request, res: Response): Promise<void> {
   if (typeof rawToken === 'string' && rawToken.length > 0) {
     await revokeSessionByRawToken(rawToken);
   }
+  logger.security('info', 'auth.logout', {});
 
   res.clearCookie(SESSION_COOKIE_NAME, clearSessionCookieOptions);
   // Tell the browser to drop anything it kept for this origin (ASVS V14.3.1).

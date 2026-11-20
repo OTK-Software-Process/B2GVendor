@@ -11,6 +11,7 @@ import { analyzeTorDocument, TagCandidate, DocumentAnalysisInput, DocumentAnalys
 import { findOrCreateAiTag } from './tag.service';
 import { env } from '../config/env';
 import { saveTorFile } from './fileStorage.service';
+import { assertFileIsClean } from './antivirus.service';
 import { extractPdfContent, DocumentContent } from './pdfText.service';
 import { extractHtmlContent } from './htmlText.service';
 import { extractPdfsFromZip, pickPrimaryPdf } from './zipExtraction.service';
@@ -539,6 +540,8 @@ async function downloadAndExtractTorFiles(item: EgpRssItem, htmlGapMs: number, p
   if (item.linkType === 'pdf') {
     try {
       const downloaded = await downloadTorFile(item.link, 'pdf');
+      // Scanned before anything parses or stores it (ASVS V5.4.3).
+      await assertFileIsClean(downloaded.buffer, item.link);
       const saved = await saveTorFile(downloaded.buffer, downloaded.filename);
       const content = await extractPdfContent(downloaded.buffer, saved.filename);
       return [
@@ -561,6 +564,8 @@ async function downloadAndExtractTorFiles(item: EgpRssItem, htmlGapMs: number, p
   if (item.linkType === 'zip') {
     try {
       const downloaded = await downloadTorFile(item.link, 'zip');
+      // The whole archive is scanned (clamd looks inside it) before it is unpacked.
+      await assertFileIsClean(downloaded.buffer, item.link);
       const pdfEntries = extractPdfsFromZip(downloaded.buffer);
       if (pdfEntries.length === 0) {
         logger.warn('ingestion', `Zip from ${item.link} contained no PDF entries`);

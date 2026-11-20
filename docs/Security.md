@@ -21,6 +21,7 @@ answers. The plan and its status live in `OWASP_ASVS_5.0_B2GVendor_Plan.xlsx` at
 10. [Dangerous functionality](#10-dangerous-functionality) — V15.1.5
 11. [Dependencies](#11-dependencies) — V15.1.1, V15.1.2, V15.1.4, V15.2.1
 12. [Password policy](#12-password-policy) — V6.1.2, V6.2.5, V6.2.9, V6.2.11, V6.3.7
+13. [Logging](#13-logging) — V16.1.1, V16.2.3–V16.2.5, V16.3.1–V16.3.3, V16.4.1–V16.4.3
 
 ---
 
@@ -28,6 +29,14 @@ answers. The plan and its status live in `OWASP_ASVS_5.0_B2GVendor_Plan.xlsx` at
 
 Every connection the application makes or accepts (ASVS V13.1.1). "API" is the Express backend,
 "worker" the ingestion worker, "website" the Next.js server.
+
+**How outbound calls are controlled (ASVS V13.2.4, V13.2.5, V1.3.6, V15.3.2).** Every HTTP call the
+API and the worker make goes through `Backend/src/utils/outbound.ts`: each purpose (e-GP, data.go.th,
+HIBP, AI) has its own allowed hosts, a URL on any other host is refused before it is requested, and
+redirects are followed by hand, at most 5, each hop checked against the same list (a redirected POST
+is refused). A refusal is logged as `outbound.blocked`. In Docker the API and the worker are also on
+a network with **no route to the internet**: their only way out is the egress proxy (Squid,
+`docker/proxy/`), which allows the hosts in `allowed-domains.txt` and refuses and logs the rest.
 
 | From → to | Address | Protocol | Why | What is sent | Credential | Limits |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -37,11 +46,17 @@ Every connection the application makes or accepts (ASVS V13.1.1). "API" is the E
 | Browser → website | `/csp-report` | HTTPS in production | Content-Security-Policy violation reports | The report (page URL, blocked URL, directive) | — | 64 KB per request, 300 log lines a minute |
 | Worker → e-GP RSS feed | `process3.gprocurement.go.th` (`EGP_RSS_BASE_URL`) | HTTPS | New and changed announcements | A department code and announcement type | — | 30 s per request (`INGESTION_REQUEST_TIMEOUT_MS`) |
 | Worker → e-GP announcement pages | `*.gprocurement.go.th` only | HTTPS (an `http://` link is upgraded) | The price on a winner announcement | GET of the exact URL the feed gave | — | Host allow-list on every redirect, 5 redirects, 2 MB, 1 request a second |
-| Worker → TOR document links | whatever the feed links to ⬜ allow-list (V1.3.6) | HTTPS (e-GP links upgraded) | Download TOR PDFs / ZIPs | GET | — | 100 MB, 120 s, ZIP limits (§9) |
+| Worker → TOR document links | `*.gprocurement.go.th` only (every real link is on `process5`) | HTTPS (e-GP links upgraded) | Download TOR PDFs / ZIPs | GET | — | Allow-list on every redirect, 100 MB, 120 s, antivirus scan, ZIP limits (§9) |
 | Worker / API → data.go.th | `data.go.th` (`DATA_GO_TH_BASE_URL`) | HTTPS | Contract datasets, the department directory | CKAN queries | Optional `DATA_GO_TH_API_KEY` | 30 s per request |
 | API → Have I Been Pwned | `api.pwnedpasswords.com` | HTTPS | Breached-password check at sign-up, change and reset | The first 5 hex characters of the password's SHA-1, nothing else | — | Refuses the password change if unreachable |
 | Worker → AI provider | `openrouter.ai` or Google Vertex AI (`asia-southeast1`) | HTTPS | Tags, summary and price of a TOR document | The title, at most 8,000 characters of TOR text, the tag list | `OPENROUTER_API_KEY` or a Google service account | Off unless `AI_TAGGING_ENABLED=true` |
-| API / worker → SMTP | `SMTP_HOST:SMTP_PORT` | SMTP with STARTTLS (587) or TLS (465) ⬜ TLS required (V12.3.1) | Verification, reset, notification emails | Recipient, the email | `SMTP_USER` / `SMTP_PASS` | `EMAIL_SEND_CONCURRENCY` (5) |
+| API / worker → SMTP | `SMTP_HOST:SMTP_PORT` (in Docker through the egress proxy as a CONNECT tunnel) | SMTP with STARTTLS (587) or TLS (465) ⬜ TLS required (V12.3.1) | Verification, reset, notification emails | Recipient, the email | `SMTP_USER` / `SMTP_PASS` | `EMAIL_SEND_CONCURRENCY` (5) |
+| API / worker → egress proxy | `proxy:3128` (internal network) | HTTP CONNECT | The only way out of the internal network | The calls above | — | Hosts in `docker/proxy/allowed-domains.txt` |
+| Browser → API gateway | `localhost:4000` → `backend:4000` (Squid in front of the API) | HTTP (HTTPS behind the production proxy ⬜ V12) | The API has no published port of its own | The API traffic; the caller's address appended to `X-Forwarded-For` | — | — |
+| Worker → ClamAV | `clamav:3310` (internal network) | clamd INSTREAM over TCP | Scan every downloaded TOR file before it is unpacked or stored | The file | — | 110 MB per stream, 120 s |
+| ClamAV → signature mirror | `database.clamav.net` | HTTPS | Virus-signature updates (freshclam) | — | — | — |
+| Docker → Alloy → Loki | Docker socket (read-only) → `loki:3100` (logging network) | HTTP | Every container's log lines into the log store (§13) | Log lines | — | — |
+| Loki → Alertmanager | `alertmanager:9093` (logging network) | HTTP | Security alerts (§13) | Alert name, labels | — | — |
 | API / worker → MongoDB | `MONGODB_URI` | MongoDB wire protocol on the internal network ⬜ authentication and TLS (V13.2.1, V12.3.1) | All application data | Everything | ⬜ none yet | — |
 
 Nothing else is called. The application loads no third-party scripts, fonts or trackers in the browser
@@ -209,7 +224,7 @@ How long each kind of data is kept, and what removes it (ASVS V14.2.7).
 | Account, its follows, notifications, sessions and tokens | Until the owner asks for deletion | An Admin deletes it in the admin console (`DELETE /admin/accounts/:id`, `DELETE /admin/staff/:id`); everything that belongs to it goes with it |
 | Audit log | For the life of the system: it is the accountability record of admin actions | Nobody (append-only) |
 | Works, TOR files, gov sites, tags | Kept: public procurement records | Never deleted; sites and tags are disabled or retired |
-| Logs (stdout) | As long as the container platform keeps them ⬜ (V16.4) | The host |
+| Logs (application, access, proxy, ClamAV) | 90 days in Loki (§13) | Loki's compactor (retention); nobody can delete them earlier |
 
 **A deletion request under PDPA:** the person emails the operator; an Admin confirms the request comes
 from the account's email address, then deletes the account in Admin › Vendor accounts. The audit log
@@ -227,6 +242,7 @@ in check (ASVS V15.1.3).
 | Public search (`GET /works`) | A regex scan of the works collection; typo-tolerant patterns grow with query length | 200 characters and 8 words at most; pattern size capped (exact match beyond); 120 searches per address per minute; 5 s MongoDB time limit (503 beyond); page size ≤ 50 |
 | Polling e-GP and data.go.th | Many outbound requests per site | One poll at a time (lock); Poll Now 10 a minute per admin; 30 s per request; whole poll stopped after 2 hours; per-site requests-per-minute setting; runs in the worker, not the API |
 | TOR download | Up to 100 MB per file | 100 MB cap while streaming, 120 s timeout |
+| Antivirus scan | ClamAV memory (~1.5 GB with signatures) and a few seconds per large file | One scan per downloaded file, 120 s time limit; the daemon runs in its own container |
 | ZIP extraction | Decompression (ZIP bombs) | 200 entries, 50 PDFs, 50 MB per entry, 200 MB in total, checked against declared sizes before inflating |
 | PDF text extraction | CPU and memory per document | Only real PDFs (`%PDF-` signature); text cut to 8,000 characters for the AI |
 | e-GP HTML page reading | One request per winner announcement | e-GP hosts only, 1 request a second, 2 MB per page |
@@ -241,8 +257,8 @@ Places where the application handles untrusted input in a way that could hurt it
 
 | Function | Danger | Controls |
 | :--- | :--- | :--- |
-| Fetching URLs found in the e-GP feed | Server-side request forgery into the internal network or cloud metadata | HTML pages: `*.gprocurement.go.th` only, every redirect checked. ⬜ TOR downloads: allow-list and redirect checks (V1.3.6, V15.3.2) |
-| Parsing PDF and ZIP files from the feed (`pdf-parse`, `adm-zip`) | Parser bugs, ZIP bombs, path tricks in entry names | Size and entry limits (§9), files stored only as `<sha256>.pdf`, never by their own name |
+| Fetching URLs found in the e-GP feed | Server-side request forgery into the internal network or cloud metadata | Feed, pages and TOR files: `*.gprocurement.go.th` only, every redirect checked before it is followed (`utils/outbound.ts`); in Docker, the egress proxy refuses every other host as well |
+| Parsing PDF and ZIP files from the feed (`pdf-parse`, `adm-zip`) | Parser bugs, ZIP bombs, path tricks in entry names, malware passed on to users | Scanned by ClamAV before anything opens them (an infected or unscannable file is never parsed or stored); size and entry limits (§9); files stored only as `<sha256>.pdf`, never by their own name |
 | Serving downloaded files to users | A disguised HTML or script file running in the browser | Only files with a real PDF signature are served, as `application/pdf`, `attachment`, `nosniff` |
 | Reading e-GP HTML pages | Script or markup in third-party HTML | Converted to plain text on the server; never rendered |
 | Sending TOR text to the AI | Prompt injection: a document that tells the model to add tags, write a misleading summary or invent a price | Text fenced as untrusted data and capped; the system prompt forbids following it; the answer is validated: only known tag ids (at most 5), description cut to 2,000 characters with control characters removed, price between 0 and 1 trillion baht, a proposed tag checked against existing names. Tested in `tests/unit/ai-prompt-injection.check.ts` |
@@ -274,7 +290,7 @@ dependency is pinned to a safe version with an npm `overrides` entry (as for `uu
 Google's `gaxios` in `Backend/package.json`) or replaced.
 
 **State on 2026-11-20:** `npm audit` reports 0 vulnerabilities in both apps, after upgrading next
-16.4.6 (critical RCE), express 4.22.3, mongoose 8.24.10, morgan 1.12.1, zod 4, nodemailer 10,
+16.4.6 (critical RCE), express 4.22.3, mongoose 8.24.10, morgan 1.12.1 (since removed: replaced by the JSON access log, §13), zod 4, nodemailer 10,
 node-cron 4 and fast-xml-parser 5, and pinning `uuid` 11.1.1 under gaxios.
 
 ### Software bill of materials
@@ -322,3 +338,67 @@ maintained. They are upgraded first and reviewed whenever they change.
 - **Notice:** every password change and reset emails the owner (time, how it was changed, and a
   link to reset it if it was not them). Re-hashing at sign-in (§2) is not a change and sends nothing.
 - **Hashing:** see §2. A password is never logged, returned or stored in a replayable form.
+
+## 13. Logging
+
+What is logged, where it goes, how it is protected and what raises an alarm (ASVS V16.1.1, V16.2.3,
+V16.2.4, V16.2.5, V16.3.1–V16.3.3, V16.4.1–V16.4.3).
+
+### Inventory
+
+| Log | Written by | Format | Where it goes | Kept |
+| :--- | :--- | :--- | :--- | :--- |
+| Application log | API, worker (`utils/logger.ts`) | One JSON object per line: `time`, `level`, `scope`, `msg`, and inside a request `requestId` and the actor's id and role | stdout/stderr → Docker → Alloy → Loki | 90 days |
+| Security events | API, worker (`logger.security`) | JSON with `scope: "security"` and a stable `event` name (below), plus the client address | Same as above | 90 days |
+| HTTP access log | API (`middlewares/accessLog.middleware.ts`) | JSON `event: "http.request"`: method, path **without** the query string, status, duration, address, request id, account id | Same as above | 90 days |
+| Audit log | API, worker (`audit/`) | MongoDB documents: who, what (field diff), when, where | MongoDB `auditlogs` collection, append-only | For the life of the system (§8) |
+| Egress proxy log | Squid | One line per request: time, client, result (`TCP_TUNNEL` / `TCP_DENIED`), method, destination | stdout → Loki | 90 days |
+| Antivirus, database, log stack | ClamAV, MongoDB, Loki, Alloy, Alertmanager | Their own formats | stdout → Loki | 90 days |
+| CSP violation reports | Website (`/csp-report`) | JSON line per report | Website stdout → Loki | 90 days |
+
+Nothing is written to log files inside the application containers, and nothing is sent anywhere else
+(V16.2.3). The request id is returned to the caller in the `X-Request-Id` header, so a reported error
+can be found in the logs.
+
+### What is never logged
+
+Passwords, session and link tokens, API keys and SMTP credentials are never logged. Email addresses
+are masked (`s***@example.com`); request bodies and query strings are not logged at all; a
+validation failure logs the names of the fields, not what was sent (V16.2.5). JSON encoding escapes
+CR, LF and every control character, so text from a request cannot forge a log line (V16.4.1).
+
+### Security events
+
+| Event | Level | When |
+| :--- | :--- | :--- |
+| `auth.login.success` | info | A sign-in succeeded (account, role, session id) |
+| `auth.login.failure` | warn | A sign-in failed: `reason` is `invalid_credentials`, `locked`, `suspended` or `email_not_verified`; masked email; whether the account exists |
+| `auth.lockout` | warn | The failure that locked an account (or an unknown address) and until when |
+| `auth.reauth.failure` | warn | A wrong current password on change-password or when ending a session |
+| `auth.logout`, `auth.session.revoked`, `auth.session.idle_timeout` | info | A session ended: sign-out, a new sign-in in the same browser, the owner or an Admin ending sessions, inactivity |
+| `auth.signup`, `auth.email_verified` | info | A sign-up (`created` or `existing_email`), an email verified |
+| `auth.password.changed`, `auth.password_reset.requested`, `auth.password_reset.completed` | info | Password changes and resets |
+| `auth.token.invalid` | warn | A verification, reset or unsubscribe link that is wrong, used or expired |
+| `access.denied` | warn | Every 401 / 403 / 423 refusal (no session, wrong role, suspended, locked), with the route and actor |
+| `input.rejected` | info | A request refused by validation (400), or too large / wrong type (413, 415): field names only |
+| `input.dangerous_keys_dropped` | warn | A body carried `$` operators, dotted keys or `__proto__` / `constructor` / `prototype` |
+| `csrf.blocked` | warn | A state-changing request from a foreign origin, with the origin |
+| `rate_limit.exceeded` | warn | A rate limit refused a request |
+| `outbound.blocked` | warn | The application refused to call a host off its allow-list |
+| `tor.malware_found` | error | The antivirus found malware in a downloaded TOR file |
+
+### Protection and alerting
+
+- **Separate store (V16.4.3):** Grafana Alloy reads every container's output through the Docker
+  socket (read-only) and ships it to **Grafana Loki**. The application containers are not on the
+  logging network: they cannot reach Loki at all, so they cannot read, change or delete stored lines.
+- **No changes (V16.4.2):** Loki's delete API is disabled (`deletion_mode: disabled`): stored lines
+  disappear only through the 90-day retention. Loki's port is not published to the host.
+- **Alerts (V16.4.3):** Loki's ruler evaluates `docker/logging/rules/security.yaml` every minute and
+  sends alerts to **Alertmanager** (`http://127.0.0.1:9093` on the host): many failed sign-ins, account
+  lockouts, CSRF refusals, injection probes, blocked outbound calls, egress denials, malware in a TOR
+  file, bursts of 5xx errors. To escalate by email, fill in the receiver in
+  `docker/logging/alertmanager.yml`.
+- **Reading the logs:** from a container on the logging network, e.g.
+  `docker compose exec alertmanager wget -qO- 'http://loki:3100/loki/api/v1/query_range?query={service="backend"}|json|event="auth.login.failure"'`,
+  or attach Grafana to the logging network with Loki as its data source.

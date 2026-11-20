@@ -4,6 +4,7 @@ import { env } from '../config/env';
 import { Account, IAccount } from '../models/account.model';
 import { Session, hashSessionToken } from '../models/session.model';
 import { AppError } from '../utils/AppError';
+import { logger } from '../utils/logger';
 
 const MINUTE = 60 * 1000;
 
@@ -53,6 +54,7 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
     const lastActive = session.lastActiveAt ?? session.createdAt ?? now;
     if (now.getTime() - lastActive.getTime() > idleTimeoutMs(account)) {
       await Session.updateOne({ _id: session._id, revokedAt: { $exists: false } }, { revokedAt: now });
+      logger.security('info', 'auth.session.idle_timeout', { accountId: String(account._id), role: account.role, sessionId: String(session._id), idleMinutes: Math.round((now.getTime() - lastActive.getTime()) / 60000) });
       throw AppError.notAuthenticated(IDLE_TIMEOUT_MESSAGE);
     }
 

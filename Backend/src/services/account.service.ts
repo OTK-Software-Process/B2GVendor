@@ -70,6 +70,7 @@ export async function changePassword(
 
   const isMatch = await account.comparePassword(currentPassword);
   if (!isMatch) {
+    logger.security("warn", "auth.reauth.failure", { purpose: "change_password", accountId: String(account._id) });
     throw AppError.invalidCredentials();
   }
   await clearFailedLogins(account._id);
@@ -78,7 +79,8 @@ export async function changePassword(
   await assertPasswordNotPwned(newPassword);
   account.passwordHash = newPassword;
   await account.save();
-  await revokeOtherSessions(accountId, currentSessionId);
+  const revoked = await revokeOtherSessions(accountId, currentSessionId);
+  logger.security("info", "auth.password.changed", { accountId: String(account._id), otherSessionsRevoked: revoked });
   await notifyPasswordChanged(account, "changed");
 }
 
@@ -114,6 +116,7 @@ export async function forgotPassword(email: string): Promise<void> {
     }
 
     const account = await Account.findOne({ email: email.trim().toLowerCase() });
+    logger.security("info", "auth.password_reset.requested", { email: maskEmail(email), accountFound: !!account });
 
     if (!account) {
       return;
@@ -127,7 +130,7 @@ export async function forgotPassword(email: string): Promise<void> {
       throw error;
     }
   } catch (error) {
-    console.error("Error in forgotPassword:", error);
+    logger.error("account", "forgot-password could not send the reset email", error);
     throw AppError.internalError(
       "An error occurred while processing the password reset request.",
     );
@@ -153,7 +156,8 @@ export async function resetPassword(
   await account.save();
   // Proving control of the mailbox lifts a sign-in lockout.
   await clearFailedLogins(account._id);
-  await revokeAllSessions(accountId);
+  const revoked = await revokeAllSessions(accountId);
+  logger.security("info", "auth.password_reset.completed", { accountId: String(account._id), sessionsRevoked: revoked });
   await notifyPasswordChanged(account, "reset");
 }
 
@@ -174,7 +178,10 @@ async function confirmPassword(accountId: string, password: string): Promise<voi
   if (!account) throw AppError.notFound("Account not found.");
   const attempt = await reserveLoginAttempt(account._id);
   if (!attempt.allowed) throw AppError.accountLocked(attempt.retryAfterSeconds);
-  if (!(await account.comparePassword(password))) throw AppError.invalidCredentials();
+  if (!(await account.comparePassword(password))) {
+    logger.security("warn", "auth.reauth.failure", { purpose: "end_session", accountId: String(account._id) });
+    throw AppError.invalidCredentials();
+  }
   await clearFailedLogins(account._id);
 }
 
@@ -182,12 +189,16 @@ export async function revokeSession(accountId: string, sessionId: string, passwo
   await confirmPassword(accountId, password);
   const session = await Session.findOne({ _id: sessionId, accountId, revokedAt: { $exists: false } });
   if (!session) throw AppError.notFound("No such session.");
-  return { revoked: await revokeSessionById(session._id) };
+  const revoked = await revokeSessionById(session._id);
+  logger.security("info", "auth.session.revoked", { reason: "owner", accountId, sessionId: String(session._id) });
+  return { revoked };
 }
 
 export async function revokeOtherSessionsWithPassword(accountId: string, currentSessionId: string, password: string): Promise<{ revoked: number }> {
   await confirmPassword(accountId, password);
-  return { revoked: await revokeOtherSessions(accountId, currentSessionId) };
+  const revoked = await revokeOtherSessions(accountId, currentSessionId);
+  logger.security("info", "auth.session.revoked", { reason: "owner_others", accountId, count: revoked });
+  return { revoked };
 }
 
 export interface NotificationSettingsUpdate {

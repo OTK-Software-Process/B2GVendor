@@ -2,7 +2,6 @@
 import './audit/install';
 import express from 'express';
 import cors from 'cors';
-import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 import { corsOrigins, env, isProduction } from './config/env';
 import { logger } from './utils/logger';
@@ -13,6 +12,7 @@ import { sanitizeInput } from './middlewares/sanitize.middleware';
 import { csrfProtection } from './middlewares/csrf.middleware';
 import { noStoreExceptPublicReads, securityHeaders } from './middlewares/securityHeaders.middleware';
 import { auditContextMiddleware } from './middlewares/auditContext.middleware';
+import { accessLog } from './middlewares/accessLog.middleware';
 
 export function createApp() {
   const app = express();
@@ -31,7 +31,10 @@ export function createApp() {
     logger.warn('csrf', `COOKIE_SAMESITE=none: CSRF protection relies on CORS_ORIGIN listing exactly the trusted frontend origins (${corsOrigins.join(', ')})`);
   }
 
-  // First, so EVERY response carries the headers: success, errors, 404s and CORS preflights alike.
+  // The access log goes first so every request is logged, refused ones included.
+  app.use(accessLog());
+
+  // Next, so EVERY response carries the headers: success, errors, 404s and CORS preflights alike.
   app.use(securityHeaders(isProduction));
 
   app.use(
@@ -46,7 +49,6 @@ export function createApp() {
   app.use(express.json({ limit: '1mb' }));
   app.use(sanitizeInput);
   app.use(cookieParser());
-  app.use(morgan(isProduction ? 'combined' : 'dev'));
   // After the body/cookie parsers, before any route: opens the audit context
   // (actor/IP/request id) that audit.log() reads for the rest of the request.
   app.use(auditContextMiddleware);

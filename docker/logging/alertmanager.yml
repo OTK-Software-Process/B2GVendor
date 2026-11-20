@@ -1,0 +1,26 @@
+# Alertmanager: receives the security alerts from Loki's ruler (docker/logging/
+# rules/security.yaml), groups them and escalates (ASVS V16.4.3).
+#
+# Alerts are always visible at http://127.0.0.1:9093 on the host. To escalate by
+# email, fill in email_configs below (Alertmanager does not read environment
+# variables; keep the password in a file mounted next to this one, never here).
+route:
+  receiver: security-team
+  group_by: [alertname]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers: [severity="critical"]
+      receiver: security-team
+      repeat_interval: 1h
+
+receivers:
+  - name: security-team
+    # email_configs:
+    #   - to: security@example.com
+    #     from: b2g-alerts@example.com
+    #     smarthost: smtp.gmail.com:587
+    #     auth_username: b2g-alerts@example.com
+    #     auth_password_file: /etc/alertmanager/smtp_password
+    #     send_resolved: true

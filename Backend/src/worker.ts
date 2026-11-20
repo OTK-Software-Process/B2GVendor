@@ -10,8 +10,10 @@ import { purgeUnverifiedAccounts } from './services/retention.service';
 import { audit } from './services/audit.service';
 import { logger } from './utils/logger';
 import { installProcessHandlers } from './utils/processHandlers';
+import { installEgressProxy } from './config/egressProxy';
 
 installProcessHandlers('ingestion-worker');
+installEgressProxy();
 
 /**
  * Entry point for the ingestion-worker container -- a separate process from
@@ -105,6 +107,6 @@ async function main(): Promise<void> {
 }
 
 main().catch(err => {
-  console.error('[fatal] failed to start ingestion-worker', err);
+  logger.error('worker', 'failed to start', err);
   process.exit(1);
 });

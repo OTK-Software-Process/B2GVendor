@@ -1,6 +1,8 @@
 import { randomBytes } from 'crypto';
 import { hashPassword, needsRehash, verifyPassword } from '../utils/passwordHasher';
 import { assertPasswordNotGuessable } from '../utils/passwordPolicy';
+import { logger } from '../utils/logger';
+import { maskEmail } from '../utils/privacy';
 import { audit } from './audit.service';
 import { Request } from 'express';
 import { env } from '../config/env';
@@ -92,6 +94,7 @@ export async function registerAccount(
     // 201 "check your email" -- after the same work (hash, then one email). The
     // email that goes out tells the owner someone tried, and how to sign in.
     const existing = await Account.findOne({ email: input.email }).select('name email');
+    logger.security('info', 'auth.signup', { outcome: 'existing_email', email: maskEmail(input.email) });
     if (existing) {
       try {
         await sendAccountExistsEmail(existing.email, existing.name);
@@ -119,6 +122,7 @@ export async function registerAccount(
     throw error;
   }
 
+  logger.security('info', 'auth.signup', { outcome: 'created', accountId: String(account._id), email: maskEmail(account.email) });
   return account;
 }
 
@@ -129,6 +133,7 @@ export async function verifyEmailAddress(rawToken: string): Promise<void> {
   if (!account) {
     throw AppError.tokenInvalid();
   }
+  logger.security('info', 'auth.email_verified', { accountId: String(account._id) });
 }
 
 /**
@@ -161,9 +166,16 @@ export async function loginWithPassword(
     // "locked") and its timing never reveal whether the account exists (V6.3.8).
     const unknown = await reserveUnknownEmailAttempt(input.email);
     await verifyPassword(input.password, await getDummyHash());
-    if (!unknown.allowed) throw AppError.accountLocked(unknown.retryAfterSeconds);
+    const email = maskEmail(input.email);
+    if (unknown.allowed && unknown.lockedUntil) logger.security('warn', 'auth.lockout', { email, accountExists: false, lockedUntil: unknown.lockedUntil });
+    if (!unknown.allowed) {
+      logger.security('warn', 'auth.login.failure', { reason: 'locked', email, accountExists: false });
+      throw AppError.accountLocked(unknown.retryAfterSeconds);
+    }
+    logger.security('warn', 'auth.login.failure', { reason: 'invalid_credentials', email, accountExists: false });
     throw AppError.invalidCredentials();
   }
+  const who = { accountId: String(account._id), role: account.role, email: maskEmail(account.email) };
 
   // Counted per account (the IP limiter alone is beaten by rotating IPs). A
   // locked account is refused without checking its password -- but after a
@@ -171,27 +183,33 @@ export async function loginWithPassword(
   const attempt = await reserveLoginAttempt(account._id);
   if (!attempt.allowed) {
     await verifyPassword(input.password, await getDummyHash());
+    logger.security('warn', 'auth.login.failure', { reason: 'locked', ...who });
     throw AppError.accountLocked(attempt.retryAfterSeconds);
   }
+  if (attempt.lockedUntil) logger.security('warn', 'auth.lockout', { ...who, lockedUntil: attempt.lockedUntil });
 
   // The password comes first, for every account: a wrong password gets the same
   // answer whether the account is active, suspended or missing. Only someone who
   // proves they know the password is told the account is suspended.
   const passwordMatches = await account.comparePassword(input.password);
   if (!passwordMatches) {
+    logger.security('warn', 'auth.login.failure', { reason: 'invalid_credentials', ...who });
     throw AppError.invalidCredentials();
   }
   await clearFailedLogins(account._id);
   await upgradePasswordHash(account._id, account.passwordHash, input.password);
 
   if (account.status === 'suspended') {
+    logger.security('warn', 'auth.login.failure', { reason: 'suspended', ...who });
     throw AppError.accountSuspended();
   }
   if (!account.emailVerified) {
+    logger.security('info', 'auth.login.failure', { reason: 'email_not_verified', ...who });
     throw AppError.emailNotVerified();
   }
 
-  const { rawToken } = await createSession(account._id, sessionContextFromRequest(req));
+  const { session, rawToken } = await createSession(account._id, sessionContextFromRequest(req));
+  logger.security('info', 'auth.login.success', { ...who, sessionId: String(session._id) });
 
   return { account, rawToken };
 }

@@ -89,7 +89,7 @@ export function csrfProtection(allowedOrigins: readonly string[]): RequestHandle
     }
 
     // Worth knowing about: either a misconfigured frontend origin, or an attack.
-    logger.warn('csrf', `${req.method} ${req.originalUrl.split('?')[0]} refused: ${verdict.reason}`);
+    logger.security('warn', 'csrf.blocked', { method: req.method, path: req.originalUrl.split('?')[0], reason: verdict.reason, origin: single(req.headers.origin) });
     next(verdict.error === 'CSRF_BLOCKED' ? AppError.csrfBlocked() : AppError.unsupportedMediaType());
   };
 }

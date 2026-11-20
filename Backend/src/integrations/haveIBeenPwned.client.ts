@@ -1,8 +1,9 @@
 import { createHash } from 'crypto';
 import { AppError } from '../utils/AppError';
 import { logger } from '../utils/logger';
+import { HIBP_HOST, outboundFetch } from '../utils/outbound';
 
-const PWNED_PASSWORDS_RANGE_URL = 'https://api.pwnedpasswords.com/range/';
+const PWNED_PASSWORDS_RANGE_URL = `https://${HIBP_HOST}/range/`;
 const REQUEST_TIMEOUT_MS = 5000;
 
 function serviceUnavailable(): AppError {
@@ -18,7 +19,7 @@ export async function assertPasswordNotPwned(password: string): Promise<void> {
 
   let response: Response;
   try {
-    response = await fetch(`${PWNED_PASSWORDS_RANGE_URL}${prefix}`, {
+    response = await outboundFetch('hibp', `${PWNED_PASSWORDS_RANGE_URL}${prefix}`, {
       headers: {
         'Add-Padding': 'true',
         'User-Agent': 'B2GVendor-Password-Check',

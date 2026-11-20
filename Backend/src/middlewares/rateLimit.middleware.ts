@@ -22,7 +22,7 @@ function createLimiter(
     ...(keyGenerator ? { keyGenerator } : {}),
     handler: (req, res) => {
       // A refused request is a security event worth seeing (ASVS V16.3.3).
-      logger.warn('rate-limit', `${name}: ${req.method} ${req.originalUrl.split('?')[0]} refused for ${req.ip}`);
+      logger.security('warn', 'rate_limit.exceeded', { limiter: name, method: req.method, path: req.originalUrl.split('?')[0], ip: req.ip });
       const error = AppError.rateLimited(message);
       fail(res, error.status, error.code, error.message);
     }

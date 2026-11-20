@@ -238,6 +238,7 @@ export async function sendVendorPasswordLink(id: string): Promise<SetupEmailResu
 export async function signOutVendorEverywhere(id: string): Promise<{ revoked: number }> {
   const account = await findVendor(id);
   const revoked = await revokeAllSessions(account._id);
+  logger.security('info', 'auth.session.revoked', { reason: 'admin_sign_out_everywhere', targetAccountId: String(account._id), targetRole: account.role, count: revoked });
   // Sessions are not an audited model (they churn on every sign-in), so record the action by hand.
   await audit.log({ action: 'account.sign_out_all', entity: account, metadata: { role: account.role, sessionsRevoked: revoked } });
   return { revoked };

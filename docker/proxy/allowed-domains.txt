@@ -1,0 +1,17 @@
+# The ONLY outside hosts the API and the ingestion worker can reach (ASVS
+# V13.2.5). Keep in step with Backend/src/utils/outbound.ts (V13.2.4).
+# A leading dot also matches every subdomain.
+
+# e-GP: RSS feed, announcement pages, TOR files (process*.gprocurement.go.th)
+.gprocurement.go.th
+# data.go.th open-data API (contract datasets, department directory)
+data.go.th
+# Have I Been Pwned: breached-password range API
+api.pwnedpasswords.com
+# AI provider, AI_PROVIDER=openrouter
+openrouter.ai
+# AI provider, AI_PROVIDER=vertexai (regional endpoint + Google sign-in)
+asia-southeast1-aiplatform.googleapis.com
+oauth2.googleapis.com
+# Outgoing mail: the SMTP_HOST of Backend/.env (change it here if you change provider)
+smtp.gmail.com

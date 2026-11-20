@@ -32,7 +32,13 @@ export function lockSecondsLeft(lockedUntil: Date | undefined | null, now = new 
   return Math.max(0, Math.ceil((lockedUntil.getTime() - now.getTime()) / 1000));
 }
 
-export type AttemptReservation = { allowed: true } | { allowed: false; retryAfterSeconds: number };
+// `lockedUntil` on an allowed attempt: THIS failure-in-waiting just started a lock (for the security log).
+export type AttemptReservation = { allowed: true; lockedUntil?: Date } | { allowed: false; retryAfterSeconds: number };
+
+function claimed(doc: { lockedUntil?: Date | null } | null, now: Date): AttemptReservation | null {
+  if (!doc) return null;
+  return doc.lockedUntil && doc.lockedUntil > now ? { allowed: true, lockedUntil: doc.lockedUntil } : { allowed: true };
+}
 
 /**
  * Claims one sign-in attempt BEFORE the password is checked: the failure count
@@ -86,9 +92,10 @@ export async function reserveLoginAttempt(accountId: Types.ObjectId, now = new D
   // Bookkeeping, not an admin's edit: kept out of the audit log. (exec() inside
   // the callback -- a query left to the caller's await would run outside it.)
   const updated = await audit.withoutAuto(() =>
-    Account.findOneAndUpdate({ _id: accountId, ...notLockedAt(now) }, claimAttemptUpdate(now), { new: true, projection: { _id: 1 } }).exec()
+    Account.findOneAndUpdate({ _id: accountId, ...notLockedAt(now) }, claimAttemptUpdate(now), { new: true, projection: { _id: 1, lockedUntil: 1 } }).exec()
   );
-  if (updated) return { allowed: true };
+  const ok = claimed(updated, now);
+  if (ok) return ok;
 
   // The filter missed: the account is (now) locked -- possibly by a parallel attempt.
   const current = await Account.findById(accountId).select('+lockedUntil');
@@ -109,11 +116,12 @@ export async function reserveUnknownEmailAttempt(email: string, now = new Date()
   // A few rounds, because the first failure for an address has to create its
   // row before it can claim on it, and a lock can run out in between.
   for (let round = 0; round < 3; round += 1) {
-    const claimed = await LoginFailure.findOneAndUpdate({ emailHash, ...notLockedAt(now) }, claimAttemptUpdate(now), {
+    const claimedDoc = await LoginFailure.findOneAndUpdate({ emailHash, ...notLockedAt(now) }, claimAttemptUpdate(now), {
       new: true,
-      projection: { _id: 1 }
+      projection: { _id: 1, lockedUntil: 1 }
     }).exec();
-    if (claimed) return { allowed: true };
+    const ok = claimed(claimedDoc, now);
+    if (ok) return ok;
 
     const existing = await LoginFailure.findOne({ emailHash }).select('lockedUntil').lean();
     if (existing) {

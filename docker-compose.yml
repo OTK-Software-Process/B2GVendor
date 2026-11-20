@@ -1,3 +1,24 @@
+# The whole stack. Three networks keep the parts apart (docs/Security.md):
+#
+#   internal  NO route to the internet (internal: true). The API and the
+#             ingestion worker live only here: the one way out is the egress
+#             proxy, which allows the hosts in docker/proxy/allowed-domains.txt
+#             and refuses the rest (ASVS V13.2.5). The browser reaches the API
+#             through the same proxy (port 4000).
+#   logging   Loki, Alloy, Alertmanager. The application containers are NOT on
+#             it: they write to stdout and Alloy ships that to Loki, so the app
+#             can neither read nor change the stored logs (ASVS V16.4.2, V16.4.3).
+#   default   Everything that must talk to the outside or be published to the
+#             host: the website, the proxy, ClamAV's signature updates, mongo's
+#             local port, Alertmanager.
+
+x-api-egress: &api-egress
+  # Node's fetch and nodemailer go out through the egress proxy
+  # (Backend/src/config/egressProxy.ts); internal services are reached directly.
+  HTTPS_PROXY: http://proxy:3128
+  HTTP_PROXY: http://proxy:3128
+  NO_PROXY: mongo,clamav,localhost,127.0.0.1
+
 services:
   mongo:
     image: mongo:7
@@ -11,6 +32,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks: [internal, default]
 
   backend:
     build:
@@ -18,13 +40,15 @@ services:
     restart: unless-stopped
     env_file:
       - ./Backend/.env
-    ports:
-      - "${BACKEND_PORT:-4000}:4000"
+    environment:
+      <<: *api-egress
+    # No published port: the browser comes in through the proxy (port 4000).
     volumes:
       - tor-storage:/app/storage
     depends_on:
       mongo:
         condition: service_healthy
+    networks: [internal]
 
   # Runs the actual polling (e-GP RSS + data.go.th) in its own process, on
   # its own schedule, separate from the request/response API container.
@@ -39,11 +63,21 @@ services:
     command: ["node", "dist/worker.js"]
     env_file:
       - ./Backend/.env
+    environment:
+      <<: *api-egress
+      # Every downloaded TOR file is scanned before it is unpacked or stored (ASVS V5.4.3).
+      CLAMAV_HOST: clamav
     volumes:
       - tor-storage:/app/storage
     depends_on:
       mongo:
         condition: service_healthy
+      # Started, not healthy: ClamAV needs a minute or two to load its
+      # signatures. Until then a scan fails closed and the file is retried at
+      # the next poll.
+      clamav:
+        condition: service_started
+    networks: [internal]
 
   frontend:
     build:
@@ -61,7 +95,80 @@ services:
       - "${FRONTEND_PORT:-3000}:3000"
     depends_on:
       - backend
+    networks: [internal, default]
+
+  # Squid: the egress filter (3128, internal only) and the API gateway (4000,
+  # published). docker/proxy/squid.conf explains both.
+  proxy:
+    image: ubuntu/squid:6.13-25.04_beta
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-4000}:4000"
+    volumes:
+      - ./docker/proxy/squid.conf:/etc/squid/squid.conf:ro
+      - ./docker/proxy/allowed-domains.txt:/etc/squid/allowed-domains.txt:ro
+    depends_on:
+      - backend
+    networks: [internal, default]
+
+  # ClamAV daemon for the TOR file scan. On the default network only for its
+  # signature updates (freshclam, database.clamav.net).
+  clamav:
+    image: clamav/clamav:1.5.5
+    restart: unless-stopped
+    volumes:
+      - clamav-db:/var/lib/clamav
+      - ./docker/clamav/clamd.conf:/etc/clamav/clamd.conf:ro
+    networks: [internal, default]
+
+  # ---------------------------------------------------------------- logging
+  loki:
+    image: grafana/loki:3.5.5
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ./docker/logging/loki.yaml:/etc/loki/loki.yaml:ro
+      # With auth off, Loki's tenant is "fake": its rules live in rules/fake/.
+      - ./docker/logging/rules:/etc/loki/rules/fake:ro
+      - loki-data:/loki
+    networks: [logging]
+
+  alloy:
+    image: grafana/alloy:v1.10.2
+    restart: unless-stopped
+    command: ["run", "--storage.path=/var/lib/alloy/data", "/etc/alloy/config.alloy"]
+    volumes:
+      - ./docker/logging/alloy.alloy:/etc/alloy/config.alloy:ro
+      # Read-only: Alloy reads the containers' log streams, nothing else.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloy-data:/var/lib/alloy/data
+    depends_on:
+      - loki
+    networks: [logging]
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    restart: unless-stopped
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml", "--storage.path=/alertmanager"]
+    ports:
+      # Alerts UI, on this machine only.
+      - "127.0.0.1:9093:9093"
+    volumes:
+      - ./docker/logging/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    # default: to send escalation emails.
+    networks: [logging, default]
+
+networks:
+  internal:
+    internal: true
+  logging:
+    internal: true
 
 volumes:
   mongo-data:
   tor-storage:
+  clamav-db:
+  loki-data:
+  alloy-data:
+  alertmanager-data:
