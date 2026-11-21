@@ -4,13 +4,13 @@ for
 
 **B2G Vendor**
 
-Version 0.3
+Version 0.4
 
 Prepared by Techaphatr Indhavivadhana
 
 OTK
 
-11/11/2026
+21/11/2026
 
 ---
 
@@ -21,6 +21,7 @@ OTK
 | 0.1 | 22/08/2026 | Techaphatr Indhavivadhana | Initial version. |
 | 0.2 | 04/11/2026 | Techaphatr Indhavivadhana | Sections 4 and 5 brought in line with the implemented system: an implementation status on every FR and NFR; new FR-1.7 to FR-1.12, FR-2.11 to FR-2.13 and FR-5.5; security NFRs for the authentication, CSRF, header and document-handling work; new Section 5.6 Verification Requirements; open issues in Section 7.1 updated; the site-coverage assumption in Section 2.5 corrected. The use case model (Section 6) is unchanged. |
 | 0.3 | 11/11/2026 | Buravit Yenjit | Use case diagram (Section 6.1) updated. |
+| 0.4 | 21/11/2026 | Techaphatr Indhavivadhana | Statuses brought in line with the OWASP ASVS security work: email unsubscribe without login (FR-3.7), rate limits on search and Poll Now, one outbound allow-list for every call, the RSS request time limit, server-rendered public pages (SEO), the `npm test` runner, CI with a dependency audit, the performance suite and the browser test (Section 5.6). |
 
 ---
 
@@ -318,7 +319,7 @@ The requirements in this SRS rely on the following assumptions:
 
 This section organizes the specific functional requirements into logical features. Each feature includes a description, the specific system behaviors (`The system shall...`), and a traceability mapping to the corresponding User Story (US).
 
-Every requirement carries its implementation status as of 04/11/2026 (see Section 1.2). *Current* notes describe how the shipped system actually behaves where it adds detail to the requirement; *Next* notes describe the agreed follow-up work for anything not yet complete. How each feature is verified is summarized at the end of each feature and planned in Section 5.6.
+Every requirement carries its implementation status as of 21/11/2026 (see Section 1.2). *Current* notes describe how the shipped system actually behaves where it adds detail to the requirement; *Next* notes describe the agreed follow-up work for anything not yet complete. How each feature is verified is summarized at the end of each feature and planned in Section 5.6.
 
 ### 4.1 Account & Access Management
 
@@ -415,9 +416,8 @@ Every requirement carries its implementation status as of 04/11/2026 (see Sectio
     - *Next:* Pin the digest schedule to Asia/Bangkok time; it currently follows the server's time zone, and the containers set none.
   - **FR-3.6** *(Implemented)*: The system shall send at most one notification per work per user, even if multiple followed tags match or the work is re-polled.
     - *Current:* This covers the email as well as the in-app entry: when a later poll adds another followed tag to a work the user was already told about, the in-app entry is refreshed but no second email is sent.
-  - **FR-3.7** *(Partial)*: The system shall allow a user to pause, edit, or delete a followed tag, and support email unsubscribe without requiring login.
-    - *Current:* Pausing, resuming and removing a followed tag work. Pausing silences that follow only (no in-app entry and no email) while the tag stays followed; resuming brings it back for the next new work, not for work missed meanwhile. Pausing needs an existing follow (404 otherwise, so it cannot be used to follow), takes exactly `{"paused": true|false}` and is otherwise 400, and un-following a paused tag and following it again starts a fresh, un-paused follow. Follow endpoints answer 401 to a visitor and 403 to a suspended account. The **Unsubscribe** page exists but is a front-end placeholder only: it calls no backend, and notification emails carry no unsubscribe link.
-    - *Next:* Add a signed, per-user unsubscribe token to every notification email and a no-login endpoint that switches email notifications off.
+  - **FR-3.7** *(Implemented)*: The system shall allow a user to pause, edit, or delete a followed tag, and support email unsubscribe without requiring login.
+    - *Current:* Pausing, resuming and removing a followed tag work. Pausing silences that follow only (no in-app entry and no email) while the tag stays followed; resuming brings it back for the next new work, not for work missed meanwhile. Pausing needs an existing follow (404 otherwise, so it cannot be used to follow), takes exactly `{"paused": true|false}` and is otherwise 400, and un-following a paused tag and following it again starts a fresh, un-paused follow. Follow endpoints answer 401 to a visitor and 403 to a suspended account. Every notification email, instant and daily digest, links to `/unsubscribe#token=…`: a random single-purpose token stored only as a hash, placed after the `#` so it never reaches a server or its logs. The **Unsubscribe** page posts it to `POST /account/unsubscribe`, which needs no session and switches the account's email notifications off; an old `/unsubscribe/<token>` link is moved behind the `#` first.
 
 - **Traceability:**
   - US-3.1 (Follow Tags) → FR-3.1
@@ -426,7 +426,7 @@ Every requirement carries its implementation status as of 04/11/2026 (see Sectio
   - US-3.4 (Edit Tags) → FR-3.7
   - US-3.5 (Admin Tag Management) → FR-3.4
 
-- **Verification:** Covered today by `check:follow-tags` (follow, unfollow, pause and resume; who may call it and whose follows a caller can see; what a follow, a paused follow and an unfollow do to the notifications and emails a poll produces), `check:admin-tags`, `check:admin-works` and `check:search-tags`; notification matching is also exercised inside `check:facts-ingestion`. The notification-center endpoints, the daily digest and the unsubscribe flow have no dedicated automated checks yet (Section 5.6).
+- **Verification:** Covered today by `check:follow-tags` (follow, unfollow, pause and resume; who may call it and whose follows a caller can see; what a follow, a paused follow and an unfollow do to the notifications and emails a poll produces), `check:admin-tags`, `check:admin-works` and `check:search-tags`; notification matching is also exercised inside `check:facts-ingestion`. `check:notifications` covers the notification center (mark one and mark all read), the daily digest (sent once, not resent) and unsubscribing from an email's link without signing in; the Playwright test `B2GVendor/tests/e2e/unsubscribe.spec.ts` covers the Unsubscribe page in a browser.
 
 ### 4.4 Search, Browse & Status Display
 
@@ -480,7 +480,7 @@ Every requirement carries its implementation status as of 04/11/2026 (see Sectio
 
 ## 5. Non-Functional Requirements
 
-Each requirement below carries its status as of 04/11/2026 (Section 1.2). Targets that have not been measured yet are marked *Planned* even where the design is intended to meet them; measuring them is part of Section 5.6.
+Each requirement below carries its status as of 21/11/2026 (Section 1.2). Targets that have not been measured yet are marked *Planned* even where the design is intended to meet them; measuring them is part of Section 5.6.
 
 ### 5.1 Performance Requirements
 
@@ -490,7 +490,7 @@ This section defines the specific timing and throughput constraints the system m
   - *Current:* The public pages render their data on the server (home, search, agencies, work detail). Lighthouse mobile defaults (mid-range phone, 4G), median of 3: 2.11 s on every page over HTTPS/HTTP/2 as in production; 2.42–2.46 s with the throttling really applied over the local HTTP/1.1 server; 2.50–2.72 s in Lighthouse's strictest estimate (simulated, HTTP/1.1). Before: 3.3–3.6 s (and ~7.8 s before an 889 KB favicon was replaced). See `Backend/perf/README.md` (`npm run perf:lighthouse`).
 
 - **Search Latency** *(Measured 2026-11-16 — met)*: Faceted search results (with status and facets) shall return within 1.5 seconds at p95 for typical queries.
-  - *Current:* k6, 20,000 works, the search page's typical query mix at 5 searches/s: p95 582 ms (`npm run perf -- search`). The typo-tolerant pattern was restructured (same matches, ~10× faster per scan).
+  - *Current:* k6, 20,000 works, the search page's typical query mix at 5 searches/s: p95 582 ms (`npm run perf -- search`). The typo-tolerant pattern was restructured (same matches, ~10× faster per scan). Measured again on 20/11/2026 after the security changes (rate limits, logging, the egress proxy): p95 734 ms, still within the target.
   - *Next:* The keyword match is still a pattern scan, not an index: p95 stays under 0.7 s up to ~8 searches/s on the test machine, beyond that MongoDB saturates. A search index (NFR-N4.1) is the next step as traffic or data grows.
 
 - **Notification Timeliness** *(Measured 2026-11-16 — met)*: Instant notifications shall be dispatched within approximately 5 minutes of the poll that discovered the matching work.
@@ -500,8 +500,8 @@ This section defines the specific timing and throughput constraints the system m
   - *Current:* Unchanged items are counted as skipped and not rewritten; reading of HTML announcement pages is capped per poll (FR-2.3a).
 
 - **Poll Timeout** *(Partial)*: If a poll for a given site exceeds a configured duration, the system shall time out that run, log it as failed, and alert the Admin (`Poll Timeout`) rather than hang indefinitely.
-  - *Current:* Individual downloads are time-limited (TOR files 120 s, HTML pages 30 s), and a poll abandoned by a crashed worker is closed after 2 minutes without a heartbeat (FR-2.9).
-  - *Next:* Add a time limit to the RSS feed request itself and a configured maximum duration for a whole run, after which the run is logged as failed and the Admin alerted (FR-2.7).
+  - *Current:* Every request is time-limited: the RSS feed and `data.go.th` requests (`INGESTION_REQUEST_TIMEOUT_MS`, 30 s by default), TOR files (120 s) and HTML pages (30 s). A poll abandoned by a crashed worker is closed after 2 minutes without a heartbeat (FR-2.9).
+  - *Next:* A configured maximum duration for a whole run, after which the run is logged as failed and the Admin alerted (FR-2.7).
 
 ### 5.2 Safety Requirements
 
@@ -550,13 +550,11 @@ This section defines the measures required to protect user data, identity, and s
 
 - **Security Headers** *(Implemented)*: The API shall send `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'` and `Referrer-Policy: no-referrer` on every response, with no `X-Powered-By` header. The web application shall send a Content Security Policy, `Referrer-Policy`, `Permissions-Policy` and `X-Frame-Options`.
 
-- **Injection & Rate Limiting** *(Partial)*: The system shall apply OWASP Top 10 protections (especially injection on search) and rate limiting on authentication, search, and admin poll endpoints.
-  - *Current:* All input is validated against strict schemas that reject unknown fields; MongoDB operator and dotted keys are stripped from input; search text is escaped before it is used in a query; email templates escape every inserted value. Sign-in is limited to 10 attempts per 15 minutes, and sign-up and forgot/reset password to 5 per hour, per IP address. A request body that is not valid JSON, or is too large, is refused with `400` or `413` rather than a server error, and a search cannot be made to fail or stall by its text (long Thai text, regular-expression characters, operators).
-  - *Next:* Rate-limit search and the admin poll endpoints.
+- **Injection & Rate Limiting** *(Implemented)*: The system shall apply OWASP Top 10 protections (especially injection on search) and rate limiting on authentication, search, and admin poll endpoints.
+  - *Current:* All input is validated against strict schemas that reject unknown fields; MongoDB operator and dotted keys are stripped from input; search text is escaped before it is used in a query; email templates escape every inserted value. Sign-in is limited to 10 attempts per 15 minutes, and sign-up and forgot/reset password to 5 per hour, per IP address; public search to 120 requests per minute per address (`SEARCH_RATE_LIMIT_PER_MINUTE`); Poll Now to 10 per minute per signed-in Admin (`POLL_RATE_LIMIT_PER_MINUTE`); the second sign-in step to 10 per 15 minutes per address. A refused request gets `429` and is logged as a security event. A request body that is not valid JSON, or is too large, is refused with `400` or `413` rather than a server error, and a search cannot be made to fail or stall by its text (at most 200 characters and 8 words, regular-expression characters escaped, a 5-second database time limit).
 
-- **Outbound Request Safety** *(Partial)*: The system shall only fetch from the government sources it is configured for.
-  - *Current:* HTML announcement pages are fetched only from e-GP hosts, with every redirect checked (FR-2.3a).
-  - *Next:* Apply the same host allowlist to TOR file downloads, which currently follow any link the feed provides.
+- **Outbound Request Safety** *(Implemented)*: The system shall only fetch from the government sources it is configured for.
+  - *Current:* Every outbound call (the RSS feed, HTML announcement pages, TOR file downloads, `data.go.th`, the breached-password service and the AI provider) goes through one allow-list per purpose (`Backend/src/utils/outbound.ts`). Redirects are followed by hand, at most five, and each hop is checked against the allow-list before it is requested. In Docker the API and the worker have no route to the internet: their only way out is the egress proxy, which allows the same hosts. A refused call is logged and raises an alert (`docs/Security.md` sections 1 and 13).
 
 - **Document Handling** *(Implemented)*: Downloaded and served documents shall be limited and validated per FR-5.5.
 
@@ -564,8 +562,8 @@ This section defines the measures required to protect user data, identity, and s
   - *Current:* In the production deployment (`docker-compose.prod.yml`) MongoDB requires a login and TLS, has no published port and no route to the internet, and has one user per service (the API and the worker) with the `readWrite` role on the application database only; no application is given the root password. Only the proxy publishes a port. The API, the worker, the website and the proxy run as an unprivileged user with every capability dropped, no privilege escalation and a read-only file system. Every secret is a file from a secret store, and each service is given only the ones it needs; none is in an environment variable, a `.env` file or an image. The passwords are random and distinct (`docker/secrets/generate.sh`). Dependencies are audited on every change (CI job *Dependencies*). Third-party images keep their own default users.
 
 - **Privacy** *(Partial)*: Contact information, notification preferences, and followed tags shall be stored and processed in a PDPA-compliant manner, with per-channel opt-in.
-  - *Current:* Email notifications can be switched off per user and are only sent to verified addresses; the in-app channel is always on.
-  - *Next:* Make email an explicit opt-in (it is currently on by default), add the no-login unsubscribe of FR-3.7, and let users export and delete their own account data.
+  - *Current:* Email notifications can be switched off per user, from the account page or from the unsubscribe link in every notification email without signing in (FR-3.7), and are only sent to verified addresses; the in-app channel is always on. Personal data is classified and handled by the rules in `docs/Security.md` sections 6 to 8: email addresses are masked in logs, one-time tokens stay out of URLs sent to a server, and accounts never verified are removed after 7 days.
+  - *Next:* Make email an explicit opt-in (it is currently on by default), and let users export and delete their own account data.
 
 ### 5.4 Software Quality Attributes
 
@@ -587,8 +585,8 @@ This section details the quality characteristics important for the long-term mai
 
 - **Portability (Browser Support)** *(Planned — not yet verified)*: The application shall function correctly on all modern browsers, specifically Chrome, Firefox, Safari, and Edge.
 
-- **Discoverability (SEO)** *(Planned)*: Public search and detail pages shall be server-rendered or pre-rendered so content and status are indexable.
-  - *Current:* The public search and work-detail pages load their data in the browser, so their content is not in the server-rendered HTML.
+- **Discoverability (SEO)** *(Implemented)*: Public search and detail pages shall be server-rendered or pre-rendered so content and status are indexable.
+  - *Current:* The home, search, agencies and work-detail pages fetch their data on the server, so works and their status badges are in the HTML the server sends; the search page then takes over in the browser for later searches. No sitemap or structured data is published yet.
 
 ### 5.5 Business Rules
 
@@ -614,23 +612,26 @@ This section lists the operating principles and constraints that dictate specifi
 
 This section defines how the requirements above are verified, and the testing work planned next.
 
-- **NFR-V1 Automated Regression Suite** *(Partial)*: Every requirement marked *Implemented* shall be covered by an automated check that runs with one command, against a throwaway database, with outgoing email disabled.
-  - *Current:* About 30 backend check suites exist (`npm run check:*`, roughly 1,500 assertions), each using its own throwaway database, with mock e-GP, `data.go.th`, breached-password and email services. They are started one script at a time, and `check:ingestion` points at a missing file.
-  - *Next:* One `npm test` runner for every suite; repair `check:ingestion`.
+- **NFR-V1 Automated Regression Suite** *(Implemented)*: Every requirement marked *Implemented* shall be covered by an automated check that runs with one command, against a throwaway database, with outgoing email disabled.
+  - *Current:* `npm test` (in `Backend/`, `tests/run-all.ts`) runs all 52 `check:*` suites, each against its own throwaway MongoDB database, with mock e-GP, `data.go.th`, breached-password and email services, and exits non-zero if any fails. A new suite is picked up as soon as it has a `check:*` script.
 
-- **NFR-V2 Continuous Integration** *(Planned)*: Every pull request shall run the backend checks and typecheck, and the frontend lint, typecheck and production build, and shall not be mergeable while any of them fails.
+- **NFR-V2 Continuous Integration** *(Implemented)*: Every pull request shall run the backend checks and typecheck, and the frontend lint, typecheck and production build, and shall not be mergeable while any of them fails.
+  - *Current:* `.github/workflows/ci.yml` runs on every pull request, every push to `main`, on demand and every Monday: backend typecheck and `npm test` against a MongoDB service container, frontend lint, typecheck and production build, and a dependency audit with an SBOM for each app. One summary check, **CI passed**, fails if any job fails; making it required in the branch protection rule for `main` is a repository setting.
 
 - **NFR-V3 API Coverage per Use Case** *(Partial)*: Each use case in Section 6.2 shall have API-level tests for its basic and alternative flows.
-  - *Current:* *Register / Login*, *Search & Filter Work*, *View Work Detail & Status History*, *Follow Interest Tag*, *Poll Government Site*, *Manage Source Configuration*, *Manage Tag Vocabulary* and *Manage Vendor Accounts* are covered. *Download TOR Document* and *Receive Notification* (matching and email are covered through `check:follow-tags`) are partly covered.
-  - *Next:* Add tests for the rest of *Receive Notification* (digest, notification center, unsubscribe), and complete the partial ones.
+  - *Current:* *Register / Login*, *Search & Filter Work*, *View Work Detail & Status History*, *Follow Interest Tag*, *Poll Government Site*, *Manage Source Configuration*, *Manage Tag Vocabulary* and *Manage Vendor Accounts* are covered. *Receive Notification* is covered by `check:follow-tags` (matching and email) and `check:notifications` (notification center, daily digest, unsubscribe). *Download TOR Document* is partly covered (`check:tor-download`, `check:tor-files`).
+  - *Next:* Complete the alternative flows of *Download TOR Document*.
 
-- **NFR-V4 End-to-End, Accessibility and Browser Tests** *(Planned)*: The main journeys of every use case shall be tested in a real browser on Chrome, Firefox, Safari (WebKit) and Edge, in Thai and English, including automated WCAG 2.1 AA checks.
+- **NFR-V4 End-to-End, Accessibility and Browser Tests** *(Partial)*: The main journeys of every use case shall be tested in a real browser on Chrome, Firefox, Safari (WebKit) and Edge, in Thai and English, including automated WCAG 2.1 AA checks.
+  - *Current:* Playwright is set up in `B2GVendor/` (`npm run test:e2e`) with two tests of the Unsubscribe page in Chromium.
+  - *Next:* The main journey of every use case, on all four browsers, in Thai and English, with automated WCAG 2.1 AA checks.
 
 - **NFR-V5 Security Testing** *(Partial)*: The controls in Section 5.3 shall be covered by automated tests, a dynamic application security scan, and a dependency vulnerability scan.
-  - *Current:* Automated checks cover CSRF, security headers, account enumeration, account lockout, sessions and cookie flags, two-step sign-in, search injection and document safety (`check:csrf`, `check:security-headers`, `check:auth-enumeration`, `check:login-lockout`, `check:login-session`, `check:mfa`, `check:mfa-crypto`, `check:search-filter`, `check:tor-files`), and the production deployment's TLS, MongoDB login, secrets and containers (`check:deployment-config`, `check:transport-security`, `check:secret-files`, and `docker/verify-deployment.sh` on a running stack).
-  - *Next:* Add a dynamic scan (OWASP ZAP baseline) against the full stack, a dependency audit in CI, and cross-user access tests.
+  - *Current:* Automated checks cover CSRF, security headers, account enumeration, account lockout, sessions and cookie flags, two-step sign-in, search injection and document safety (`check:csrf`, `check:security-headers`, `check:auth-enumeration`, `check:login-lockout`, `check:login-session`, `check:mfa`, `check:mfa-crypto`, `check:search-filter`, `check:tor-files`), rate limits, the outbound allow-list and security logging (`check:rate-limits`, `check:logging-outbound`, `check:security-hardening`), passwords (`check:pwned-passwords`, `check:password-hasher`, `check:password-session`), prompt injection (`check:ai-prompt`), and the production deployment's TLS, MongoDB login, secrets and containers (`check:deployment-config`, `check:transport-security`, `check:secret-files`, and `docker/verify-deployment.sh` on a running stack). CI audits the dependencies of both apps on every run (`npm audit --audit-level=high`) and keeps an SBOM. The full stack was also tested once in production mode with a real browser, antivirus, egress proxy and mail server (`docs/B2GVendor_Security_Project_Document.docx`, section 6.4).
+  - *Next:* Add a dynamic scan (OWASP ZAP baseline) against the full stack, and cross-user access tests.
 
-- **NFR-V6 Performance Testing** *(Planned)*: The targets in Section 5.1 shall be measured under load, on a dataset of realistic size, before release.
+- **NFR-V6 Performance Testing** *(Implemented)*: The targets in Section 5.1 shall be measured under load, on a dataset of realistic size, before release.
+  - *Current:* `npm run perf` (k6) and `npm run perf:lighthouse` in `Backend/`, on a seeded set of 20,000 works; the results are in Section 5.1 and `Backend/perf/README.md`.
 
 - **NFR-V7 Test Isolation** *(Implemented)*: Automated tests shall never call the live government sources, the breached-password service, or a real mail server, and shall never touch the development or production database.
 

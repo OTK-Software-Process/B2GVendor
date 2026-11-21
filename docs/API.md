@@ -35,7 +35,7 @@ flowchart LR
         me["GET /auth/me ✅<br/>POST /auth/logout ✅<br/>/account/* ✅<br/>/account/mfa/* ✅<br/>/follows/tags ✅<br/>/notifications ✅"]
         adminq["/admin/dashboard ✅<br/>/admin/accounts ✅<br/>/admin/audit-log ✅<br/>/admin/ingestion ✅<br/>/admin/gov-sites poll ✅<br/>/admin/tags ✅<br/>/admin/works ✅<br/>/admin/data-go-th ✅"]
         sa["/admin/gov-sites add, edit ✅<br/>/admin/staff ✅"]
-        unsub["email unsubscribe ⬜"]
+        unsub["POST /account/unsubscribe ✅"]
         health["GET /health ✅"]
     end
 

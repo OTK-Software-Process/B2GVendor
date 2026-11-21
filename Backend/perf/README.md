@@ -16,7 +16,7 @@ Targets (SRS / ProjectDescription NFR-N4.2, NFR-G2, Notification Timeliness):
 
 1. starts a throwaway MongoDB (a `mongo:7` container on a random port, data in RAM, removed afterwards; or `PERF_MONGODB_URI`);
 2. seeds a realistic data set (`perf/seed.ts`): the 7 launch sites, ~70 tags, **20,000 works** (`PERF_WORKS`) with Thai titles/descriptions, statuses, budgets, deadlines, TOR entries, 300 vendors with follows, 30 Poll Admins with sessions;
-3. starts the API in **production mode** on port 4100 (`PERF_PORT`), never touching the dev stack on 4000, with SMTP off, AI off and the government feeds unreachable — a fresh API process per script, and queries a previous script left running in MongoDB are killed first;
+3. starts the API in **production mode** on port 4100 (`PERF_PORT`), never touching the dev stack on 4000, with SMTP off, AI off and the government feeds unreachable — a fresh API process per script, and queries a previous script left running in MongoDB are killed first. Because the suite measures capacity, not the security limits, it lifts the search and Poll Now rate limits (`PERF_SEARCH_RATE_LIMIT`, `PERF_POLL_RATE_LIMIT`) and turns off two-step sign-in for staff (`MFA_REQUIRED_FOR_STAFF=false`): without that the API refuses to start with no `MFA_ENCRYPTION_KEY`, and the seeded admins, who have no second factor, would get `403` on Poll Now;
 4. runs k6 (a local `k6` binary if installed, otherwise the `grafana/k6:0.54.0` image) and exits non-zero if a threshold fails.
 
 Knobs: `PERF_RATE` (searches/s, default 5), `PERF_DURATION` (default 60s), `PERF_LOGIN_RATE` (default 10), `PERF_BROWSE_RATE` (default 20).
@@ -50,6 +50,23 @@ Results (k6 summaries, Lighthouse JSON, API log) go to `perf/.state/results/` (g
 | Pages interactive on mid-range phone / 4G — HTTPS/HTTP/2 as in production, simulated | all 5 pages **2.11 s** (scores 98–99) | PASS |
 | … with the phone/4G limits really applied (DevTools), local HTTP/1.1 | `/` 2.42 s, `/search` 2.46 s, `/search?q=` 2.45 s, `/agencies` 2.46 s, `/works/:id` 2.44 s | PASS (thin margin) |
 | … simulated, local HTTP/1.1 (strictest) | `/` 2.50 s, `/search` 2.59 s, `/search?q=` 2.64 s, `/agencies` 2.72 s, `/works/:id` 2.72 s (was 3.3–3.6 s) | 1 of 5 |
+
+### Re-run — 2026-11-20, after the OWASP ASVS security changes
+
+Same machine and data set, with the security changes of 20/11 in place (rate limits, security-event
+logging, the outbound allow-list, the password and session changes) and before two-step sign-in was
+added. The three k6 scripts only; Lighthouse and the notification timing were not re-run.
+
+| Test | Result | Verdict |
+|---|---|---|
+| Search, 5/s, typical mix, 20,000 works | p95 **734 ms**, p99 1,414 ms, 0 failed checks | PASS |
+| 30 simultaneous Poll Now | 1 accepted, 29 × 409, p95 174 ms | PASS |
+| 10 sign-ins/s while browsing | browse p95 **46 ms → 48 ms** during sign-ins, 100 % sign-ins OK | PASS |
+
+This run found one fault in the suite itself: the perf API runs in production mode, where the session
+cookie is named `__Host-b2g_session`, but `perf/seed.ts` still gave the admins cookies under the
+development name, so every Poll Now request got 401. The seed now asks for the production name
+(`sessionCookieName(…, true)`).
 
 What these tests found and what was changed:
 

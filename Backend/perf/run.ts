@@ -132,7 +132,12 @@ async function main(): Promise<void> {
         // every request from one address, which the search and Poll Now
         // limiters (ASVS V2.4.1) would otherwise refuse after a minute.
         SEARCH_RATE_LIMIT_PER_MINUTE: process.env.PERF_SEARCH_RATE_LIMIT ?? '1000000',
-        POLL_RATE_LIMIT_PER_MINUTE: process.env.PERF_POLL_RATE_LIMIT ?? '1000000'
+        POLL_RATE_LIMIT_PER_MINUTE: process.env.PERF_POLL_RATE_LIMIT ?? '1000000',
+        // Nor does it measure two-step sign-in. Admin accounts must use a second
+        // factor by default, and without MFA_ENCRYPTION_KEY the API refuses to start
+        // (config/mfa.ts); the seeded admin sessions (perf/seed.ts) have no factor
+        // either, so Poll Now would answer 403 MFA_SETUP_REQUIRED.
+        MFA_REQUIRED_FOR_STAFF: 'false'
       },
       stdio: ['ignore', logFd, logFd]
     });

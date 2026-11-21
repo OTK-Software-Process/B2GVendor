@@ -1,6 +1,6 @@
 # B2G Vendor
 
-A multi-agency Thai government procurement disclosure portal — polls TOR/procurement announcements from real government e-GP/data.go.th sources, AI-tags and summarizes them, tracks status over their lifecycle, and notifies users (in-app + email) about work matching tags they follow. See [docs/ProjectDescription.md](docs/ProjectDescription.md) for the full requirements spec, [docs/Architecture.md](docs/Architecture.md) for how the system is put together, and [docs/API.md](docs/API.md) for the REST API reference.
+A multi-agency Thai government procurement disclosure portal — polls TOR/procurement announcements from real government e-GP/data.go.th sources, AI-tags and summarizes them, tracks status over their lifecycle, and notifies users (in-app + email) about work matching tags they follow. See [SRS.md](SRS.md) for the requirements and the implementation status of each, [docs/ProjectDescription.md](docs/ProjectDescription.md) for the original feature write-up, [docs/Architecture.md](docs/Architecture.md) for how the system is put together, [docs/API.md](docs/API.md) for the REST API reference, and [docs/Security.md](docs/Security.md) / [docs/Deployment.md](docs/Deployment.md) for the security controls and the production deployment.
 
 ## Repo layout
 
@@ -12,10 +12,20 @@ B2GVendor/    Next.js frontend — public pages (search/home/agencies/work detai
 Backend/      Express + TypeScript API + a separate ingestion-worker process. Real e-GP RSS
               polling, data.go.th enrichment, AI tagging/summarization/price extraction
               (OpenRouter or Vertex AI), notifications + email, auth, admin endpoints.
+              Backend/perf/ holds the k6 + Lighthouse performance suite.
 testAPI/      Exploration scripts for the real government data sources (not part of the shipped app).
-docker-compose.yml   Runs mongo + backend + ingestion-worker + frontend together.
+docker/       Config for the security services: egress proxy (Squid), log stack (Loki, Alloy,
+              Alertmanager and the alert rules), the HTTPS edge (Caddy), MongoDB users,
+              secret generation and the deployment check script.
+docker-compose.yml        Local stack: mongo, backend, ingestion-worker, frontend, plus proxy,
+                          clamav, loki, alloy and alertmanager.
+docker-compose.prod.yml   Production overlay: HTTPS edge, MongoDB login + TLS, secrets as files.
+.github/workflows/ci.yml  CI: backend tests, frontend lint/build, dependency audit + SBOM.
+SRS.md        Software Requirements Specification, with the status of every requirement.
 docs/         API.md (every route), Architecture.md, Security.md (connections, crypto, secrets,
-              data classes and retention -- the OWASP ASVS documentation).
+              data classes, retention, logging -- the OWASP ASVS documentation), Deployment.md
+              (production setup), ProjectDescription.md (original feature write-up), and
+              B2GVendor_Security_Project_Document.docx (security project report).
 OWASP_ASVS_5.0_B2GVendor_Plan.xlsx   The ASVS 5.0 plan: what we do, its status, and what is done.
 ```
 
@@ -75,8 +85,9 @@ npm run seed:superadmin -- admin@example.com "Password123" "Admin"
 # Government sites + the tag vocabulary (including the "software" filter tag).
 npm run seed:all
 
-# Admin account tag, poll, poll&tag
-npm run seed:admins tag@example.com "b4Cjh7G1TQX|" poll@example.com "l7./1{w>'5{P" tnp@example.com "£51D]xjJ1xZ;"
+# Optional: three Admin accounts (Tag Admin, Poll Admin, Poll and Tag Admin), each with a password you choose.
+# Like the superadmin, each sets up its authenticator app at first sign-in.
+npm run seed:admins -- tag@example.com "<tag-password>" poll@example.com "<poll-password>" tnp@example.com "<poll-tag-password>"
 ```
 > [!NOTE]
 > If seed commands not working try change the URI in `.env` in `\Backend` to `mongodb://localhost:27017/b2gvendor` and rerun it.
@@ -195,7 +206,7 @@ Optional settings go inside the braces:
 - **Not captured:** `bulkWrite` and raw `Model.collection.*` calls bypass Mongoose hooks. Call `audit.log()` yourself there.
 - **Load order matters.** The audit plugin only covers models loaded after it, so `import './audit/install'` must stay the first import of `app.ts` and `worker.ts`. If a registered model is not covered, the server logs an `[audit]` error at startup.
 - **Tests:** `npm test -- audit notifications tag-lifecycle` (in `Backend/`) runs `check:audit-core | check:audit-plugin | check:audit-registry | check:audit-api | check:notifications | check:tag-lifecycle` against a throwaway database.
-- **Unsubscribe browser regression:** from `B2GVendor/`, run `npx playwright install chromium` once, then `npm run test:e2e`. The anonymous unsubscribe test is marked expected-failing until the FR-3.7 backend integration is implemented.
+- **Unsubscribe browser test:** from `B2GVendor/`, run `npx playwright install chromium` once, then `npm run test:e2e`. It checks that the Unsubscribe page sends the token from an email link to `POST /account/unsubscribe` without signing in, and that an old `/unsubscribe/<token>` link moves its token behind the `#`.
 
 ## Seed scripts reference
 
@@ -204,7 +215,7 @@ Run from `Backend/`:
 | Command | What it does |
 |---|---|
 | `npm run seed:superadmin -- <email> <password> [name]` | Creates (or promotes an existing account to) superadmin. Required — there's no default account. |
-| `npm run seed:gov-sites` | Seeds government sites: 2 test sites + 4 real, live-verified agencies (MOPH, Dept. of Highways, Dept. of Health, depa). See the script's header comment for how each `deptId` was verified, and for what's needed to add PEA/EGAT/DGA/BMA (they don't have one simple central code). |
+| `npm run seed:gov-sites` | Seeds 4 real, live-verified agencies: Office of the Permanent Secretary of MOPH (`2102`), Dept. of Highways (`0806`), Dept. of Health (`2109`) and depa (`1106`). Two test sites are kept in the script, commented out. See the script's header comment for how each `deptId` was verified, and for what's needed to add PEA/EGAT/DGA/BMA (they don't have one simple central code). |
 | `npm run seed:tags` | Seeds the real category/method/keyword tag vocabulary (mirrors the frontend's original mock taxonomy), including the software-only filter tag. |
 | `npm run seed:all` | Both of the above, in order. Idempotent. |
 | `npm run backfill:budgets [-- --dry-run]` | One-off repair for works ingested with no price: re-scans their already-stored TOR PDFs for a labelled ราคากลาง / วงเงินงบประมาณ amount (anchored on "บาท") and fills it in, or records why there's none. Local only — no AI calls — and never overwrites an existing price. Use `--dry-run` to preview. |
@@ -212,6 +223,9 @@ Run from `Backend/`:
 | `npm run backfill:search-text [-- --dry-run]` | One-time migration that creates normalized search text for existing works. Run from `Backend/` after deploying Thai-aware typo-tolerant search; new or updated works are populated automatically. |
 | `npm run backfill:facts [-- --dry-run] [--limit=N]` | One-off catch-up for works ingested before the procurement method (วิธีการจัดซื้อจัดจ้าง), fiscal year (ปีงบประมาณ) and bid deadline were read: assigns the method tag from the title/document, fills the fiscal year (stated, else estimated from the project number and marked as such) and the bid deadline from the already-stored invitation PDFs. Local only — no network, no AI — and uses targeted writes, so it is safe beside a running poll. New works get all three automatically. **PowerShell:** `npm run … -- --dry-run` swallows the flag and runs for real; use `npx tsx src/scripts/backfillProcurementFacts.ts --dry-run`, or in Docker `docker compose exec backend node dist/scripts/backfillProcurementFacts.js --dry-run`. Run it together with `backfill:search-text` when deploying both features (order doesn't matter). |
 | `npm run seed:admins -- <tag-email> <tag-password> <poll-email> <poll-password> <poll-tag-email> <poll-tag-password>` | Creates (or updates) three regular Admin accounts, one per permission: **Tag Admin** (`tag:manage`), **Poll Admin** (`poll:manage`) and **Poll and Tag Admin** (`poll&tag:manage`). Never touches a Super Admin. |
+| `npm run backfill:status-history [-- --dry-run]` | One-off repair for works written by the older poll, which let an old announcement still in the feed pull a work's status back and added a history entry on every poll: keeps each announcement once, in publication order, and sets the status from the latest one. Works that are already right are not touched. |
+| `npm run backfill:tor-file-keys [-- --dry-run]` | **Run once on any database created before 20/11/2026.** Renames TOR files stored under the old 96-bit key to the full SHA-256 key new files get (ASVS V11.4.3) and repoints the works that use them; a file whose bytes no longer match is reported and left alone. In Docker: `docker compose exec backend node dist/scripts/backfillTorFileKeys.js --dry-run`, then again without the flag. |
+| `npm run mfa:reset -- <email> "<reason, at least 10 characters>"` | Removes an account's two-step sign-in from the command line: the only way for a **Super Admin** who lost both the authenticator and the recovery codes (the admin panel never changes a Super Admin). Ends the account's sessions, emails the owner and writes the reason to the audit log; a staff account sets up a new factor at its next sign-in. In Docker: `docker compose exec backend node dist/scripts/resetMfa.js <email> "<reason>"`. |
 
 ## Quick start (Docker — runs everything together)
 
@@ -274,7 +288,7 @@ npm test -- --list             # what would run
 
 `npm test` (`Backend/tests/run-all.ts`) starts a **throwaway MongoDB** — a `mongo:7` container on a random port with its data in RAM, removed afterwards (or the server in `TEST_MONGODB_URI`) — gives each check its own database, and runs every check hermetically: `Backend/.env` is not read, `SMTP_HOST` is empty (no real email can go out; mail tests use an in-memory SMTP server), AI is off, and the e-GP / data.go.th URLs point at a closed port, so nothing reaches a live government site. Needs Docker running, or `TEST_MONGODB_URI`.
 
-CI (`.github/workflows/ci.yml`) runs on every pull request and every push to `main`: backend typecheck + `npm test` against a Mongo service container, and frontend lint, `tsc` and `next build`. Make the **`CI passed`** check required in the branch protection rule for `main` (GitHub → Settings → Branches) so a failing PR can't be merged.
+CI (`.github/workflows/ci.yml`) runs on every pull request, every push to `main`, on demand, and every Monday at 01:00 UTC (so a new advisory for a package we already ship is noticed): backend typecheck + `npm test` against a Mongo service container; frontend lint, `tsc` and `next build`; and, for both apps, `npm audit --audit-level=high` plus a CycloneDX SBOM kept as a build artifact for 90 days. Make the **`CI passed`** check required in the branch protection rule for `main` (GitHub → Settings → Branches) so a failing PR can't be merged.
 
 Performance and load tests (k6 + Lighthouse, on a seeded 20,000-work data set): see [Backend/perf/README.md](Backend/perf/README.md) — `npm run perf`, `npm run perf:lighthouse`.
 
@@ -304,4 +318,4 @@ Every service has a `.env.example` — copy each to `.env` before running (the r
 
 ## Tech stack
 
-Next.js (frontend) · Node.js/Express (backend + separate ingestion-worker process) · MongoDB (database) · OpenRouter (Qwen) or Vertex AI (auto-tagging, summarization, price extraction) · Nodemailer (email)
+Next.js (frontend) · Node.js/Express (backend + separate ingestion-worker process) · MongoDB (database) · OpenRouter (Qwen) or Vertex AI (auto-tagging, summarization, price extraction) · Nodemailer (email) · Squid (egress proxy) · ClamAV (antivirus for TOR files) · Grafana Loki, Alloy and Alertmanager (logs and security alerts) · Caddy (HTTPS edge, production)

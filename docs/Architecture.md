@@ -787,12 +787,12 @@ notes of the SRS requirement it names.
 | Area | Delivers | State |
 | :--- | :--- | :--- |
 | Accounts and access (FR-1.x) | Sign-up with email verification, one login for everyone, sign-in lockout, password reset and change, profile, Admin roles, vendor and admin account management, two-step sign-in (authenticator app and recovery codes, required for Admin and Super Admin, with an identity-checked reset) | ✅ |
-| Ingestion (FR-2.x) | e-GP polling, TOR download, schedule, run history, source configuration, deptId verify and suggestions, `data.go.th` enrichment, procurement facts, topic filter | ✅ — except active alerts for a failed run (FR-2.7) and a per-poll time limit 🔨 |
-| Tags and notifications (FR-3.x) | Follow, pause, unfollow, in-app and email notifications, daily digest, tag vocabulary | ✅ — agency tags are not assigned automatically (FR-3.2) 🔨; no-login email unsubscribe (FR-3.7) ⬜ |
+| Ingestion (FR-2.x) | e-GP polling, TOR download, schedule, run history, source configuration, deptId verify and suggestions, `data.go.th` enrichment, procurement facts, topic filter | ✅ — except active alerts for a failed run (FR-2.7) and a time limit on a whole poll run 🔨 |
+| Tags and notifications (FR-3.x) | Follow, pause, unfollow, in-app and email notifications, daily digest, email unsubscribe without login (FR-3.7), tag vocabulary | ✅ — agency tags are not assigned automatically (FR-3.2) 🔨 |
 | Search and browse (FR-4.x) | Thai-aware search, filters, sorts, status badges, site directory | 🔨 — extracted TOR text is not indexed; budget and date-range filters are in the API but not yet on the search page |
 | Work detail and TOR (FR-5.x) | Detail page, status history, PDF download, hash dedupe | ✅ — served over HTTPS by the production overlay (`docker-compose.prod.yml`) |
 | Security (SRS §5.3) | CSRF, headers, validation, lockout, hashing, rate limits on sign-in, sign-up and reset | ✅ — two-step sign-in for staff, and the dependency audit + SBOM in CI, session idle timeout, rate limits on search and poll. In a deployment (`docker-compose.prod.yml`): TLS 1.2/1.3 and Let's Encrypt, MongoDB login and TLS, secrets in the secret store, non-root containers ✅ — Let's Encrypt issuance is shown only on a public server |
-| Verification (SRS §5.6) | Per-area `check:*` scripts against throwaway databases | 🔨 — CI, browser and accessibility tests, load tests ⬜ |
+| Verification (SRS §5.6) | `npm test` runs all 52 `check:*` suites against throwaway databases; CI on every pull request (tests, lint, build, dependency audit + SBOM); k6 and Lighthouse performance suite; a Playwright browser test | ✅ — browser tests for every journey and browser, accessibility checks and a dynamic scan ⬜ |
 
 ### Open decisions
 
@@ -801,7 +801,7 @@ notes of the SRS requirement it names.
 | AI confidence threshold for discarding a suggested tag | A product decision; today no threshold is applied and Admins correct tags afterwards (SRS §7.1) |
 | One site, or one site per branch, for agencies with no agency-wide `deptId` (PEA, EGAT) | The Product Owner (SRS §7.1, §5.5) |
 | Exact `data.go.th` resource per site | Onboarding each site one at a time; not every site has one (SRS §7.1) |
-| Second factor for staff accounts | Not decided, and not in the current security requirements (SRS §7.1) |
+| Hardware security keys and passkeys (WebAuthn), and whether vendors must also use a second factor | A product decision; staff already must use an authenticator app (SRS §7.1, FR-1.13) |
 
 ---
 
