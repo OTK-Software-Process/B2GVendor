@@ -56,7 +56,7 @@ console.warn = (...args: unknown[]) => {
 };
 function lastResetToken(): string | null {
   for (let i = capturedLogs.length - 1; i >= 0; i--) {
-    const m = capturedLogs[i].match(/reset-password\/([A-Za-z0-9_-]+)/);
+    const m = capturedLogs[i].match(/reset-password(?:\/|#token=)([A-Za-z0-9_-]+)/);
     if (m) return m[1];
   }
   return null;
@@ -258,7 +258,7 @@ async function main(): Promise<void> {
   capturedLogs.length = 0;
   const forgot = await call('POST', '/auth/forgot-password', undefined, { email: 'wipa@example.com' });
   record(forgot.status === 500, 'forgot-password fails when SMTP is not configured', String(forgot.status));
-  record(!forgot.text.includes('/reset-password/'), 'the failed response does not expose a reset link');
+  record(!/reset-password(\/|#token=)/.test(forgot.text), 'the failed response does not expose a reset link');
   record(await Token.countDocuments({ accountId: v2Id, purpose: 'password_reset' }) === 0, 'a reset token is not left behind when email fails');
 
   const forgotUnknown = await call('POST', '/auth/forgot-password', undefined, { email: 'unknown@example.com' });
@@ -312,7 +312,7 @@ async function main(): Promise<void> {
   const setupVendorId = setupEmail.json?.data?.vendor?.id;
   const message = smtp.messages[0] ?? '';
   const decodedMessage = decodeMimeBody(message);
-  const rawSetupToken = decodedMessage.match(/reset-password\/([A-Za-z0-9_-]+)/)?.[1];
+  const rawSetupToken = decodedMessage.match(/reset-password(?:\/|#token=)([A-Za-z0-9_-]+)/)?.[1];
   record(
     setupEmail.status === 201 && setupEmail.json.data.setupEmail.sent === true && smtp.messages.length === 1,
     'creating a vendor sends exactly one password-setup email',
@@ -320,7 +320,7 @@ async function main(): Promise<void> {
   );
   record(
     /^To: .*setup-test@example\.com/im.test(message) &&
-      decodedMessage.includes('/reset-password/') &&
+      decodedMessage.includes('/reset-password#token=') &&
       !!rawSetupToken,
     'the setup email is addressed to the vendor and contains the one-time setup link',
   );
@@ -332,8 +332,8 @@ async function main(): Promise<void> {
   if (rawSetupToken) {
     const setupPassword = await call('POST', '/auth/reset-password', undefined, {
       token: rawSetupToken,
-      newPassword: 'SetupPassword123',
-      confirmNewPassword: 'SetupPassword123'
+      newPassword: 'Kangaroo-Lantern-77',
+      confirmNewPassword: 'Kangaroo-Lantern-77'
     });
     record(setupPassword.status === 200, 'the emailed setup link lets the vendor set a password', String(setupPassword.status));
   }

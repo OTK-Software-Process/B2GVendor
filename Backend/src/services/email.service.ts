@@ -1,20 +1,31 @@
 import nodemailer, { Transporter } from 'nodemailer';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
+import { maskEmail, tokenLink } from '../utils/privacy';
+import { proxyUrl } from '../config/egressProxy';
+import { smtpTransportOptions } from '../config/transportSecurity';
+import type SMTPTransport from 'nodemailer/lib/smtp-transport';
 
 let transporter: Transporter | null = null;
 
-function getTransporter(): Transporter | null {
+/**
+ * How the mail transport is configured, or null when no SMTP host is set. With
+ * REQUIRE_SECURE_BACKENDS the connection must use TLS and never falls back to
+ * plain text (ASVS V12.3.1; config/transportSecurity.ts).
+ */
+export function mailTransportOptions(): SMTPTransport.Options | null {
   if (!env.SMTP_HOST) return null;
+  return smtpTransportOptions(
+    { host: env.SMTP_HOST, port: env.SMTP_PORT, user: env.SMTP_USER, pass: env.SMTP_PASS },
+    { requireSecure: env.REQUIRE_SECURE_BACKENDS, proxy: proxyUrl() }
+  );
+}
 
-  if (!transporter) {
-    transporter = nodemailer.createTransport({
-      host: env.SMTP_HOST,
-      port: env.SMTP_PORT ?? 587,
-      secure: (env.SMTP_PORT ?? 587) === 465,
-      auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASS } : undefined
-    });
-  }
+function getTransporter(): Transporter | null {
+  const options = mailTransportOptions();
+  if (!options) return null;
+
+  if (!transporter) transporter = nodemailer.createTransport(options);
 
   return transporter;
 }
@@ -52,7 +63,7 @@ async function send(mail: Mail): Promise<void> {
   }
 
   await activeTransporter.sendMail({ from: env.MAIL_FROM, ...mail });
-  logger.info('email', `sent "${mail.subject}" to ${mail.to}`);
+  logger.info('email', `sent "${mail.subject}" to ${maskEmail(mail.to)}`);
 }
 
 function layout(heading: string, body: string, buttonLabel: string, url: string, footerHtml = ''): string {
@@ -75,7 +86,7 @@ export async function sendPasswordResetEmail(
   name: string,
   rawToken: string
 ): Promise<void> {
-  const url = `${env.APP_URL}/reset-password/${rawToken}`;
+  const url = tokenLink(env.APP_URL, 'reset-password', rawToken);
 
   await send({
     to,
@@ -95,7 +106,7 @@ export async function sendPasswordSetupEmail(
   name: string,
   rawToken: string
 ): Promise<void> {
-  const url = `${env.APP_URL}/reset-password/${rawToken}`;
+  const url = tokenLink(env.APP_URL, 'reset-password', rawToken);
 
   await send({
     to,
@@ -115,7 +126,7 @@ export async function sendEmailVerificationEmail(
   name: string,
   rawToken: string
 ): Promise<void> {
-  const url = `${env.APP_URL}/verify-email/${encodeURIComponent(rawToken)}`;
+  const url = tokenLink(env.APP_URL, 'verify-email', rawToken);
 
   await send({
     to,
@@ -130,6 +141,101 @@ export async function sendEmailVerificationEmail(
   });
 }
 
+/**
+ * ASVS V6.3.7: sent after every password change and reset, so the owner notices
+ * a change they did not make. It carries no link that changes anything -- only
+ * the way to the forgot-password page, to take the account back.
+ */
+export async function sendPasswordChangedEmail(to: string, name: string, how: 'changed' | 'reset'): Promise<void> {
+  const resetUrl = `${env.APP_URL}/forgot-password`;
+  const when = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', dateStyle: 'long', timeStyle: 'short' });
+  const thaiHow = how === 'reset' ? 'ตั้งรหัสผ่านใหม่ผ่านลิงก์ทางอีเมล' : 'เปลี่ยนรหัสผ่านในหน้าบัญชี';
+  const englishHow = how === 'reset' ? 'reset through an emailed link' : 'changed from the account page';
+
+  await send({
+    to,
+    subject: 'รหัสผ่านของคุณถูกเปลี่ยนแล้ว | Your B2G Vendor password was changed',
+    text:
+      `สวัสดีคุณ ${name}\n\nรหัสผ่านบัญชี B2G Vendor ของคุณถูก${thaiHow}เมื่อ ${when} และอุปกรณ์อื่นถูกออกจากระบบแล้ว ` +
+      `หากไม่ใช่คุณ กรุณาตั้งรหัสผ่านใหม่ทันทีที่ ${resetUrl}\n\n` +
+      `Your B2G Vendor password was ${englishHow} on ${when} (Bangkok time), and your other devices were signed out. ` +
+      `If this was not you, reset your password now: ${resetUrl}`,
+    html: layout(
+      'รหัสผ่านของคุณถูกเปลี่ยนแล้ว',
+      `สวัสดีคุณ ${name} — รหัสผ่านบัญชี B2G Vendor ของคุณถูก${thaiHow}เมื่อ ${when} และอุปกรณ์อื่นถูกออกจากระบบแล้ว หากเป็นคุณ ไม่ต้องดำเนินการใด ๆ หากไม่ใช่คุณ กรุณาตั้งรหัสผ่านใหม่ทันที`,
+      'ตั้งรหัสผ่านใหม่',
+      resetUrl
+    )
+  });
+}
+
+export type MfaNotice = 'enabled' | 'disabled' | 'recovery_codes_regenerated' | 'recovery_code_used' | 'reset';
+
+const MFA_NOTICE_TEXT: Record<MfaNotice, { th: string; en: string; severe: boolean }> = {
+  enabled: { th: 'เปิดการยืนยันตัวตนสองขั้นตอน (แอปยืนยันตัวตน)', en: 'turned on two-step verification (authenticator app)', severe: false },
+  disabled: { th: 'ปิดการยืนยันตัวตนสองขั้นตอน', en: 'turned off two-step verification', severe: true },
+  recovery_codes_regenerated: { th: 'สร้างรหัสกู้คืนชุดใหม่ (ชุดเดิมใช้ไม่ได้อีกแล้ว)', en: 'generated new recovery codes (the old ones no longer work)', severe: true },
+  recovery_code_used: { th: 'ใช้รหัสกู้คืนเพื่อเข้าสู่ระบบ', en: 'a recovery code was used to sign in', severe: true },
+  reset: { th: 'ผู้ดูแลระบบรีเซ็ตการยืนยันตัวตนสองขั้นตอนของคุณหลังจากตรวจสอบตัวตน และอุปกรณ์ทั้งหมดถูกออกจากระบบแล้ว', en: 'an administrator reset your two-step verification after checking your identity, and all your devices were signed out', severe: true }
+};
+
+/**
+ * Sent after every change to a second factor (ASVS V6.3.7 in spirit): turning it
+ * on or off, new recovery codes, a recovery code used to sign in, an Admin reset.
+ * It says what happened and when and points at the way to take the account back;
+ * it carries no link that changes anything and never a code or a secret. Best
+ * effort: the change has already happened.
+ */
+export async function sendMfaNoticeEmail(to: string, name: string, what: MfaNotice): Promise<void> {
+  const resetUrl = `${env.APP_URL}/forgot-password`;
+  const when = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', dateStyle: 'long', timeStyle: 'short' });
+  const notice = MFA_NOTICE_TEXT[what];
+
+  await send({
+    to,
+    subject: 'มีการเปลี่ยนแปลงการยืนยันตัวตนสองขั้นตอน | A change to your B2G Vendor two-step verification',
+    text:
+      `สวัสดีคุณ ${name}\n\nบัญชี B2G Vendor ของคุณ: ${notice.th} เมื่อ ${when}\n` +
+      (notice.severe ? `หากไม่ใช่คุณ กรุณาตั้งรหัสผ่านใหม่ทันทีที่ ${resetUrl} และแจ้งผู้ดูแลระบบ\n\n` : '\n') +
+      `Your B2G Vendor account: ${notice.en} on ${when} (Bangkok time).\n` +
+      (notice.severe ? `If this was not you, reset your password now: ${resetUrl} and tell an administrator.` : 'If this was not you, reset your password and tell an administrator.'),
+    html: layout(
+      'มีการเปลี่ยนแปลงการยืนยันตัวตนสองขั้นตอน',
+      `สวัสดีคุณ ${name} — ${notice.th} เมื่อ ${when} หากเป็นคุณ ไม่ต้องดำเนินการใด ๆ หากไม่ใช่คุณ กรุณาตั้งรหัสผ่านใหม่ทันทีและแจ้งผู้ดูแลระบบ`,
+      'ตั้งรหัสผ่านใหม่',
+      resetUrl
+    )
+  });
+}
+
+/**
+ * Sent instead of a verification email when someone signs up with an email that
+ * already has an account. The sign-up itself answers exactly as for a new
+ * address (ASVS V6.3.8), so only the owner of the mailbox learns the account
+ * exists -- and is pointed to sign-in and password reset.
+ */
+export async function sendAccountExistsEmail(to: string, name: string): Promise<void> {
+  const loginUrl = `${env.APP_URL}/login`;
+  const resetUrl = `${env.APP_URL}/forgot-password`;
+
+  await send({
+    to,
+    subject: 'มีการสมัครด้วยอีเมลของคุณ | Someone tried to sign up with your email',
+    text:
+      `สวัสดีคุณ ${name}\n\nมีผู้พยายามสมัครบัญชี B2G Vendor ด้วยอีเมลนี้ ซึ่งมีบัญชีอยู่แล้ว ` +
+      `หากเป็นคุณ เข้าสู่ระบบได้ที่ ${loginUrl} หรือตั้งรหัสผ่านใหม่ที่ ${resetUrl}\n\n` +
+      `Someone tried to create a B2G Vendor account with this email, which already has one. ` +
+      `If it was you, sign in or reset your password. If not, you can ignore this email -- nothing has changed.`,
+    html: layout(
+      'มีการสมัครด้วยอีเมลของคุณ',
+      `สวัสดีคุณ ${name} — มีผู้พยายามสมัครบัญชี B2G Vendor ด้วยอีเมลนี้ ซึ่งมีบัญชีอยู่แล้ว หากเป็นคุณ กรุณาเข้าสู่ระบบ หรือตั้งรหัสผ่านใหม่หากจำไม่ได้ หากไม่ใช่คุณ ไม่ต้องดำเนินการใด ๆ บัญชีของคุณไม่มีการเปลี่ยนแปลง`,
+      'เข้าสู่ระบบ',
+      loginUrl,
+      `<p style="margin:16px 0 0;font-size:12px;color:#64748b;">Forgot your password? <a href="${escapeHtml(resetUrl)}" style="color:#0284c7;">Reset it here</a>.</p>`
+    )
+  });
+}
+
 export async function sendNewWorkMatchEmail(
   to: string,
   name: string,
@@ -138,7 +244,7 @@ export async function sendNewWorkMatchEmail(
   unsubscribeToken: string,
 ): Promise<void> {
   const url = `${env.APP_URL}/works/${encodeURIComponent(work)}`;
-  const unsubscribeUrl = `${env.APP_URL}/unsubscribe/${encodeURIComponent(unsubscribeToken)}`;
+  const unsubscribeUrl = tokenLink(env.APP_URL, 'unsubscribe', unsubscribeToken);
   const unsubscribeFooter = `<p style="margin:24px 0 0;font-size:12px;color:#64748b;">To stop these emails, <a href="${escapeHtml(unsubscribeUrl)}" style="color:#0284c7;">unsubscribe here</a>.</p>`;
 
   await send({
@@ -168,7 +274,7 @@ export interface DailyDigestItem {
 // work), so it builds its own HTML rather than reusing layout()'s
 // single-button shape.
 export async function sendDailyDigestEmail(to: string, name: string, items: DailyDigestItem[], unsubscribeToken: string): Promise<void> {
-  const unsubscribeUrl = `${env.APP_URL}/unsubscribe/${encodeURIComponent(unsubscribeToken)}`;
+  const unsubscribeUrl = tokenLink(env.APP_URL, 'unsubscribe', unsubscribeToken);
   const rows = items
     .map(item => {
       const url = `${env.APP_URL}/works/${encodeURIComponent(item.workId)}`;

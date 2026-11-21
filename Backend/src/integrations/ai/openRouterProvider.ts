@@ -1,4 +1,5 @@
 import { env } from '../../config/env';
+import { outboundFetch } from '../../utils/outbound';
 import { logger } from '../../utils/logger';
 import { AiProvider } from './types';
 
@@ -19,7 +20,7 @@ export const openRouterProvider: AiProvider = {
       return '';
     }
 
-    const res = await fetch(`${env.OPENROUTER_BASE_URL}/chat/completions`, {
+    const res = await outboundFetch('ai', `${env.OPENROUTER_BASE_URL}/chat/completions`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,

@@ -17,6 +17,33 @@ function getAuthenticatedSessionId(req: Request): string {
   return req.authSession._id.toString();
 }
 
+export async function listSessions(req: Request, res: Response, next: NextFunction) {
+  try {
+    const sessions = await services.listSessions(getAuthenticatedAccountId(req), getAuthenticatedSessionId(req));
+    res.status(200).send({ success: true, data: sessions });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function revokeSession(req: Request, res: Response, next: NextFunction) {
+  try {
+    const result = await services.revokeSession(getAuthenticatedAccountId(req), req.params.id, req.body.password);
+    res.status(200).send({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function revokeOtherSessions(req: Request, res: Response, next: NextFunction) {
+  try {
+    const result = await services.revokeOtherSessionsWithPassword(getAuthenticatedAccountId(req), getAuthenticatedSessionId(req), req.body.password);
+    res.status(200).send({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function getProfile(
   req: Request,
   res: Response,

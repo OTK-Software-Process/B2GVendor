@@ -1,4 +1,5 @@
 import { XMLParser } from 'fast-xml-parser';
+import { isAllowedOutbound, outboundFetch } from '../utils/outbound';
 import { env } from '../config/env';
 import { AnnounceType } from '../models/govSite.model';
 import { logger } from '../utils/logger';
@@ -76,7 +77,7 @@ export async function fetchEgpRssFeed(deptId: string | null, announceType: Annou
   if (deptId) url.searchParams.set('deptId', deptId);
   url.searchParams.set('anounceType', announceType);
 
-  const res = await fetch(url, { signal: requestSignal(signal) });
+  const res = await outboundFetch('egp', url, { signal: requestSignal(signal) });
   if (!res.ok) {
     throw new Error(`e-GP RSS feed returned HTTP ${res.status} for ${url}`);
   }
@@ -126,8 +127,12 @@ export interface DownloadedFile {
 const TOR_TIMEOUT_MS = 120_000;
 export const TOR_MAX_BYTES = 100 * 1024 * 1024;
 
+// The link comes from the feed (untrusted): only e-GP hosts may be contacted,
+// and every redirect is checked before it is followed (ASVS V1.3.6, V15.3.2) --
+// fetch's own redirect handling would contact whatever a redirect points at.
+// Every real TOR link seen so far is on process5.gprocurement.go.th.
 export async function downloadTorFile(url: string, extensionFallback: 'pdf' | 'zip' = 'pdf', maxBytes = TOR_MAX_BYTES): Promise<DownloadedFile> {
-  const res = await fetch(toHttpsLink(url), { signal: AbortSignal.timeout(TOR_TIMEOUT_MS) });
+  const res = await outboundFetch('egp', toHttpsLink(url), { signal: AbortSignal.timeout(TOR_TIMEOUT_MS) });
   if (!res.ok) {
     throw new Error(`Failed to download TOR file (HTTP ${res.status}) from ${url}`);
   }
@@ -171,22 +176,9 @@ const DEFAULT_HTML_CHARSET = 'windows-874';
 // The link comes out of a feed, so it must never become "fetch any URL a feed
 // item names": http(s) only, and only e-GP's own hosts (or the host the RSS
 // feed itself is configured on, which is what lets a local test server work).
+// The same list every e-GP call uses (utils/outbound.ts).
 export function isAllowedHtmlSource(rawUrl: string): boolean {
-  let url: URL;
-  try {
-    url = new URL(rawUrl);
-  } catch {
-    return false;
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-
-  const host = url.hostname.toLowerCase();
-  if (host === 'gprocurement.go.th' || host.endsWith('.gprocurement.go.th')) return true;
-  try {
-    return host === new URL(env.EGP_RSS_BASE_URL).hostname.toLowerCase();
-  } catch {
-    return false;
-  }
+  return isAllowedOutbound('egp', rawUrl);
 }
 
 function charsetFromContentType(header: string | null | undefined): string | null {
@@ -259,35 +251,13 @@ export async function fetchHtmlDocument(url: string, options: { minGapMs?: numbe
   await waitForHtmlSlot(options.minGapMs ?? DEFAULT_HTML_MIN_GAP_MS);
 
   // Redirects are followed by hand (e-GP redirects http -> https), so every hop
-  // is checked against the allow-list BEFORE it is requested -- letting fetch
-  // follow them itself would already have contacted an unexpected host by the
-  // time we could look at where it ended up.
-  const signal = AbortSignal.timeout(HTML_TIMEOUT_MS);
+  // is checked against the allow-list BEFORE it is requested (utils/outbound.ts).
   // In production, straight to https instead of a plain-http first hop.
-  let currentUrl = toHttpsLink(url);
-  let res: Response | null = null;
-  for (let hop = 0; hop <= HTML_MAX_REDIRECTS; hop++) {
-    const response = await fetch(currentUrl, {
-      signal,
-      redirect: 'manual',
-      headers: { Accept: 'text/html,application/xhtml+xml', 'User-Agent': 'B2GVendor-ingestion/1.0 (public procurement announcements)' }
-    });
-
-    const location = response.headers.get('location');
-    if (response.status >= 300 && response.status < 400 && location) {
-      const next = new URL(location, currentUrl).toString();
-      if (!isAllowedHtmlSource(next)) {
-        throw new Error(`HTML page redirected to an unexpected address: ${next}`);
-      }
-      await response.body?.cancel().catch(() => undefined);
-      currentUrl = next;
-      continue;
-    }
-
-    res = response;
-    break;
-  }
-  if (!res) throw new Error(`HTML page redirected more than ${HTML_MAX_REDIRECTS} times: ${url}`);
+  const res = await outboundFetch('egp', toHttpsLink(url), {
+    signal: AbortSignal.timeout(HTML_TIMEOUT_MS),
+    maxRedirects: HTML_MAX_REDIRECTS,
+    headers: { Accept: 'text/html,application/xhtml+xml', 'User-Agent': 'B2GVendor-ingestion/1.0 (public procurement announcements)' }
+  });
 
   if (!res.ok) {
     throw new Error(`HTML page returned HTTP ${res.status}: ${url}`);

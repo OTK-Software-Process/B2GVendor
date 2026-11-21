@@ -18,8 +18,8 @@ async function main(): Promise<void> {
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     usage('A valid email address is required.');
   }
-  if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
-    usage('Password must be at least 8 characters and contain a letter and a number.');
+  if (Array.from(password).length < 8 || Array.from(password).length > 128) {
+    usage('Password must be 8 to 128 characters (any characters).');
   }
 
   await mongoose.connect(env.MONGODB_URI);

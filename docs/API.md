@@ -7,6 +7,13 @@ The contract between the browser, the admin console, and the API service.
 The web app reads the base URL from `NEXT_PUBLIC_API_URL` (default `http://localhost:4000/api/v1`); the
 API itself listens on `PORT` (default `4000`). No host is hard-coded in the server.
 
+In a deployment ([Deployment.md](Deployment.md)) the API is served **only over HTTPS, on a host name of its
+own**, different from the website's: `https://api.example.com/api/v1`, called from the website at
+`https://app.example.com`. TLS 1.2 or newer is required. Plain HTTP to the API host is **refused** (`403`),
+never redirected, so a client that wrongly calls `http://` fails at once instead of being quietly sent on.
+The two host names are siblings of one domain, so the session cookie (`SameSite=Lax`) reaches the API, and
+CORS allows exactly the website's origin.
+
 Every application route lives under **`/api/v1`**. The version is in the path so that a breaking change
 to a response shape can be introduced beside the old one as `/api/v2` instead of as a silent edit. The
 one route outside it is `GET /health`.
@@ -24,11 +31,11 @@ flowchart LR
 
     subgraph api["API · /api/v1"]
         pub["GET /works ✅<br/>GET /works/fiscal-years ✅<br/>GET /works/:id ✅<br/>GET /works/:id/tor/:index ✅<br/>GET /tags ✅<br/>GET /gov-sites ✅"]
-        auth["POST /auth/register ✅<br/>POST /auth/verify-email ✅<br/>POST /auth/login ✅<br/>POST /auth/forgot-password ✅<br/>POST /auth/reset-password ✅"]
-        me["GET /auth/me ✅<br/>POST /auth/logout ✅<br/>/account/* ✅<br/>/follows/tags ✅<br/>/notifications ✅"]
+        auth["POST /auth/register ✅<br/>POST /auth/verify-email ✅<br/>POST /auth/login ✅<br/>POST /auth/mfa/verify ✅<br/>POST /auth/forgot-password ✅<br/>POST /auth/reset-password ✅"]
+        me["GET /auth/me ✅<br/>POST /auth/logout ✅<br/>/account/* ✅<br/>/account/mfa/* ✅<br/>/follows/tags ✅<br/>/notifications ✅"]
         adminq["/admin/dashboard ✅<br/>/admin/accounts ✅<br/>/admin/audit-log ✅<br/>/admin/ingestion ✅<br/>/admin/gov-sites poll ✅<br/>/admin/tags ✅<br/>/admin/works ✅<br/>/admin/data-go-th ✅"]
         sa["/admin/gov-sites add, edit ✅<br/>/admin/staff ✅"]
-        unsub["email unsubscribe ⬜"]
+        unsub["POST /account/unsubscribe ✅"]
         health["GET /health ✅"]
     end
 
@@ -73,6 +80,9 @@ Every route except `/health` answers in one shape:
              "fields": { "email": "Invalid email address" } } }
 ```
 
+Every response carries an `X-Request-Id` header: the id under which the request appears in the logs
+(Security.md §13). Quote it when reporting an error.
+
 A creation answers `201` (register, a new site, tag, vendor, admin, or poll job); everything else
 answers `200`, including following a tag. `fields` maps a request field to the reason it was refused,
 using a dotted path for nested input (`announceTypes.0`). `details` carries machine-readable context
@@ -85,7 +95,7 @@ A signed-in caller carries a **session cookie**, set by `POST /auth/login` and c
 
 | Attribute | Value |
 | :--- | :--- |
-| Name | `SESSION_COOKIE_NAME`, `b2g_session` by default |
+| Name | `SESSION_COOKIE_NAME`, `b2g_session` by default. In production always `__Host-` + that name (`__Host-b2g_session`), so the browser binds it to this exact host: `Secure`, `Path=/`, no `Domain` |
 | Flags | `HttpOnly`; `SameSite=Lax` by default (`COOKIE_SAMESITE`); `Secure` in production |
 | Lifetime | `SESSION_TTL_DAYS`, 7 by default |
 | Value | A random token. The server keeps only its hash, so the session can be revoked |
@@ -117,7 +127,9 @@ read-only pages. A Super Admin passes every check.
 | Admin accounts (`/admin/staff`) | — | — | — | — | — | — | ✅ |
 
 A request with no valid session answers `401 NOT_AUTHENTICATED`. A signed-in caller without the role
-answers `403 FORBIDDEN`, decided **before** the body or the id is looked at. A suspended account answers
+answers `403 FORBIDDEN`, decided **before** the body or the id is looked at. An Admin or Super Admin who
+has not yet set up two-step sign-in (§5) answers `403 MFA_SETUP_REQUIRED` on every `/admin/*` route; only
+`/account/mfa/*`, `GET /auth/me` and `POST /auth/logout` work until they have. A suspended account answers
 `403 ACCOUNT_SUSPENDED`. The admin screens hide what a role cannot use, but that is convenience; the
 server is what refuses.
 
@@ -134,11 +146,24 @@ even parsed:
 A failure is `403 CSRF_BLOCKED` or `415 UNSUPPORTED_MEDIA_TYPE`. `GET`, `HEAD`, and `OPTIONS` are not
 checked.
 
+### Caching
+
+Every response carries `Cache-Control: no-store` **except** the public reads (`GET /works`, `/tags`,
+`/gov-sites` and what is under them), so nothing personal is kept by a browser cache or a proxy.
+
+### Links in emails
+
+Every emailed link puts its one-time token **after the `#`** — `/verify-email#token=…`,
+`/reset-password#token=…`, `/unsubscribe#token=…` — because a URL fragment is never sent to any server
+and so cannot end up in a log. The page reads it in the browser and posts it in the request body. Old
+`/<page>/<token>` links from earlier emails still work: the page moves the token behind the `#` at once.
+
 ### Input
 
 - Bodies and queries are validated against **strict** schemas. An unknown field is a `400
   VALIDATION_ERROR`, never ignored, and nothing is changed when any field is bad.
-- Any body key that starts with `$` or contains a `.` is dropped before validation.
+- Any body key that starts with `$`, contains a `.`, or is `__proto__`, `constructor` or `prototype` is
+  dropped before validation.
 - Text is trimmed; emails are lower-cased. The body limit is 1 MB (`413 PAYLOAD_TOO_LARGE`); a body that
   is not JSON is `400 BAD_REQUEST`.
 - Numbers in a query string are plain digits (`budgetMin=500000`), not `1e3` or `0x10`.
@@ -167,44 +192,57 @@ or vanish between pages. `/admin/accounts` and `/admin/staff` add a `summary` of
 | 400 | `VALIDATION_ERROR` | A field failed its rule; `fields` says which and why |
 | 400 | `BAD_REQUEST` | The request itself is wrong (broken JSON, passwords that do not match, a breached password) |
 | 400 | `TOKEN_INVALID` | An email or reset link that has expired or was already used |
-| 401 | `NOT_AUTHENTICATED` | No session, or it expired or was revoked |
+| 401 | `NOT_AUTHENTICATED` | No session, or it expired, timed out from inactivity (30 minutes for staff, 24 hours for vendors) or was revoked |
 | 401 | `INVALID_CREDENTIALS` | Wrong email or password (also a wrong *current* password on change) |
+| 401 | `INVALID_MFA_CODE` | A wrong, expired or already-used authenticator code or recovery code (the same answer for each) |
 | 403 | `FORBIDDEN` | Signed in, but not allowed here |
 | 403 | `ACCOUNT_SUSPENDED` | The account has been suspended |
 | 403 | `EMAIL_NOT_VERIFIED` | The password was right, but the email is not verified yet |
+| 403 | `MFA_SETUP_REQUIRED` | A staff account has not set up two-step sign-in yet (§5); set it up first |
 | 403 | `CSRF_BLOCKED` | The request did not come from an allowed origin |
 | 404 | `NOT_FOUND` | No such record; also a malformed id on a route that does not validate it |
 | 409 | `CONFLICT` | The action clashes with current state (a poll already running, a site name, `deptId`, or short code already in use) |
 | 409 | `DUPLICATE_TAG` · `NEAR_DUPLICATE_TAG` | A tag with that name exists · a similar one does and the Admin has not confirmed |
-| 409 | `REGISTRATION_FAILED` | Sign-up refused, deliberately without saying why |
 | 409 | `EMAIL_ALREADY_REGISTERED` | An Admin tried to create an account with a taken email |
 | 413 | `PAYLOAD_TOO_LARGE` | The body is over 1 MB |
 | 415 | `UNSUPPORTED_MEDIA_TYPE` | A change was not sent as `application/json` |
-| 423 | `ACCOUNT_LOCKED` | Too many failed sign-ins; `details.retryAfterSeconds` says when to try again |
-| 429 | `RATE_LIMITED` | Too many requests from this address; the `RateLimit` headers say when to retry |
+| 423 | `ACCOUNT_LOCKED` | Too many failed sign-ins or wrong second-step codes; `details.retryAfterSeconds` says when to try again |
+| 429 | `RATE_LIMITED` | Too many requests from this address (or, for Poll Now, this admin); the `RateLimit` headers say when to retry |
 | 500 | `INTERNAL_ERROR` | A server fault. In production the message is fixed text; details go to the log |
-| 503 | `SERVICE_UNAVAILABLE` | A dependency is missing: email is not configured, or the password check is down |
+| 503 | `SERVICE_UNAVAILABLE` | A dependency is missing (email is not configured, the password check is down), or a search ran past its time limit |
 
 A duplicate-key conflict that no service handled itself surfaces as `409 VALIDATION_ERROR` with the
 message "That value is already in use."
 
 ### Rate limiting and lockout
 
-Three limits count requests **per client address**:
+These limits count requests, per client address unless stated:
 
 | Route | Limit |
 | :--- | :--- |
 | `POST /auth/login` | 10 per 15 minutes |
+| `POST /auth/mfa/verify` | 10 per 15 minutes |
+| `POST /account/mfa/setup`, `/enable`, `/recovery-codes`, `/disable` | 10 per 15 minutes **per account** |
 | `POST /auth/register` | 5 per hour |
 | `POST /auth/forgot-password` and `/auth/reset-password`, together | 5 per hour |
+| `GET /works` (search) | `SEARCH_RATE_LIMIT_PER_MINUTE`, 120 per minute |
+| `POST /admin/gov-sites/poll-all` and `/:id/poll` | `POLL_RATE_LIMIT_PER_MINUTE`, 10 per minute **per admin account** |
+
+The website's server-side renders pass the visitor's address on in `X-Forwarded-For`, so visitors do
+not share one budget (the API trusts that header only in production, behind one proxy hop). A search
+also stops in MongoDB after `SEARCH_MAX_TIME_MS` (5 s) and then answers `503`.
 
 The standard `RateLimit` and `RateLimit-Policy` headers (IETF draft 7) report what is left. On top of
 that, wrong passwords are counted **per account**, wherever they come from, on sign-in and on change
 password: the first 4 failures cost nothing; after that the account is locked for 1 minute, then
 twice as long after each further failure, up to 30 minutes (`423 ACCOUNT_LOCKED`). A correct sign-in,
-or a password reset, clears the count. Failures older than 24 hours are forgotten.
+or a password reset, clears the count. Failures older than 24 hours are forgotten. An email with **no**
+account is counted and locked in exactly the same way (by a hash of the address), so a `423` does not
+reveal that an account exists.
 
-Search and the poll routes are **not** rate-limited yet (SRS §5.3, *Injection and Rate Limiting*).
+Wrong **second-step** codes are counted apart from passwords, per account: 4 free failures, then a lock of
+1 minute, doubling to 30 (`423 ACCOUNT_LOCKED`). A correct password does **not** clear it; only a correct
+code does. See §5.
 
 ---
 
@@ -241,8 +279,9 @@ sequenceDiagram
 | :--- | :--- | :--- |
 | `POST /auth/register` | none | Creates a self-registered account and emails a verification link |
 | `POST /auth/verify-email` | none | `{ token }` — marks the email verified. The link is single-use and lasts 24 hours |
-| `POST /auth/login` | none | Starts a session; the cookie is the response's `Set-Cookie` |
-| `POST /auth/logout` | session | Revokes the session and clears the cookie |
+| `POST /auth/login` | none | Starts a session; the cookie is the response's `Set-Cookie`. For an account with two-step sign-in it starts only a 5-minute **challenge** (below) |
+| `POST /auth/mfa/verify` | challenge cookie | `{ code }` — the second step: a 6-digit authenticator code or a recovery code. Ends the challenge and starts the session |
+| `POST /auth/logout` | session | Revokes the session, clears the cookie and sends `Clear-Site-Data: "cache", "storage"` |
 | `GET /auth/me` | session | The signed-in account |
 | `POST /auth/forgot-password` | none | `{ email }` — emails a reset link. Answers `200` with the same message whether or not the email has an account; `500` when email is not configured or the send fails |
 | `POST /auth/reset-password` | none | `{ token, newPassword, confirmNewPassword }` — the link is single-use and lasts 1 hour. Ends **every** session of the account and lifts a sign-in lock |
@@ -263,16 +302,17 @@ sequenceDiagram
 | :--- | :--- |
 | `name` | Required, at most 150 characters. Letters, hyphens, and apostrophes, with at most one space |
 | `email` | Required, a valid address with no spaces; stored lower-case |
-| `password` | At least 8 characters, with a letter and a digit, at most 72 bytes, and not in a known breach |
+| `password` | 8 to 128 characters of any kind (no letter/digit rule), not made mostly of the site's name or the person's own details, and not in a known breach (Security.md §12) |
 | `type` | `individual` (default) or `business`. Fixed after sign-up |
 | `businessProfile` | Required for `business`: `companyName` (at most 200) and `taxId` (exactly 13 digits) |
 
 An account cannot sign in until its email is verified, so registration needs email to be configured:
 without `SMTP_HOST` it answers `503 SERVICE_UNAVAILABLE`. The breached-password check sends only the
 first five characters of the password's hash; a password found in a breach is `400 BAD_REQUEST`, and if
-that service cannot be reached the answer is `503`. A taken email answers the same generic
-`409 REGISTRATION_FAILED` as any other refusal, so the route cannot be used to discover who has an
-account.
+that service cannot be reached the answer is `503`. A **taken** email gets exactly the same `201`
+answer as a new one, after the same work, so the route cannot be used to discover who has an account;
+instead of a verification link, the address's owner is emailed that someone tried to sign up, with
+links to sign in and to reset the password.
 
 ### `POST /auth/login`
 
@@ -293,6 +333,33 @@ the password is proved:
 3. A wrong password is `401 INVALID_CREDENTIALS` — identical for an active, a suspended, and a
    missing account.
 4. Only with the **right** password: `403 ACCOUNT_SUSPENDED`, then `403 EMAIL_NOT_VERIFIED`.
+5. Only then, an account with two-step sign-in answers `200 { "mfaRequired": true }` and sets a **challenge**
+   cookie instead of a session: it lasts 5 minutes, every other route refuses it (`401`), and it is good
+   for `POST /auth/mfa/verify` alone.
+
+### `POST /auth/mfa/verify`
+
+```bash
+curl -i -X POST http://localhost:4000/api/v1/auth/mfa/verify \
+  -H "Content-Type: application/json" -b cookies.txt -c cookies.txt \
+  -d '{"code":"123456"}'
+```
+
+`code` is the 6-digit code from the authenticator app, **or a recovery code** (`XXXX-XXXX-XXXX-XXXX-XXXX`,
+in either case, with or without the dashes). Anything that is not exactly six digits is checked as a
+recovery code. On success the challenge ends, a **new** session is issued (a new cookie), and the answer is
+the account with how it was proved:
+
+```json
+{ "success": true, "data": { "id": "670f9a0b1c2d3e4f5a6b7c10", "email": "admin@example.com", "role": "admin",
+  "mfaEnabled": true, "mfaSetupRequired": false, "mfa": { "method": "recovery_code", "recoveryCodesRemaining": 7 } } }
+```
+
+(`method` is `totp` or `recovery_code`; `recoveryCodesRemaining` only after a recovery code, which also
+emails the owner.) A wrong, expired or used code is `401 INVALID_MFA_CODE`; after four, the account is
+locked (`423 ACCOUNT_LOCKED`, `details.retryAfterSeconds`). A code is judged against the **server's**
+clock (one 30-second step either side) and works **once**: the same code a second time is refused.
+Without a valid challenge the route answers `401 NOT_AUTHENTICATED`.
 
 ---
 
@@ -430,20 +497,45 @@ All routes here need a session.
   "phone": "081-234-5678", "type": "business",
   "businessProfile": { "companyName": "Example Co., Ltd.", "taxId": "0105500000000" },
   "role": "user", "permissions": [], "status": "active", "emailVerified": true,
+  "mfaEnabled": false, "mfaSetupRequired": false,
   "emailNotificationsEnabled": true, "notificationFrequency": "instant",
   "createdAt": "2026-10-01T02:00:00.000Z", "updatedAt": "2026-10-01T02:00:00.000Z" }
 ```
 
-The password hash, the sign-in lock fields, and the internal id are never included.
+The password hash, the sign-in lock fields, and the internal id are never included. `mfaEnabled` says
+whether two-step sign-in is on; `mfaSetupRequired` is `true` for an Admin or Super Admin who must set it up
+and has not (the website then opens *Account security*). Neither carries a secret.
 
 | Route | Purpose |
 | :--- | :--- |
 | `GET /account/profile` | The account, as above |
 | `PATCH /account/profile` | Any of `name`, `phone` (a Thai number, `+66` or `0` first), `businessProfile` (`companyName`, 13-digit `taxId`). **Email and account type cannot be changed.** Strict: an unknown field is `400` |
 | `GET /account/session` | The account's most recently active session: browser, OS, masked IP address, last-active time |
+| `GET /account/sessions` | Every live session of the account: `[{ id, browser, os, ipAddress (masked), lastActiveAt, isCurrent }]` |
+| `POST /account/sessions/:id/revoke` | `{ password }` — ends one of the account's own sessions. The password is checked against the sign-in lock; another account's session is `404` |
+| `POST /account/sessions/revoke-others` | `{ password }` — ends every session but this one; answers `{ revoked }` |
 | `GET /account/notification-settings` | `{ emailNotificationsEnabled, notificationFrequency, pausedTagIds }` |
 | `PATCH /account/notification-settings` | `{ emailNotificationsEnabled?: boolean, notificationFrequency?: "instant" or "daily" }` |
-| `POST /account/change-password` | `{ currentPassword, newPassword, confirmNewPassword }`. The current password is checked against the sign-in lock, so a stolen session cannot guess it without limit. Ends **every other** session; the current one stays |
+| `POST /account/change-password` | `{ currentPassword, newPassword, confirmNewPassword }`. The current password is checked against the sign-in lock, so a stolen session cannot guess it without limit. Ends **every other** session; the current one stays. The owner is emailed a notice |
+
+### Two-step sign-in ✅ (use cases 6.2.1, 6.2.10)
+
+An authenticator app (TOTP, RFC 6238) plus ten recovery codes. Admins and Super Admins must set it up;
+vendors may. Every route needs a session, but **no role**, so a staff account that has to set it up can
+reach exactly these. Turning it on, off, or making new recovery codes asks for the account's password
+(counted toward the sign-in lock) and, except for setup, a current code. Why and how: Security.md §15.
+
+| Route | Purpose |
+| :--- | :--- |
+| `GET /account/mfa` | `{ available, enabled, enabledAt, recoveryCodesRemaining, required, setupRequired }`. `available` is `false` on a server with no `MFA_ENCRYPTION_KEY` |
+| `POST /account/mfa/setup` | `{ password }` → `{ secret, otpauthUri, expiresInSeconds }`. A new 160-bit secret (Base32) and the `otpauth://` link for a QR code. It is held for 10 minutes and **not active yet**; asking again replaces it. `409` if it is already on |
+| `POST /account/mfa/enable` | `{ code }` — a code made from the secret just handed out. Turns it on and answers `{ recoveryCodes: [10 codes], otherSessionsRevoked }`. **The recovery codes are shown only here.** Ends every other session and emails the owner |
+| `POST /account/mfa/recovery-codes` | `{ password, code }` → `{ recoveryCodes }`: ten new codes; the old ones stop working at once |
+| `POST /account/mfa/disable` | `{ password, code }` → `{ otherSessionsRevoked }`. `403` for Admin and Super Admin: it is required for them (ask a Super Admin for a reset) |
+
+A request carries no time: a field the schema does not know, a timestamp included, is `400`. An unknown
+or used code is `401 INVALID_MFA_CODE`; a staff account without it set up is `403 MFA_SETUP_REQUIRED`
+everywhere else (§2).
 
 ### Following tags (use case 6.2.5)
 
@@ -481,11 +573,12 @@ server time).
 late), and is `null` rather than `0` when unknown. `status` here is the notification's own vocabulary:
 `INVITATION` (planned or draft TOR), `BIDDING`, `EVALUATION` (amended), `AWARDED`, `CANCELLED`.
 
-### Email unsubscribe ⬜
+### Email unsubscribe ✅
 
-A signed link in every notification email that switches email off without signing in (SRS FR-3.7). Not
-built: the `/unsubscribe/[token]` page exists in the web app but does not call the API yet, and the
-emails carry no token. Today a user turns email off with `PATCH /account/notification-settings`.
+Every notification email links to `/unsubscribe#token=…` (SRS FR-3.7). The page posts
+`POST /account/unsubscribe` with `{ token }` — no session needed — which turns email notifications off
+for that account. The token is long-lived (it must keep working in old emails) and only ever does this
+one thing. A signed-in user can also switch email off with `PATCH /account/notification-settings`.
 
 ---
 
@@ -531,10 +624,12 @@ Only ever acts on vendor accounts: an Admin or Super Admin id is reported as `40
 | :--- | :--- |
 | `GET /admin/accounts?q=&status=&type=&sort=&page=&pageSize=` | Vendors. `q` searches name, email, company name, and tax id; `status` is `active` or `suspended`; `type` is `individual` or `business`; `sort` is `newest`, `oldest`, or `name`. Also answers `summary: { total, active, suspended }` |
 | `POST /admin/accounts` | `{ name, email, phone?, type, businessProfile? }` → `201 { vendor, setupEmail }`. **No admin ever chooses a password**: a random one is set, and the vendor is emailed a link (valid 1 hour) to choose their own. `setupEmail` is `{ sent, reason? }`, with `reason` `smtp_not_configured` or `send_failed` |
-| `GET /admin/accounts/:id` | One vendor, with `followedTagsCount` and `lastActiveAt` |
+| `GET /admin/accounts/:id` | One vendor, with `followedTagsCount`, `lastActiveAt` and `mfaEnabled` |
 | `PATCH /admin/accounts/:id` | `{ name?, phone? (null clears it), businessProfile? }`. Email and account type are identity and cannot change; a business profile only on a business account |
 | `PATCH /admin/accounts/:id/suspend` · `/reactivate` | Suspending ends every session at once, so a later reactivation does not bring old sign-ins back |
 | `POST /admin/accounts/:id/password-link` | Sends the vendor a fresh set-or-reset link. Refused for a suspended account |
+| `POST /admin/accounts/:id/sign-out` | Ends every session of the vendor ("sign out everywhere") without suspending it. Answers `{ revoked }`; recorded in the audit log |
+| `POST /admin/accounts/:id/mfa-reset` | Removes a vendor's two-step sign-in after they lost their authenticator **and** recovery codes. `{ password, identityCheck, reason }`: the **administrator's own** password; `identityCheck` one of `in_person`, `video_call`, `callback_to_known_number`, `other_documented`; `reason`, 10–500 characters, what was checked. Ends every session of the vendor, emails them, and records who, how and why in the audit log. Answers `{ sessionsRevoked }`; `409` if it is not on |
 | `DELETE /admin/accounts/:id` | **Permanent.** Removes the account, its sessions, follows, notifications, and outstanding links. Answers `{ id, email }` |
 
 ### 6.3 Admin accounts ✅ (Super Admin only)
@@ -550,6 +645,7 @@ The whole `/admin/staff` router is Super Admin only; an Admin gets `403`.
 | `PATCH /admin/staff/:id/suspend` · `/reactivate` | Suspending signs the Admin out everywhere |
 | `POST /admin/staff/:id/sign-out` | Ends every session without suspending — a lost laptop. Answers `{ revoked }` |
 | `POST /admin/staff/:id/password-link` | Sends a set-or-reset link |
+| `POST /admin/staff/:id/mfa-reset` | The same as for a vendor, for a plain **Admin**: `{ password, identityCheck, reason }` with the Super Admin's own password. A Super Admin cannot be reset here (`403`): that is done on the server, `npm run mfa:reset` ([Deployment.md](Deployment.md#5-day-to-day)). Each staff entry also shows `mfaEnabled` and `mfaSetupRequired` |
 | `DELETE /admin/staff/:id` | **Permanent**, with the same cascade as a vendor |
 
 A **Super Admin is listed but read-only** (`manageable: false`): every change, sign-out, and delete of

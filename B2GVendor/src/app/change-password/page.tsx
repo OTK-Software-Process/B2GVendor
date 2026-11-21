@@ -101,7 +101,9 @@ export default function ChangePasswordPage() {
                 </p>
                 <ul className="mt-5 space-y-3 text-sm text-slate-600">
                   <li className="rounded-2xl border border-slate-200 bg-white px-3 py-2">
-                    {lang === 'en' ? 'Use at least 8 characters.' : 'ใช้รหัสผ่านอย่างน้อย 8 ตัวอักษร'}
+                    {lang === 'en'
+                      ? 'Use 8 to 128 characters -- any letters, Thai, numbers, spaces or symbols. A long phrase is best.'
+                      : 'ใช้ 8 ถึง 128 ตัวอักษร จะเป็นตัวอักษรไทย อังกฤษ ตัวเลข เว้นวรรค หรือสัญลักษณ์ก็ได้ วลียาว ๆ ปลอดภัยที่สุด'}
                   </li>
                   <li className="rounded-2xl border border-slate-200 bg-white px-3 py-2">
                     {lang === 'en' ? 'Avoid reusing recent passwords.' : 'หลีกเลี่ยงการใช้รหัสผ่านซ้ำกับที่เคยใช้ก่อน'}
@@ -176,7 +178,7 @@ export default function ChangePasswordPage() {
                       </button>
                     </div>
                     {fieldErrors.newPassword && (
-                      <p className="mt-1 text-xs text-rose-600">{fieldErrors.newPassword}</p>
+                      <p className="mt-1 text-xs text-rose-600">{localizeAuthError(fieldErrors.newPassword, lang)}</p>
                     )}
                   </div>
 

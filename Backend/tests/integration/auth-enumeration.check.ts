@@ -5,6 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import { Request } from 'express';
 import bcrypt from 'bcryptjs';
+import { createHmac } from 'node:crypto';
 import mongoose from 'mongoose';
 import { env } from '../../src/config/env';
 import { Account } from '../../src/models/account.model';
@@ -78,7 +79,8 @@ async function main(): Promise<void> {
     Account.create({ email, passwordHash: PASSWORD, name: 'Test User', type: 'individual', status });
   const active = await mk('active@example.com', 'active');
   const suspended = await mk('suspended@example.com', 'suspended');
-  const hashOf = async (id: unknown) => (await Account.findById(id).select('+passwordHash'))!.passwordHash;
+  // The bcrypt part of a stored hash ("bcrypt-sha256$" + bcrypt, utils/passwordHasher.ts) -- what bcrypt.compare sees.
+  const hashOf = async (id: unknown) => (await Account.findById(id).select('+passwordHash'))!.passwordHash.replace(/^bcrypt-sha256\$/, '');
   const activeHash = await hashOf(active._id);
   const suspendedHash = await hashOf(suspended._id);
 
@@ -130,7 +132,7 @@ async function main(): Promise<void> {
   const suspendedWrongCall = await bcryptCallsFor('suspended, wrong password', attempt('suspended@example.com', WRONG), 'INVALID_CREDENTIALS');
   const suspendedRightCall = await bcryptCallsFor('suspended, right password', attempt('suspended@example.com', PASSWORD), 'ACCOUNT_SUSPENDED');
   record(activeCall?.hash === activeHash && suspendedWrongCall?.hash === suspendedHash && suspendedRightCall?.hash === suspendedHash, 'a real account is compared against its own hash');
-  record(!!unknownCall && unknownCall.hash !== activeHash && unknownCall.hash !== suspendedHash && unknownCall.plain === PASSWORD, 'an unknown email is compared (the submitted password) against a hash that belongs to nobody');
+  record(!!unknownCall && unknownCall.hash !== activeHash && unknownCall.hash !== suspendedHash && unknownCall.plain === createHmac('sha256', unknownCall.hash.slice(0, 29)).update(PASSWORD).digest('base64'), 'an unknown email is compared (the submitted password, pre-hashed) against a hash that belongs to nobody');
   record(!!unknownCall && bcrypt.getRounds(unknownCall.hash) === env.BCRYPT_ROUNDS && bcrypt.getRounds(activeHash) === env.BCRYPT_ROUNDS, `the dummy hash has the same cost as real ones (${env.BCRYPT_ROUNDS} rounds), so it takes as long`, `${unknownCall ? bcrypt.getRounds(unknownCall.hash) : 'n/a'}`);
   await clearFailedLogins(active._id);
   resetSpy();
@@ -162,14 +164,17 @@ async function main(): Promise<void> {
   const dupe = await post('/auth/register', body('fresh@example.com', { name: 'Someone Else', password: 'OtherPass456', confirmPassword: 'OtherPass456' }));
   const dupeCase = await post('/auth/register', body('  FRESH@Example.com '));
   const dupeSuspended = await post('/auth/register', body('suspended@example.com'));
-  const dupeJson = parse(dupe.text);
-  record(dupe.status === 409 && dupeJson.error?.code === 'REGISTRATION_FAILED', 'sign-up with a taken email -> 409 REGISTRATION_FAILED, not EMAIL_ALREADY_REGISTERED', dupe.text);
-  record(dupeJson.error?.fields === undefined, 'the refusal does not point at the email field');
-  record(!/in use|registered|taken|exists|email/i.test(dupeJson.error?.message ?? ''), 'its message does not say the email is the problem', dupeJson.error?.message);
+  record(dupe.status === 201 && dupe.text === fresh.text, 'sign-up with a taken email answers EXACTLY like a new one (201, same body, byte for byte) -- ASVS V6.3.8', dupe.text);
   record(!dupe.text.includes('fresh@example.com'), 'and does not echo the email back');
-  record(dupeCase.status === 409 && parse(dupeCase.text).error?.code === 'REGISTRATION_FAILED' && parse(dupeCase.text).error?.message === dupeJson.error?.message, 'a taken email in a different case/spacing gets the same answer');
-  record(dupeSuspended.status === 409 && dupeSuspended.text === dupe.text, 'a taken email that belongs to a suspended account gets the same answer, byte for byte');
-  record(!dupe.cookie && !dupeCase.cookie && !dupeSuspended.cookie, 'a refused sign-up sets no cookie');
+  record(dupeCase.status === 201 && dupeCase.text === fresh.text, 'a taken email in a different case/spacing gets the same answer');
+  record(dupeSuspended.status === 201 && dupeSuspended.text === fresh.text, 'a taken email that belongs to a suspended account gets the same answer, byte for byte');
+  record(!dupe.cookie && !dupeCase.cookie && !dupeSuspended.cookie, 'a taken-email sign-up sets no cookie');
+  const notices = smtp.messages.slice(1);
+  record(
+    notices.length === 3 && notices.every(m => !/verify-email/.test(m)),
+    'instead of a verification link, the owner of each taken address is emailed that someone tried to sign up',
+    `${smtp.messages.length} message(s)`
+  );
   record((await Account.countDocuments({ email: 'fresh@example.com' })) === 1, 'and creates no second account');
   const dupeName = await Account.findOne({ email: 'fresh@example.com' });
   record(dupeName?.name === 'Somchai Jaidee', 'and does not overwrite the existing account');
@@ -197,7 +202,9 @@ async function main(): Promise<void> {
   const login = src.slice(src.indexOf('export async function loginWithPassword'));
   record(login.indexOf('comparePassword') !== -1 && login.indexOf('comparePassword') < login.indexOf('accountSuspended'), 'source: the password is checked before the suspended status');
   record(login.indexOf('getDummyHash') !== -1 && login.indexOf('getDummyHash') < login.indexOf('reserveLoginAttempt'), 'source: the unknown-email branch does the dummy compare');
-  record(!/Account\.(findOne|exists|countDocuments)[^\n]*email/.test(src.slice(src.indexOf('export async function registerAccount'), src.indexOf('export async function loginWithPassword'))), 'source: sign-up does no "is this email taken?" lookup before hashing');
+  const signUp = src.slice(src.indexOf('export async function registerAccount'), src.indexOf('export async function loginWithPassword'));
+  const firstLookup = signUp.search(/Account\.(findOne|exists|countDocuments)[^\n]*email/);
+  record(firstLookup === -1 || firstLookup > signUp.indexOf('Account.create('), 'source: sign-up does no "is this email taken?" lookup before hashing (only after the insert has refused it)');
 
   server.close();
   await smtp.close();

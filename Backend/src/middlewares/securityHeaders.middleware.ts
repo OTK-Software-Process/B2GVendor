@@ -1,8 +1,8 @@
 import { RequestHandler } from 'express';
 import helmet from 'helmet';
 
-// 180 days. Long enough to matter, short enough to recover from a mistake.
-const HSTS_MAX_AGE_SECONDS = 15_552_000;
+// One year (ASVS V3.4.1), the value browsers' preload lists also expect.
+export const HSTS_MAX_AGE_SECONDS = 31_536_000;
 
 /**
  * Security headers for every response of this API (it never serves a web page:
@@ -44,4 +44,24 @@ export function securityHeaders(production: boolean): RequestHandler {
     frameguard: { action: 'deny' },
     strictTransportSecurity: production ? { maxAge: HSTS_MAX_AGE_SECONDS, includeSubDomains: true } : false
   });
+}
+
+// Read-only public data: the same for every visitor, nothing personal in it.
+const PUBLIC_READ_PREFIXES = ['/works', '/tags', '/gov-sites'];
+
+/**
+ * `Cache-Control: no-store` on every API response except the public reads
+ * (ASVS V14.3.2), so a signed-in answer -- an account, a session, an admin list,
+ * a sign-in error -- is never kept by the browser cache or a shared proxy, where
+ * the next user of the same computer could read it back. Mounted on /api/v1, so
+ * `req.path` is relative to it.
+ */
+export function noStoreExceptPublicReads(): RequestHandler {
+  return (req, res, next) => {
+    const publicRead =
+      (req.method === 'GET' || req.method === 'HEAD') &&
+      PUBLIC_READ_PREFIXES.some(prefix => req.path === prefix || req.path.startsWith(`${prefix}/`));
+    if (!publicRead) res.set('Cache-Control', 'no-store');
+    next();
+  };
 }

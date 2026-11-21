@@ -59,7 +59,7 @@ async function main(): Promise<void> {
   record((await Token.countDocuments({ accountId: account._id, purpose: 'password_reset' })) === 1, 'one reset token is stored');
 
   const body = decodeQuotedPrintable(smtp.messages[0] ?? '');
-  const rawToken = body.match(/\/reset-password\/([0-9a-f]{32,})/i)?.[1];
+  const rawToken = body.match(/\/reset-password#token=([0-9a-f]{32,})/i)?.[1];
   record(!!rawToken, 'the email carries a reset link with the raw token');
   const stored = await Token.findOne({ accountId: account._id, purpose: 'password_reset' }).select('+tokenHash');
   record(!!stored && stored.tokenHash !== rawToken, 'the database keeps only a hash of the token, never the token itself');

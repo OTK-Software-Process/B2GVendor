@@ -96,7 +96,7 @@ async function main(): Promise<void> {
     emailVerified: false
   });
   record(!!storedAccount, 'the account exists in MongoDB');
-  record(!!storedAccount.passwordHash.startsWith('$2b$12$'), 'the stored password is bcrypt-hashed, not plaintext');
+  record(/^bcrypt-sha256\$\$2b\$12\$/.test(storedAccount.passwordHash), 'the stored password is hashed (HMAC-SHA256 pre-hash + bcrypt cost 12), not plaintext');
   record(storedAccount.passwordHash !== registerBody.password, 'the stored password is not the plaintext password');
 
   const unverifiedLogin = await post('/auth/login', { email: registerBody.email, password: registerBody.password });
@@ -188,11 +188,15 @@ async function main(): Promise<void> {
   // --- Duplicate email ---
   const dupe = await post('/auth/register', registerBody);
   record(
-    dupe.status === 409 && dupe.json?.error?.code === 'REGISTRATION_FAILED' && !dupe.json?.error?.fields,
-    'registering the same email twice is rejected, without saying the email is the reason (no enumeration)',
+    dupe.status === 201 && dupe.json?.data?.emailVerificationRequired === true && !dupe.json?.error,
+    'registering the same email twice answers exactly like a new sign-up (201), so it reveals nothing (ASVS V6.3.8)',
     JSON.stringify(dupe.json)
   );
-  record(smtp.messages.length === 1, 'a refused duplicate sign-up sends no email');
+  const notice = smtp.messages[1] ?? '';
+  record(
+    smtp.messages.length === 2 && !/verify-email/.test(notice) && /\/login/.test(notice.replace(/=\r?\n/g, '')),
+    'the owner gets an "someone tried to sign up with your email" notice with a sign-in link, not a second verification link'
+  );
   await smtp.close();
 
   // --- Validation ---

@@ -1,18 +1,30 @@
 import { randomBytes } from 'crypto';
-import { hashPassword, verifyPassword } from '../utils/passwordHasher';
+import { hashPassword, needsRehash, verifyPassword } from '../utils/passwordHasher';
+import { assertPasswordNotGuessable } from '../utils/passwordPolicy';
+import { logger } from '../utils/logger';
+import { maskEmail } from '../utils/privacy';
+import { audit } from './audit.service';
 import { Request } from 'express';
 import { env } from '../config/env';
 import { Account, IAccount } from '../models/account.model';
-import { createSession, SessionContext } from './session.service';
+import { ISession } from '../models/session.model';
+import { createSession, revokeSessionById, SessionContext } from './session.service';
+import { verifySecondFactor } from './mfa.service';
 import { AppError } from '../utils/AppError';
-import { clearFailedLogins, reserveLoginAttempt } from './loginLockout.service';
+import { clearFailedLogins, reserveLoginAttempt, reserveUnknownEmailAttempt } from './loginLockout.service';
 import { assertPasswordNotPwned } from '../integrations/haveIBeenPwned.client';
 import { invalidateTokens, issueToken, consumeToken } from './token.service';
-import { isEmailConfigured, sendEmailVerificationEmail } from './email.service';
+import { isEmailConfigured, sendAccountExistsEmail, sendEmailVerificationEmail } from './email.service';
 
 export interface AuthResult {
   account: IAccount;
   rawToken: string;
+  /**
+   * True when the password was right but the account has two-step verification on:
+   * `rawToken` then belongs to a short-lived CHALLENGE session that can do nothing
+   * except answer the second factor (verifyMfaChallenge). The person is not signed in yet.
+   */
+  mfaRequired: boolean;
 }
 
 function sessionContextFromRequest(req: Request): SessionContext {
@@ -43,6 +55,11 @@ function isDuplicateEmailError(err: unknown): boolean {
   return !!e && e.code === 11000 && !!e.keyPattern && 'email' in e.keyPattern;
 }
 
+/**
+ * Creates an unverified account and emails its verification link. Resolves to
+ * null when the email already had an account: the caller must answer exactly
+ * as it does for a new one.
+ */
 export async function registerAccount(
   input: {
     name: string;
@@ -51,11 +68,18 @@ export async function registerAccount(
     type: 'individual' | 'business';
     businessProfile?: { companyName: string; taxId: string };
   }
-): Promise<IAccount> {
+): Promise<IAccount | null> {
   if (!isEmailConfigured()) {
     throw AppError.serviceUnavailable('Email verification is not configured.');
   }
 
+  // Cheap local check first, then the breach lookup (both before any write).
+  assertPasswordNotGuessable(input.password, {
+    email: input.email,
+    name: input.name,
+    companyName: input.businessProfile?.companyName,
+    taxId: input.businessProfile?.taxId
+  });
   await assertPasswordNotPwned(input.password);
 
   let account: IAccount;
@@ -72,9 +96,21 @@ export async function registerAccount(
       emailVerified: false
     });
   } catch (err) {
-    // Anyone can call this endpoint, so it must not confirm which emails have an account.
-    if (isDuplicateEmailError(err)) throw AppError.registrationFailed();
-    throw err;
+    if (!isDuplicateEmailError(err)) throw err;
+    // Anyone can call this endpoint, so it must not confirm which emails have an
+    // account (ASVS V6.3.8): a taken email gets the SAME answer as a new one --
+    // 201 "check your email" -- after the same work (hash, then one email). The
+    // email that goes out tells the owner someone tried, and how to sign in.
+    const existing = await Account.findOne({ email: input.email }).select('name email');
+    logger.security('info', 'auth.signup', { outcome: 'existing_email', email: maskEmail(input.email) });
+    if (existing) {
+      try {
+        await sendAccountExistsEmail(existing.email, existing.name);
+      } catch {
+        throw AppError.serviceUnavailable('Email verification could not be sent. Please try again later.');
+      }
+    }
+    return null;
   }
 
   let tokenIssued = false;
@@ -94,6 +130,7 @@ export async function registerAccount(
     throw error;
   }
 
+  logger.security('info', 'auth.signup', { outcome: 'created', accountId: String(account._id), email: maskEmail(account.email) });
   return account;
 }
 
@@ -104,6 +141,25 @@ export async function verifyEmailAddress(rawToken: string): Promise<void> {
   if (!account) {
     throw AppError.tokenInvalid();
   }
+  logger.security('info', 'auth.email_verified', { accountId: String(account._id) });
+}
+
+/**
+ * ASVS V11.2.2: the one moment the plain password is known to be right is a
+ * successful sign-in, so that is when a hash in the old scheme (plain bcrypt) or
+ * with an outdated cost is replaced. Written straight to the database -- not
+ * through save(), which would count as a password change (passwordChangedAt,
+ * the "your password was changed" email). Bookkeeping: not audited. A failure
+ * here never blocks the sign-in; the next one tries again.
+ */
+async function upgradePasswordHash(accountId: IAccount['_id'], stored: string, plain: string): Promise<void> {
+  if (!needsRehash(stored, env.BCRYPT_ROUNDS)) return;
+  try {
+    const upgraded = await hashPassword(plain, env.BCRYPT_ROUNDS);
+    await audit.withoutAuto(() => Account.updateOne({ _id: accountId, passwordHash: stored }, { $set: { passwordHash: upgraded } }).exec());
+  } catch {
+    // keep the old hash; it still verifies
+  }
 }
 
 export async function loginWithPassword(
@@ -113,34 +169,84 @@ export async function loginWithPassword(
   const account = await Account.findOne({ email: input.email }).select('+passwordHash');
 
   if (!account) {
+    // An address with no account is counted and locked exactly like a real one,
+    // and pays for the same bcrypt compare: the answer (401, or 423 once
+    // "locked") and its timing never reveal whether the account exists (V6.3.8).
+    const unknown = await reserveUnknownEmailAttempt(input.email);
     await verifyPassword(input.password, await getDummyHash());
+    const email = maskEmail(input.email);
+    if (unknown.allowed && unknown.lockedUntil) logger.security('warn', 'auth.lockout', { email, accountExists: false, lockedUntil: unknown.lockedUntil });
+    if (!unknown.allowed) {
+      logger.security('warn', 'auth.login.failure', { reason: 'locked', email, accountExists: false });
+      throw AppError.accountLocked(unknown.retryAfterSeconds);
+    }
+    logger.security('warn', 'auth.login.failure', { reason: 'invalid_credentials', email, accountExists: false });
     throw AppError.invalidCredentials();
   }
+  const who = { accountId: String(account._id), role: account.role, email: maskEmail(account.email) };
 
   // Counted per account (the IP limiter alone is beaten by rotating IPs). A
-  // locked account is refused without checking the password at all.
+  // locked account is refused without checking its password -- but after a
+  // dummy compare, so the refusal takes as long as any other answer.
   const attempt = await reserveLoginAttempt(account._id);
   if (!attempt.allowed) {
+    await verifyPassword(input.password, await getDummyHash());
+    logger.security('warn', 'auth.login.failure', { reason: 'locked', ...who });
     throw AppError.accountLocked(attempt.retryAfterSeconds);
   }
+  if (attempt.lockedUntil) logger.security('warn', 'auth.lockout', { ...who, lockedUntil: attempt.lockedUntil });
 
   // The password comes first, for every account: a wrong password gets the same
   // answer whether the account is active, suspended or missing. Only someone who
   // proves they know the password is told the account is suspended.
   const passwordMatches = await account.comparePassword(input.password);
   if (!passwordMatches) {
+    logger.security('warn', 'auth.login.failure', { reason: 'invalid_credentials', ...who });
     throw AppError.invalidCredentials();
   }
   await clearFailedLogins(account._id);
+  await upgradePasswordHash(account._id, account.passwordHash, input.password);
 
   if (account.status === 'suspended') {
+    logger.security('warn', 'auth.login.failure', { reason: 'suspended', ...who });
     throw AppError.accountSuspended();
   }
   if (!account.emailVerified) {
+    logger.security('info', 'auth.login.failure', { reason: 'email_not_verified', ...who });
     throw AppError.emailNotVerified();
   }
 
-  const { rawToken } = await createSession(account._id, sessionContextFromRequest(req));
+  // Two-step verification is on: the password alone does not sign anyone in. What is
+  // issued is a challenge that lives a few minutes and can only answer the second factor.
+  if (account.mfaEnabled) {
+    const { session, rawToken } = await createSession(account._id, sessionContextFromRequest(req), { mfaPending: true });
+    logger.security('info', 'auth.mfa.challenge', { ...who, sessionId: String(session._id) });
+    return { account, rawToken, mfaRequired: true };
+  }
 
-  return { account, rawToken };
+  const { session, rawToken } = await createSession(account._id, sessionContextFromRequest(req));
+  logger.security('info', 'auth.login.success', { ...who, sessionId: String(session._id), mfa: false });
+
+  return { account, rawToken, mfaRequired: false };
+}
+
+/**
+ * The second half of a sign-in. `challenge` is the session the password step issued.
+ * A correct code (or recovery code) ends the challenge and starts a NEW, full session
+ * -- a different token from the one that existed while only the password was known.
+ * Wrong codes are counted and locked apart from the password's.
+ */
+export async function verifyMfaChallenge(
+  account: IAccount,
+  challenge: ISession,
+  code: string,
+  req: Request
+): Promise<AuthResult & { method: 'totp' | 'recovery_code'; recoveryCodesRemaining?: number }> {
+  const result = await verifySecondFactor(account, code, 'sign_in');
+
+  await revokeSessionById(challenge._id);
+  const { session, rawToken } = await createSession(account._id, sessionContextFromRequest(req), { mfaVerified: true });
+  logger.security('info', 'auth.login.success', { accountId: String(account._id), role: account.role, email: maskEmail(account.email), sessionId: String(session._id), mfa: result.method });
+
+  return { account, rawToken, mfaRequired: false, ...result };
 }

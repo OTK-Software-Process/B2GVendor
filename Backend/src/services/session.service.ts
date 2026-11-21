@@ -19,9 +19,20 @@ export interface SessionView {
   isCurrent: boolean;
 }
 
+/** How long the answer to a second-factor challenge may take. */
+export const MFA_CHALLENGE_TTL_MS = 5 * 60 * 1000;
+
+export interface SessionOptions {
+  /** A challenge session: valid only for answering the second factor, for MFA_CHALLENGE_TTL_MS. */
+  mfaPending?: boolean;
+  /** A full session whose second factor has just been checked. */
+  mfaVerified?: boolean;
+}
+
 export async function createSession(
   accountId: Types.ObjectId,
-  context: SessionContext = {}
+  context: SessionContext = {},
+  options: SessionOptions = {}
 ): Promise<{ session: ISession; rawToken: string }> {
   const { raw, tokenHash } = issueSessionToken();
   const { browser, os } = parseUserAgent(context.userAgent);
@@ -35,7 +46,9 @@ export async function createSession(
     ipAddress: context.ipAddress,
     location: context.location,
     lastActiveAt: new Date(),
-    expiresAt: new Date(Date.now() + SESSION_TTL_MS)
+    expiresAt: new Date(Date.now() + (options.mfaPending ? MFA_CHALLENGE_TTL_MS : SESSION_TTL_MS)),
+    ...(options.mfaPending ? { mfaPending: true } : {}),
+    ...(options.mfaVerified ? { mfaVerifiedAt: new Date() } : {})
   });
 
   return { session, rawToken: raw };
@@ -102,7 +115,8 @@ export async function listActiveSessions(
   const sessions = await Session.find({
     accountId,
     revokedAt: { $exists: false },
-    expiresAt: { $gt: new Date() }
+    expiresAt: { $gt: new Date() },
+    mfaPending: { $ne: true } // a challenge awaiting its second factor is not a signed-in device
   }).sort({ lastActiveAt: -1 });
 
   return sessions.map(session => toSessionView(session, currentSessionId));

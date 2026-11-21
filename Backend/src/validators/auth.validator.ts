@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { passwordSchema } from '../utils/passwordPolicy';
 
 export const NAME_REGEX = /^[\p{L}][\p{L}\p{M}'-]*(?: [\p{L}][\p{L}\p{M}'-]*)?$/u;
 
@@ -21,15 +22,8 @@ export const registerSchema = z
       .toLowerCase()
       .regex(/^\S+$/, 'Email cannot contain spaces')
       .email('Invalid email address'),
-    password: z
-      .string()
-      .min(8, 'Password must be at least 8 characters')
-      .regex(/[A-Za-z]/, 'Password must contain at least one letter')
-      .regex(/\d/, 'Password must contain at least one number')
-      .refine(
-        password => Buffer.byteLength(password, 'utf8') <= 72,
-        'Password must be at most 72 bytes'
-      ),
+    // Any characters, 8-128 of them (utils/passwordPolicy.ts).
+    password: passwordSchema,
     confirmPassword: z.string(),
     type: z.enum(['individual', 'business']).default('individual'),
     businessProfile: businessProfileSchema.optional()
@@ -63,3 +57,11 @@ export type LoginInput = z.infer<typeof loginSchema>;
 export const verifyEmailSchema = z.object({
   token: z.string().min(1)
 }).strict();
+
+// The second factor: a six-digit authenticator code, or a recovery code (twenty
+// characters with hyphens). The service decides which; here only the size is bounded.
+// No time, no counter, nothing else is accepted: the server's clock decides what a
+// code is worth (ASVS V6.5.8).
+export const mfaCodeSchema = z.string().trim().min(1, 'Enter the code').max(40, 'That code is too long');
+
+export const mfaVerifySchema = z.object({ code: mfaCodeSchema }).strict();

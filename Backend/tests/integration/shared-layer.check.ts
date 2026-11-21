@@ -92,7 +92,7 @@ async function main(): Promise<void> {
 
   const user = await makeAccount();
   const stored = await Account.findById(user._id).select('+passwordHash');
-  record(!!stored?.passwordHash.startsWith('$2b$12$'), 'password hashed at cost 12 by the pre-save hook');
+  record(/^bcrypt-sha256\$\$2b\$12\$/.test(stored?.passwordHash ?? ''), 'password hashed at cost 12 by the pre-save hook (HMAC-SHA256 pre-hash + bcrypt)');
   record(!!(await stored?.comparePassword('SecurePass123')), 'comparePassword accepts the right password');
   record(!(await stored?.comparePassword('WrongPass123')), 'comparePassword rejects the wrong password');
 

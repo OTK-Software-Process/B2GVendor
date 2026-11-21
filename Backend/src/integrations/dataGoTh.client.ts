@@ -1,4 +1,5 @@
 import { env } from '../config/env';
+import { outboundFetch } from '../utils/outbound';
 
 /**
  * Client for data.go.th -- the SECONDARY, historical/batch enrichment
@@ -39,7 +40,7 @@ async function ckanAction<T>(action: string, params: Record<string, string> = {}
 
   // Time-limited, like the e-GP feed: a portal that never answers must not hang the poll.
   const timeout = AbortSignal.timeout(env.INGESTION_REQUEST_TIMEOUT_MS);
-  const res = await fetch(url, { headers: authHeaders(), signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+  const res = await outboundFetch('datagoth', url, { headers: authHeaders(), signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
   const text = await res.text();
 
   let json: CkanEnvelope<T>;

@@ -59,11 +59,23 @@
     "backfill:facts": "tsx src/scripts/backfillProcurementFacts.ts",
     "backfill:search-text": "tsx src/scripts/backfillSearchText.ts",
     "backfill:status-history": "tsx src/scripts/backfillStatusHistory.ts",
+    "backfill:tor-file-keys": "tsx src/scripts/backfillTorFileKeys.ts",
     "check:thai-search": "tsx tests/unit/thai-search.check.ts",
     "check:pwned-passwords": "tsx tests/unit/have-i-been-pwned.check.ts",
     "check:password-hasher": "tsx tests/unit/password-hasher.check.ts",
+    "check:secret-files": "tsx tests/unit/secret-files.check.ts",
+    "check:mfa-crypto": "tsx tests/unit/mfa-crypto.check.ts",
+    "check:ai-prompt": "tsx tests/unit/ai-prompt-injection.check.ts",
+    "check:rate-limits": "tsx tests/integration/rate-limits.check.ts",
+    "check:security-hardening": "tsx tests/integration/security-hardening.check.ts",
+    "check:transport-security": "tsx tests/integration/transport-security.check.ts",
+    "check:mfa": "tsx tests/integration/mfa.check.ts",
+    "check:deployment-config": "tsx tests/integration/deployment-config.check.ts",
+    "check:password-session": "tsx tests/integration/password-session.check.ts",
+    "check:logging-outbound": "tsx tests/integration/logging-outbound.check.ts",
     "seed:admins": "tsx src/scripts/seedAdmin.ts",
     "seed:superadmin": "tsx src/scripts/seedSuperAdmin.ts",
+    "mfa:reset": "tsx src/scripts/resetMfa.ts",
     "seed:gov-sites": "tsx src/scripts/seedGovSites.ts",
     "seed:tags": "tsx src/scripts/seedTags.ts",
     "seed:all": "npm run seed:gov-sites && npm run seed:tags"
@@ -75,28 +87,30 @@
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
-    "express": "^4.21.2",
+    "express": "^4.22.3",
     "express-rate-limit": "^7.5.0",
-    "fast-xml-parser": "^4.5.1",
+    "fast-xml-parser": "^5.12.1",
     "helmet": "^8.3.0",
-    "mongoose": "^8.9.5",
-    "morgan": "^1.10.0",
-    "node-cron": "^3.0.3",
-    "nodemailer": "^6.10.1",
+    "mongoose": "^8.24.10",
+    "node-cron": "^4.6.0",
+    "nodemailer": "^10.6.1",
     "pdf-parse": "^1.1.1",
-    "zod": "^3.24.1"
+    "undici": "^7.30.2",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.8",
     "@types/cookie-parser": "^1.4.8",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
-    "@types/morgan": "^1.9.9",
     "@types/node": "^22.10.2",
-    "@types/node-cron": "^3.0.11",
-    "@types/nodemailer": "^6.4.17",
     "@types/pdf-parse": "^1.1.5",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
+  },
+  "overrides": {
+    "gaxios": {
+      "uuid": "^11.1.1"
+    }
   }
 }

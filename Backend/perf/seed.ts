@@ -113,7 +113,11 @@ export async function seedPerfData(uri: string, options: { works?: number; vendo
   const { Follow } = await import('../src/models/follow.model');
   const { Session, issueSessionToken, SESSION_TTL_MS } = await import('../src/models/session.model');
   const { IngestionSettings } = await import('../src/models/ingestionSettings.model');
-  const { SESSION_COOKIE_NAME } = await import('../src/config/cookie');
+  const { sessionCookieName } = await import('../src/config/cookie');
+  const { env } = await import('../src/config/env');
+  // The perf API always runs in PRODUCTION (perf/run.ts), where the cookie carries
+  // the __Host- prefix -- this seeding process is not in production mode itself.
+  const SESSION_COOKIE_NAME = sessionCookieName(env.SESSION_COOKIE_NAME, true);
   const { createGovSite } = await import('../src/services/govSite.service');
   const { normalizeThaiSearchText } = await import('../src/utils/thaiSearch');
   const bcrypt = (await import('bcryptjs')).default;

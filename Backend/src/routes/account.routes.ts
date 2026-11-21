@@ -3,6 +3,7 @@ import { z } from "zod";
 import * as accountController from "../controllers/account.controller";
 import { requireAuth } from "../middlewares/auth.middleware";
 import { validate } from "../middlewares/validate.middleware";
+import { passwordSchema } from "../utils/passwordPolicy";
 
 const NAME_REGEX = /^[\p{L}][\p{L}\p{M}'-]*(?: [\p{L}][\p{L}\p{M}'-]*)?$/u;
 
@@ -35,18 +36,14 @@ const updateProfileSchema = z
 const changePasswordSchema = z
   .object({
     currentPassword: z.string().min(1),
-    newPassword: z
-      .string()
-      .min(8)
-      .regex(/[A-Za-z]/, "Password must contain at least one letter")
-      .regex(/\d/, "Password must contain at least one number")
-      .refine(
-        (password) => Buffer.byteLength(password, "utf8") <= 72,
-        "Password must be at most 72 bytes",
-      ),
+    newPassword: passwordSchema,
     confirmNewPassword: z.string(),
   })
   .strict();
+
+// Ending a session asks for the password again (ASVS V7.5.2).
+const confirmPasswordSchema = z.object({ password: z.string().min(1, "Password is required") }).strict();
+const sessionParamsSchema = z.object({ id: z.string().regex(/^[a-f0-9]{24}$/i, "Invalid session id") }).strict();
 
 const updateNotificationSettingsSchema = z
   .object({
@@ -73,6 +70,18 @@ accountRouter.use(requireAuth);
 
 accountRouter.get("/profile", accountController.getProfile);
 accountRouter.get("/session", accountController.getSession);
+accountRouter.get("/sessions", accountController.listSessions);
+accountRouter.post(
+  "/sessions/revoke-others",
+  validate(confirmPasswordSchema),
+  accountController.revokeOtherSessions,
+);
+accountRouter.post(
+  "/sessions/:id/revoke",
+  validate(sessionParamsSchema, "params"),
+  validate(confirmPasswordSchema),
+  accountController.revokeSession,
+);
 accountRouter.get(
   "/notification-settings",
   accountController.getNotificationSettings,

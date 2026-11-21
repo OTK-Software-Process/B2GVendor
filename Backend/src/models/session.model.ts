@@ -16,6 +16,15 @@ export interface ISession extends Document {
   expiresAt: Date;
   revokedAt?: Date;
 
+  // A session made by a correct PASSWORD for an account that has two-step
+  // verification on is only a "challenge": it may do nothing except answer the
+  // second factor (POST /auth/mfa/verify), and it lasts minutes. The answer ends it
+  // and starts a new, full session -- so the token that goes on to be used after
+  // the second factor was never one that existed before it (no fixation).
+  mfaPending?: boolean;
+  // When a second factor was checked for this (full) session.
+  mfaVerifiedAt?: Date;
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -44,6 +53,8 @@ const SessionSchema = new Schema<ISession>(
     lastActiveAt: { type: Date, default: Date.now, required: true },
     expiresAt: { type: Date, required: true },
     revokedAt: { type: Date },
+    mfaPending: { type: Boolean },
+    mfaVerifiedAt: { type: Date },
   },
   {
     timestamps: true,

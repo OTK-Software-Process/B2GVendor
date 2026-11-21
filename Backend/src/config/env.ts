@@ -1,19 +1,71 @@
 import 'dotenv/config';
 import { z } from 'zod';
+import { loadSecretFiles } from './secretFiles';
+import { mongoUriProblems } from './transportSecurity';
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().default(4000),
+  // May be given as MONGODB_URI_FILE=/run/secrets/... instead (config/secretFiles.ts).
   MONGODB_URI: z.string().min(1, 'MONGODB_URI is required'),
+  // A deployment sets this to true (docker-compose.prod.yml does). The process then
+  // refuses to start with a MongoDB address that has no login or no TLS, and the
+  // mail transport must use TLS: nothing falls back to an unencrypted connection
+  // (ASVS V12.3.1, V13.2.1; config/transportSecurity.ts). Off for local development,
+  // where MongoDB and a mail catcher run without certificates.
+  REQUIRE_SECURE_BACKENDS: z
+    .string()
+    .default('false')
+    .transform(v => v === 'true'),
   CORS_ORIGIN: z.string().default('http://localhost:3000'),
 
   APP_URL: z.string().url().default('http://localhost:3000'),
 
+  // In production the name always carries the __Host- prefix (see config/cookie.ts).
   SESSION_COOKIE_NAME: z.string().default('b2g_session'),
   SESSION_TTL_DAYS: z.coerce.number().int().positive().default(7),
+  // Inactivity timeouts (ASVS V7.3.1, docs/Security.md section 4). A session
+  // that makes no request for this long is ended and must sign in again.
+  // Staff accounts change configuration and other people's accounts, so they
+  // time out much sooner than vendors, who only manage their own follows.
+  SESSION_IDLE_MINUTES_STAFF: z.coerce.number().int().min(1).default(30),
+  SESSION_IDLE_MINUTES_VENDOR: z.coerce.number().int().min(1).default(1440),
   COOKIE_SAMESITE: z.enum(['lax', 'strict', 'none']).default('lax'),
 
   BCRYPT_ROUNDS: z.coerce.number().int().min(10).max(15).default(12),
+
+  // --- Two-step verification (ASVS V6.3.3, V6.4.4, V6.5.x; docs/Security.md section 15) ---
+  // The key that encrypts every account's authenticator secret: 32 random bytes in
+  // base64 (`openssl rand -base64 32`). It must be kept: lose it and every enrolled
+  // authenticator is unreadable. May be given as MFA_ENCRYPTION_KEY_FILE
+  // (config/secretFiles.ts). Only the API needs it, never the worker: the API
+  // refuses to start without it while MFA_REQUIRED_FOR_STAFF is on (config/mfa.ts).
+  MFA_ENCRYPTION_KEY: z.string().optional(),
+  // Admin and Super Admin accounts must use a second factor to use the admin area.
+  // Until they set one up, their session can reach nothing but the setup itself.
+  // Vendors may turn it on for themselves. Off only for a development setup.
+  MFA_REQUIRED_FOR_STAFF: z
+    .string()
+    .default('true')
+    .transform(v => v !== 'false'),
+  // The name an authenticator app shows beside the code.
+  MFA_ISSUER: z.string().trim().min(1).max(60).default('B2G Vendor'),
+  // How many 30-second steps either side of "now" a code may come from, to absorb
+  // the clock of a phone. 1 = the code of the step before and the step after are
+  // also accepted; 0 = only the current step. A code still works only once.
+  MFA_TOTP_DRIFT_STEPS: z.coerce.number().int().min(0).max(2).default(1),
+
+  // --- Anti-automation (ASVS V2.4.1, V15.2.2) ---
+  // Public search (GET /works) per client address per minute. A person paging
+  // and filtering stays far below it; a scraper is slowed. The website's own
+  // server-side renders forward the visitor's address, so they don't share one
+  // budget (B2GVendor/src/lib/serverApi.ts).
+  SEARCH_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(120),
+  // Poll Now requests per admin account per minute (the poll lock already
+  // allows only one poll at a time; this stops a client hammering the route).
+  POLL_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(10),
+  // Longest one search query may run in MongoDB before it is stopped (503).
+  SEARCH_MAX_TIME_MS: z.coerce.number().int().min(100).default(5000),
 
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().optional(),
@@ -71,6 +123,14 @@ const envSchema = z.object({
   // UI -- default 24h, minimum 2h -- see config/polling.ts and
   // models/ingestionSettings.model.ts.)
 
+  // Antivirus (ASVS V5.4.3): ClamAV's clamd, which scans every downloaded TOR
+  // file before it is unpacked, parsed or stored. docker compose sets the host;
+  // without it (local npm run dev) files are not scanned and that is logged.
+  CLAMAV_HOST: z.string().optional(),
+  CLAMAV_PORT: z.coerce.number().int().positive().default(3310),
+  // A 100 MB archive takes a while; a stuck daemon must not hold the poll for ever.
+  CLAMAV_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+
   // Local disk path for downloaded TOR PDFs (FR-N1.6). Swap for a real
   // object-storage bucket later without changing the ingestion pipeline's
   // call shape -- see services/fileStorage.service.ts.
@@ -119,9 +179,20 @@ const envSchema = z.object({
   if (value.NODE_ENV === 'production' && !/^https:\/\//i.test(value.APP_URL)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['APP_URL'], message: 'APP_URL must be an https:// address in production' });
   }
+
+  // A hardened deployment talks to MongoDB only with a login and over TLS.
+  if (value.REQUIRE_SECURE_BACKENDS) {
+    for (const message of mongoUriProblems(value.MONGODB_URI)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['MONGODB_URI'], message });
+    }
+  }
 });
 
 export type Env = z.infer<typeof envSchema>;
+
+// Secrets that arrive as files (NAME_FILE=/run/secrets/name) are read first, so the
+// schema above sees them as ordinary variables.
+loadSecretFiles();
 
 export const env: Env = envSchema.parse(process.env);
 

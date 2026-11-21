@@ -5,7 +5,11 @@
 #                check:* script) against a throwaway MongoDB service container,
 #                with SMTP_HOST empty so no real email can go out
 #   frontend  -- eslint, tsc, next build
-#   ci-ok     -- one status that is green only when both jobs are: make THIS
+#   dependencies -- per app: `npm audit` fails the build on any known high or
+#                critical advisory (fix windows: docs/Security.md section 11),
+#                and a CycloneDX SBOM of everything installed is kept as a
+#                build artifact for 90 days (every push to main is a release)
+#   ci-ok     -- one status that is green only when all jobs are: make THIS
 #                the required check in the branch protection rule for main
 #                (Settings -> Branches), so a failing PR can't be merged
 name: CI
@@ -15,6 +19,10 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  # Weekly, so an advisory published for a dependency we already ship is noticed
+  # even when nobody opens a pull request.
+  schedule:
+    - cron: '0 1 * * 1'
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -80,14 +88,46 @@ jobs:
       - run: npx tsc --noEmit
       - run: npm run build
 
+  dependencies:
+    name: Dependencies (audit + SBOM)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [Backend, B2GVendor]
+    defaults:
+      run:
+        working-directory: ${{ matrix.app }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: ${{ matrix.app }}/package-lock.json
+      # Install scripts are not needed to list or audit what is installed.
+      - run: npm ci --ignore-scripts
+      # ASVS V15.1.1 / V15.2.1: a known high or critical advisory fails the build.
+      # Moderate and low ones are printed and fixed within their windows.
+      - run: npm audit --audit-level=high
+      # ASVS V15.1.2: the bill of materials of this build (CycloneDX JSON).
+      - run: npm sbom --sbom-format cyclonedx --sbom-type application > sbom-${{ matrix.app }}.cdx.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ matrix.app }}
+          path: ${{ matrix.app }}/sbom-${{ matrix.app }}.cdx.json
+          retention-days: 90
+
   ci-ok:
     name: CI passed
     if: always()
-    needs: [backend, frontend]
+    needs: [backend, frontend, dependencies]
     runs-on: ubuntu-latest
     steps:
-      - name: Both jobs succeeded
+      - name: All jobs succeeded
         run: |
-          echo "backend: ${{ needs.backend.result }}, frontend: ${{ needs.frontend.result }}"
+          echo "backend: ${{ needs.backend.result }}, frontend: ${{ needs.frontend.result }}, dependencies: ${{ needs.dependencies.result }}"
           test "${{ needs.backend.result }}" = success
           test "${{ needs.frontend.result }}" = success
+          test "${{ needs.dependencies.result }}" = success

@@ -6,8 +6,14 @@ import { env } from './config/env';
 import { claimNextPollJob, executePollJob, reapStalePollJobs } from './services/pollJob.service';
 import { enqueueDueSitePolls } from './services/scheduler.service';
 import { sendDailyDigests } from './services/notification.service';
+import { purgeUnverifiedAccounts } from './services/retention.service';
 import { audit } from './services/audit.service';
 import { logger } from './utils/logger';
+import { installProcessHandlers } from './utils/processHandlers';
+import { installEgressProxy } from './config/egressProxy';
+
+installProcessHandlers('ingestion-worker');
+installEgressProxy();
 
 /**
  * Entry point for the ingestion-worker container -- a separate process from
@@ -24,6 +30,8 @@ import { logger } from './utils/logger';
  *      every account on 'daily' notification frequency (see
  *      account/notifications/settings and notification.service.ts's
  *      sendDailyDigests).
+ *   4. Retention tick -- once a day, removes self-registered accounts that never
+ *      verified their email (retention.service.ts, docs/Security.md section 8).
  *
  * The API container (server.ts) never imports this file and never calls
  * ingestion.service.ts directly -- it only ever writes a PollJob row.
@@ -85,9 +93,20 @@ async function main(): Promise<void> {
       })
       .catch(err => logger.error('worker', 'Daily digest tick failed', err));
   });
+
+  // 03:15 daily: data retention (ASVS V14.2.7). Recorded in the audit log as the
+  // "retention" system actor.
+  cron.schedule('15 3 * * *', () => {
+    audit
+      .asSystem('retention', () => purgeUnverifiedAccounts())
+      .then(removed => {
+        if (removed > 0) logger.info('worker', `Removed ${removed} never-verified account(s) past the retention period`);
+      })
+      .catch(err => logger.error('worker', 'Retention tick failed', err));
+  });
 }
 
 main().catch(err => {
-  console.error('[fatal] failed to start ingestion-worker', err);
+  logger.error('worker', 'failed to start', err);
   process.exit(1);
 });

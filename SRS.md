@@ -4,13 +4,13 @@ for
 
 **B2G Vendor**
 
-Version 0.3
+Version 0.4
 
 Prepared by Techaphatr Indhavivadhana
 
 OTK
 
-11/11/2026
+21/11/2026
 
 ---
 
@@ -21,6 +21,7 @@ OTK
 | 0.1 | 22/08/2026 | Techaphatr Indhavivadhana | Initial version. |
 | 0.2 | 04/11/2026 | Techaphatr Indhavivadhana | Sections 4 and 5 brought in line with the implemented system: an implementation status on every FR and NFR; new FR-1.7 to FR-1.12, FR-2.11 to FR-2.13 and FR-5.5; security NFRs for the authentication, CSRF, header and document-handling work; new Section 5.6 Verification Requirements; open issues in Section 7.1 updated; the site-coverage assumption in Section 2.5 corrected. The use case model (Section 6) is unchanged. |
 | 0.3 | 11/11/2026 | Buravit Yenjit | Use case diagram (Section 6.1) updated. |
+| 0.4 | 21/11/2026 | Techaphatr Indhavivadhana | Statuses brought in line with the OWASP ASVS security work: email unsubscribe without login (FR-3.7), rate limits on search and Poll Now, one outbound allow-list for every call, the RSS request time limit, server-rendered public pages (SEO), the `npm test` runner, CI with a dependency audit, the performance suite and the browser test (Section 5.6). |
 
 ---
 
@@ -318,7 +319,7 @@ The requirements in this SRS rely on the following assumptions:
 
 This section organizes the specific functional requirements into logical features. Each feature includes a description, the specific system behaviors (`The system shall...`), and a traceability mapping to the corresponding User Story (US).
 
-Every requirement carries its implementation status as of 04/11/2026 (see Section 1.2). *Current* notes describe how the shipped system actually behaves where it adds detail to the requirement; *Next* notes describe the agreed follow-up work for anything not yet complete. How each feature is verified is summarized at the end of each feature and planned in Section 5.6.
+Every requirement carries its implementation status as of 21/11/2026 (see Section 1.2). *Current* notes describe how the shipped system actually behaves where it adds detail to the requirement; *Next* notes describe the agreed follow-up work for anything not yet complete. How each feature is verified is summarized at the end of each feature and planned in Section 5.6.
 
 ### 4.1 Account & Access Management
 
@@ -335,19 +336,22 @@ Every requirement carries its implementation status as of 04/11/2026 (see Sectio
   - **FR-1.7** *(Implemented)*: The system shall let a user reset a forgotten password by email with a single-use link valid for 1 hour. The request shall get the same answer whether or not the email is registered, and a completed reset shall end every session of the account and clear any sign-in lockout.
     - *Current:* Forgot-password and reset-password share a limit of 5 requests per hour per IP address.
   - **FR-1.8** *(Implemented)*: The system shall require a self-registered account to verify its email address before it can sign in. Registration sends a single-use verification link valid for 24 hours and does not start a session. If email delivery is not configured or the email cannot be sent, registration shall be refused (`SERVICE_UNAVAILABLE`) and shall leave no account behind. Accounts created by staff or by seed scripts are treated as already verified.
-  - **FR-1.9** *(Implemented)*: The system shall apply one password policy on registration, password change and password reset: at least 8 characters, at least one letter and one number, at most 72 bytes in UTF-8 (the bcrypt input limit), and not present in the Have I Been Pwned breached-password list. The breach check shall send only the first 5 characters of the password's SHA-1 hash (k-anonymity range query); if the check service is unavailable, the request shall be refused rather than the check skipped.
+  - **FR-1.9** *(Implemented)*: The system shall apply one password policy on registration, password change and password reset: 8 to 128 characters of any kind (no rule requiring letters, digits or symbols; Thai counts character by character), not made mostly of the documented context-specific words or the person's own name, email, company or tax ID (docs/Security.md §12), and not present in the Have I Been Pwned breached-password list. The owner shall be emailed after every password change or reset. The breach check shall send only the first 5 characters of the password's SHA-1 hash (k-anonymity range query); if the check service is unavailable, the request shall be refused rather than the check skipped.
   - **FR-1.10** *(Implemented)*: The system shall let a signed-in user change their password after re-entering the current one. All of the user's other sessions shall be ended; the session that made the change stays signed in. A wrong current password counts toward the same account lock as a failed sign-in, so a stolen session cannot be used to guess the password.
   - **FR-1.11** *(Implemented)*: The system shall split staff into roles. Every Admin can use the dashboard, manage vendor accounts and read the audit log, and additionally holds one role chosen by a Super Admin: **Poll Admin** (polling and run history), **Tag Admin** (tag vocabulary and the tags on each work) or **Poll and Tag Admin** (both). Only a Super Admin shall create Admin accounts, set their role, suspend/reactivate them, sign them out of every session, send them a password link, or delete them. Roles shall be enforced server-side; an Admin created before the role split has no role until a Super Admin assigns one.
   - **FR-1.12** *(Implemented)*: The system shall let a signed-in user view and edit their own profile (name, phone, business profile) and notification settings.
+  - **FR-1.13** *(Implemented)*: The system shall support two-step sign-in with a time-based one-time password (TOTP, RFC 6238) from an authenticator app, and ten single-use recovery codes. It shall be **required for Admin and Super Admin accounts**, which can use no admin function until they have set it up, and optional for vendors. After a correct password an account with a second factor receives only a short-lived challenge (5 minutes) that is accepted nowhere but the second step; a correct code, or a recovery code, then starts the session. Each code works once, a code is checked against the server's clock only, and an authenticator secret is stored encrypted and recovery codes only as hashes. Wrong codes are counted and locked apart from wrong passwords. A staff account cannot turn the factor off; a vendor can, after re-entering the password and a code.
+    - *Current:* Set up, turn off and new recovery codes are in *Account → Security* and each asks for the password again; the owner is emailed at every change and whenever a recovery code is used. Design, limits and what is stored: `docs/Security.md` §15.
+  - **FR-1.14** *(Implemented)*: The system shall let an administrator reset a lost second factor only after an identity check: an Admin resets a vendor, a Super Admin resets an Admin, and a Super Admin is reset only from the server. The administrator shall give their own password, how the identity was checked and why; every session of the account ends, its owner is emailed, and who did it, how and why is kept in the audit log.
 
 - **Traceability:**
   - US-1.1 (Register) → FR-1.1, FR-1.2, FR-1.8, FR-1.9
-  - US-1.2 (Unified Login) → FR-1.3
+  - US-1.2 (Unified Login) → FR-1.3, FR-1.13
   - US-1.3 (Restrict Access) → FR-1.4, FR-1.12
   - US-1.4 (Reset Password) → FR-1.7, FR-1.9, FR-1.10
-  - US-1.5 (Manage Accounts) → FR-1.5, FR-1.6, FR-1.11
+  - US-1.5 (Manage Accounts) → FR-1.5, FR-1.6, FR-1.11, FR-1.14
 
-- **Verification:** Covered today by the automated checks `check:auth`, `check:auth-enumeration`, `check:login-lockout`, `check:pwned-passwords`, `check:admin-accounts`, `check:admin-staff`, `check:admin-permissions` and the `check:audit-*` suites. Planned additions are listed in Section 5.6.
+- **Verification:** Covered today by the automated checks `check:auth`, `check:auth-enumeration`, `check:login-lockout`, `check:pwned-passwords`, `check:admin-accounts`, `check:admin-staff`, `check:admin-permissions`, `check:mfa`, `check:mfa-crypto` and the `check:audit-*` suites. Planned additions are listed in Section 5.6.
 
 ### 4.2 Government Data Ingestion & Source Management
 
@@ -412,9 +416,8 @@ Every requirement carries its implementation status as of 04/11/2026 (see Sectio
     - *Next:* Pin the digest schedule to Asia/Bangkok time; it currently follows the server's time zone, and the containers set none.
   - **FR-3.6** *(Implemented)*: The system shall send at most one notification per work per user, even if multiple followed tags match or the work is re-polled.
     - *Current:* This covers the email as well as the in-app entry: when a later poll adds another followed tag to a work the user was already told about, the in-app entry is refreshed but no second email is sent.
-  - **FR-3.7** *(Partial)*: The system shall allow a user to pause, edit, or delete a followed tag, and support email unsubscribe without requiring login.
-    - *Current:* Pausing, resuming and removing a followed tag work. Pausing silences that follow only (no in-app entry and no email) while the tag stays followed; resuming brings it back for the next new work, not for work missed meanwhile. Pausing needs an existing follow (404 otherwise, so it cannot be used to follow), takes exactly `{"paused": true|false}` and is otherwise 400, and un-following a paused tag and following it again starts a fresh, un-paused follow. Follow endpoints answer 401 to a visitor and 403 to a suspended account. The **Unsubscribe** page exists but is a front-end placeholder only: it calls no backend, and notification emails carry no unsubscribe link.
-    - *Next:* Add a signed, per-user unsubscribe token to every notification email and a no-login endpoint that switches email notifications off.
+  - **FR-3.7** *(Implemented)*: The system shall allow a user to pause, edit, or delete a followed tag, and support email unsubscribe without requiring login.
+    - *Current:* Pausing, resuming and removing a followed tag work. Pausing silences that follow only (no in-app entry and no email) while the tag stays followed; resuming brings it back for the next new work, not for work missed meanwhile. Pausing needs an existing follow (404 otherwise, so it cannot be used to follow), takes exactly `{"paused": true|false}` and is otherwise 400, and un-following a paused tag and following it again starts a fresh, un-paused follow. Follow endpoints answer 401 to a visitor and 403 to a suspended account. Every notification email, instant and daily digest, links to `/unsubscribe#token=…`: a random single-purpose token stored only as a hash, placed after the `#` so it never reaches a server or its logs. The **Unsubscribe** page posts it to `POST /account/unsubscribe`, which needs no session and switches the account's email notifications off; an old `/unsubscribe/<token>` link is moved behind the `#` first.
 
 - **Traceability:**
   - US-3.1 (Follow Tags) → FR-3.1
@@ -423,7 +426,7 @@ Every requirement carries its implementation status as of 04/11/2026 (see Sectio
   - US-3.4 (Edit Tags) → FR-3.7
   - US-3.5 (Admin Tag Management) → FR-3.4
 
-- **Verification:** Covered today by `check:follow-tags` (follow, unfollow, pause and resume; who may call it and whose follows a caller can see; what a follow, a paused follow and an unfollow do to the notifications and emails a poll produces), `check:admin-tags`, `check:admin-works` and `check:search-tags`; notification matching is also exercised inside `check:facts-ingestion`. The notification-center endpoints, the daily digest and the unsubscribe flow have no dedicated automated checks yet (Section 5.6).
+- **Verification:** Covered today by `check:follow-tags` (follow, unfollow, pause and resume; who may call it and whose follows a caller can see; what a follow, a paused follow and an unfollow do to the notifications and emails a poll produces), `check:admin-tags`, `check:admin-works` and `check:search-tags`; notification matching is also exercised inside `check:facts-ingestion`. `check:notifications` covers the notification center (mark one and mark all read), the daily digest (sent once, not resent) and unsubscribing from an email's link without signing in; the Playwright test `B2GVendor/tests/e2e/unsubscribe.spec.ts` covers the Unsubscribe page in a browser.
 
 ### 4.4 Search, Browse & Status Display
 
@@ -460,9 +463,8 @@ Every requirement carries its implementation status as of 04/11/2026 (see Sectio
 - **Functional Requirements:**
   - **FR-5.1** *(Implemented)*: The system shall provide a detail page showing title, agency, method, budget, dates, current status, and linked TOR/attachments, all sourced from ingested data.
     - *Current:* The page also shows the fiscal year (marked when estimated), the submission deadline with days remaining, whether a price is a reference price or a winning bid, and a link that opens the e-GP announcement search for the work's project number. A malformed work id is refused with `400`; an id that is unknown, or belongs to a work hidden from the public site, answers `404` "This work is no longer available."
-  - **FR-5.2** *(Partial)*: The system shall provide working, HTTPS download links to every ingested TOR file and attachment.
-    - *Current:* Every stored TOR file downloads as a PDF attachment from the API; HTTPS depends on the production deployment (the local stack runs over plain HTTP).
-    - *Next:* Serve the production deployment over HTTPS only (see Section 5.3).
+  - **FR-5.2** *(Implemented)*: The system shall provide working, HTTPS download links to every ingested TOR file and attachment.
+    - *Current:* Every stored TOR file downloads as a PDF attachment from the API, over HTTPS in the production deployment (Section 5.3; the local stack runs over plain HTTP).
   - **FR-5.3** *(Implemented)*: The system shall deduplicate downloaded files by hash so an unchanged document is not re-downloaded on every poll.
   - **FR-5.4** *(Implemented)*: The system shall display a chronological status-change history on the detail page, matching the same status source of truth used in search.
     - *Current:* The history lists every announcement oldest first, and its last entry is always the work's current status.
@@ -478,7 +480,7 @@ Every requirement carries its implementation status as of 04/11/2026 (see Sectio
 
 ## 5. Non-Functional Requirements
 
-Each requirement below carries its status as of 04/11/2026 (Section 1.2). Targets that have not been measured yet are marked *Planned* even where the design is intended to meet them; measuring them is part of Section 5.6.
+Each requirement below carries its status as of 21/11/2026 (Section 1.2). Targets that have not been measured yet are marked *Planned* even where the design is intended to meet them; measuring them is part of Section 5.6.
 
 ### 5.1 Performance Requirements
 
@@ -488,7 +490,7 @@ This section defines the specific timing and throughput constraints the system m
   - *Current:* The public pages render their data on the server (home, search, agencies, work detail). Lighthouse mobile defaults (mid-range phone, 4G), median of 3: 2.11 s on every page over HTTPS/HTTP/2 as in production; 2.42–2.46 s with the throttling really applied over the local HTTP/1.1 server; 2.50–2.72 s in Lighthouse's strictest estimate (simulated, HTTP/1.1). Before: 3.3–3.6 s (and ~7.8 s before an 889 KB favicon was replaced). See `Backend/perf/README.md` (`npm run perf:lighthouse`).
 
 - **Search Latency** *(Measured 2026-11-16 — met)*: Faceted search results (with status and facets) shall return within 1.5 seconds at p95 for typical queries.
-  - *Current:* k6, 20,000 works, the search page's typical query mix at 5 searches/s: p95 582 ms (`npm run perf -- search`). The typo-tolerant pattern was restructured (same matches, ~10× faster per scan).
+  - *Current:* k6, 20,000 works, the search page's typical query mix at 5 searches/s: p95 582 ms (`npm run perf -- search`). The typo-tolerant pattern was restructured (same matches, ~10× faster per scan). Measured again on 20/11/2026 after the security changes (rate limits, logging, the egress proxy): p95 734 ms, still within the target.
   - *Next:* The keyword match is still a pattern scan, not an index: p95 stays under 0.7 s up to ~8 searches/s on the test machine, beyond that MongoDB saturates. A search index (NFR-N4.1) is the next step as traffic or data grows.
 
 - **Notification Timeliness** *(Measured 2026-11-16 — met)*: Instant notifications shall be dispatched within approximately 5 minutes of the poll that discovered the matching work.
@@ -498,8 +500,8 @@ This section defines the specific timing and throughput constraints the system m
   - *Current:* Unchanged items are counted as skipped and not rewritten; reading of HTML announcement pages is capped per poll (FR-2.3a).
 
 - **Poll Timeout** *(Partial)*: If a poll for a given site exceeds a configured duration, the system shall time out that run, log it as failed, and alert the Admin (`Poll Timeout`) rather than hang indefinitely.
-  - *Current:* Individual downloads are time-limited (TOR files 120 s, HTML pages 30 s), and a poll abandoned by a crashed worker is closed after 2 minutes without a heartbeat (FR-2.9).
-  - *Next:* Add a time limit to the RSS feed request itself and a configured maximum duration for a whole run, after which the run is logged as failed and the Admin alerted (FR-2.7).
+  - *Current:* Every request is time-limited: the RSS feed and `data.go.th` requests (`INGESTION_REQUEST_TIMEOUT_MS`, 30 s by default), TOR files (120 s) and HTML pages (30 s). A poll abandoned by a crashed worker is closed after 2 minutes without a heartbeat (FR-2.9).
+  - *Next:* A configured maximum duration for a whole run, after which the run is logged as failed and the Admin alerted (FR-2.7).
 
 ### 5.2 Safety Requirements
 
@@ -518,21 +520,27 @@ This section outlines safeguards to prevent data loss or system failure scenario
 
 This section defines the measures required to protect user data, identity, and system integrity.
 
-- **Data Encryption in Transit** *(Partial)*: All data transmitted between client and server shall be encrypted using HTTPS (TLS 1.2 or higher).
-  - *Current:* In production mode the API sends `Strict-Transport-Security` and session cookies are marked `Secure`; the local development stack runs over plain HTTP.
-  - *Next:* Terminate TLS in the production deployment and redirect all HTTP traffic to HTTPS.
+- **Data Encryption in Transit** *(Implemented)*: All data transmitted between client and server shall be encrypted using HTTPS (TLS 1.2 or higher).
+  - *Current:* The production deployment (`docker-compose.prod.yml`, `docs/Deployment.md`) serves the website and the API only over HTTPS, on separate host names, through one proxy that accepts TLS 1.2 and 1.3 only, offers only forward-secret cipher suites and uses Let's Encrypt certificates. The website redirects plain HTTP to HTTPS; the API refuses it (`403`) instead of redirecting, so a client that wrongly calls `http://` notices at once. The connections to MongoDB and to the mail server also require TLS: with `REQUIRE_SECURE_BACKENDS` on, the API and the worker refuse to start with a MongoDB address that has no login or no TLS, and never send mail without TLS. The API sends `Strict-Transport-Security` and marks session cookies `Secure` in production. The local development stack runs over plain HTTP.
+  - *Current:* The settings are checked without a server (`check:deployment-config`, `check:transport-security`) and on a running stack (`docker/verify-deployment.sh`). That Let's Encrypt issues the certificates can only be shown on a public server, with `docker/verify-deployment.sh probe`.
 
 - **Password Storage** *(Implemented)*: For local accounts, the system shall never store passwords in plain text; all passwords must be hashed using Argon2 or bcrypt before storage (bcrypt, cost factor 12 by default).
 
 - **Authentication Hardening** *(Implemented)*: The system shall resist guessing and account discovery on sign-in and sign-up:
   - After 4 failed sign-ins in a row an account is locked, first for 1 minute and then for twice as long after each further failure, up to 30 minutes (`ACCOUNT_LOCKED`); a successful sign-in or a password reset clears the count.
   - An unknown email, a wrong password and a wrong password on a suspended account get an identical answer and take a similar time (a dummy bcrypt comparison is run for unknown emails). That an account is suspended or unverified is revealed only after the correct password.
-  - A sign-up with a taken email is refused with a generic `REGISTRATION_FAILED` message that does not say the email is the reason.
+  - A sign-up with a taken email receives the same response as a new sign-up; the address's owner is emailed that someone tried to sign up instead of receiving a verification link. A sign-in to an email with no account is counted and locked like one to a real account.
   - Password policy, breach check and email verification per FR-1.8 and FR-1.9.
 
-- **Session Management** *(Partial)*: Sessions shall be server-side and revocable.
-  - *Current:* Session tokens are random, stored only as hashes, and sent in an `HttpOnly` cookie (`SameSite=Lax` by default, `Secure` in production) that lasts 7 days by default. Sessions are ended on logout, password change (other sessions), password reset (all sessions), suspension, and Super Admin "sign out" of an Admin.
-  - *Next:* Add an idle timeout so an unused session expires before its 7-day lifetime.
+- **Multi-Factor Authentication** *(Implemented)*: Admin and Super Admin accounts shall sign in with a second factor, and any account may (FR-1.13, FR-1.14).
+  - A time-based one-time password (RFC 6238: HMAC-SHA1, 6 digits, 30-second step, one step of clock drift either side) is checked against the server's clock and accepted once; ten recovery codes of 80 random bits each are stored hashed and accepted once. Seeds and codes come from the operating system's random number generator.
+  - Authenticator secrets are encrypted at rest (AES-256-GCM, bound to the account) with a key held as a secret, never in the database; wrong codes are limited per account (4 free tries, then locks of 1 to 30 minutes, not cleared by a correct password) and per address (10 per 15 minutes).
+  - A lost factor is reset only by an administrator after an identity check, and the reset is audited; an owner and a Super Admin can revoke a lost authenticator.
+
+- **Session Management** *(Implemented)*: Sessions shall be server-side and revocable.
+  - Session tokens are random, stored only as hashes, and sent in an `HttpOnly` cookie (`SameSite=Lax` by default, `Secure` and `__Host-` prefixed in production) that lasts at most 7 days. A session also ends after 30 minutes without activity for staff accounts and 24 hours for vendors. Signing in ends the session the browser held before.
+  - A password that is followed by a second step starts only a 5-minute challenge, which every route refuses except the second step; a correct code replaces it with a new session.
+  - Sessions are ended on logout, password change (other sessions), password reset (all sessions), suspension, an Admin's "sign out everywhere" (any account), and by the owner from the list of signed-in devices on the account page, which asks for the password again.
 
 - **Role-Based Access Control** *(Implemented)*: The admin panel shall enforce strong authentication and role checks, with an explicit Admin vs. **Super Admin** split for higher-risk settings such as source configuration, and the Admin roles of FR-1.11.
 
@@ -542,21 +550,20 @@ This section defines the measures required to protect user data, identity, and s
 
 - **Security Headers** *(Implemented)*: The API shall send `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'` and `Referrer-Policy: no-referrer` on every response, with no `X-Powered-By` header. The web application shall send a Content Security Policy, `Referrer-Policy`, `Permissions-Policy` and `X-Frame-Options`.
 
-- **Injection & Rate Limiting** *(Partial)*: The system shall apply OWASP Top 10 protections (especially injection on search) and rate limiting on authentication, search, and admin poll endpoints.
-  - *Current:* All input is validated against strict schemas that reject unknown fields; MongoDB operator and dotted keys are stripped from input; search text is escaped before it is used in a query; email templates escape every inserted value. Sign-in is limited to 10 attempts per 15 minutes, and sign-up and forgot/reset password to 5 per hour, per IP address. A request body that is not valid JSON, or is too large, is refused with `400` or `413` rather than a server error, and a search cannot be made to fail or stall by its text (long Thai text, regular-expression characters, operators).
-  - *Next:* Rate-limit search and the admin poll endpoints.
+- **Injection & Rate Limiting** *(Implemented)*: The system shall apply OWASP Top 10 protections (especially injection on search) and rate limiting on authentication, search, and admin poll endpoints.
+  - *Current:* All input is validated against strict schemas that reject unknown fields; MongoDB operator and dotted keys are stripped from input; search text is escaped before it is used in a query; email templates escape every inserted value. Sign-in is limited to 10 attempts per 15 minutes, and sign-up and forgot/reset password to 5 per hour, per IP address; public search to 120 requests per minute per address (`SEARCH_RATE_LIMIT_PER_MINUTE`); Poll Now to 10 per minute per signed-in Admin (`POLL_RATE_LIMIT_PER_MINUTE`); the second sign-in step to 10 per 15 minutes per address. A refused request gets `429` and is logged as a security event. A request body that is not valid JSON, or is too large, is refused with `400` or `413` rather than a server error, and a search cannot be made to fail or stall by its text (at most 200 characters and 8 words, regular-expression characters escaped, a 5-second database time limit).
 
-- **Outbound Request Safety** *(Partial)*: The system shall only fetch from the government sources it is configured for.
-  - *Current:* HTML announcement pages are fetched only from e-GP hosts, with every redirect checked (FR-2.3a).
-  - *Next:* Apply the same host allowlist to TOR file downloads, which currently follow any link the feed provides.
+- **Outbound Request Safety** *(Implemented)*: The system shall only fetch from the government sources it is configured for.
+  - *Current:* Every outbound call (the RSS feed, HTML announcement pages, TOR file downloads, `data.go.th`, the breached-password service and the AI provider) goes through one allow-list per purpose (`Backend/src/utils/outbound.ts`). Redirects are followed by hand, at most five, and each hop is checked against the allow-list before it is requested. In Docker the API and the worker have no route to the internet: their only way out is the egress proxy, which allows the same hosts. A refused call is logged and raises an alert (`docs/Security.md` sections 1 and 13).
 
 - **Document Handling** *(Implemented)*: Downloaded and served documents shall be limited and validated per FR-5.5.
 
-- **Infrastructure Hardening** *(Planned)*: The production deployment shall require authentication on MongoDB and not expose its port publicly, run application containers as a non-root user, and scan dependencies for known vulnerabilities on every change (Section 5.6).
+- **Infrastructure Hardening** *(Implemented)*: The production deployment shall require authentication on MongoDB and not expose its port publicly, run application containers as a non-root user, and scan dependencies for known vulnerabilities on every change (Section 5.6).
+  - *Current:* In the production deployment (`docker-compose.prod.yml`) MongoDB requires a login and TLS, has no published port and no route to the internet, and has one user per service (the API and the worker) with the `readWrite` role on the application database only; no application is given the root password. Only the proxy publishes a port. The API, the worker, the website and the proxy run as an unprivileged user with every capability dropped, no privilege escalation and a read-only file system. Every secret is a file from a secret store, and each service is given only the ones it needs; none is in an environment variable, a `.env` file or an image. The passwords are random and distinct (`docker/secrets/generate.sh`). Dependencies are audited on every change (CI job *Dependencies*). Third-party images keep their own default users.
 
 - **Privacy** *(Partial)*: Contact information, notification preferences, and followed tags shall be stored and processed in a PDPA-compliant manner, with per-channel opt-in.
-  - *Current:* Email notifications can be switched off per user and are only sent to verified addresses; the in-app channel is always on.
-  - *Next:* Make email an explicit opt-in (it is currently on by default), add the no-login unsubscribe of FR-3.7, and let users export and delete their own account data.
+  - *Current:* Email notifications can be switched off per user, from the account page or from the unsubscribe link in every notification email without signing in (FR-3.7), and are only sent to verified addresses; the in-app channel is always on. Personal data is classified and handled by the rules in `docs/Security.md` sections 6 to 8: email addresses are masked in logs, one-time tokens stay out of URLs sent to a server, and accounts never verified are removed after 7 days.
+  - *Next:* Make email an explicit opt-in (it is currently on by default), and let users export and delete their own account data.
 
 ### 5.4 Software Quality Attributes
 
@@ -578,8 +585,8 @@ This section details the quality characteristics important for the long-term mai
 
 - **Portability (Browser Support)** *(Planned — not yet verified)*: The application shall function correctly on all modern browsers, specifically Chrome, Firefox, Safari, and Edge.
 
-- **Discoverability (SEO)** *(Planned)*: Public search and detail pages shall be server-rendered or pre-rendered so content and status are indexable.
-  - *Current:* The public search and work-detail pages load their data in the browser, so their content is not in the server-rendered HTML.
+- **Discoverability (SEO)** *(Implemented)*: Public search and detail pages shall be server-rendered or pre-rendered so content and status are indexable.
+  - *Current:* The home, search, agencies and work-detail pages fetch their data on the server, so works and their status badges are in the HTML the server sends; the search page then takes over in the browser for later searches. No sitemap or structured data is published yet.
 
 ### 5.5 Business Rules
 
@@ -605,23 +612,26 @@ This section lists the operating principles and constraints that dictate specifi
 
 This section defines how the requirements above are verified, and the testing work planned next.
 
-- **NFR-V1 Automated Regression Suite** *(Partial)*: Every requirement marked *Implemented* shall be covered by an automated check that runs with one command, against a throwaway database, with outgoing email disabled.
-  - *Current:* About 30 backend check suites exist (`npm run check:*`, roughly 1,500 assertions), each using its own throwaway database, with mock e-GP, `data.go.th`, breached-password and email services. They are started one script at a time, and `check:ingestion` points at a missing file.
-  - *Next:* One `npm test` runner for every suite; repair `check:ingestion`.
+- **NFR-V1 Automated Regression Suite** *(Implemented)*: Every requirement marked *Implemented* shall be covered by an automated check that runs with one command, against a throwaway database, with outgoing email disabled.
+  - *Current:* `npm test` (in `Backend/`, `tests/run-all.ts`) runs all 52 `check:*` suites, each against its own throwaway MongoDB database, with mock e-GP, `data.go.th`, breached-password and email services, and exits non-zero if any fails. A new suite is picked up as soon as it has a `check:*` script.
 
-- **NFR-V2 Continuous Integration** *(Planned)*: Every pull request shall run the backend checks and typecheck, and the frontend lint, typecheck and production build, and shall not be mergeable while any of them fails.
+- **NFR-V2 Continuous Integration** *(Implemented)*: Every pull request shall run the backend checks and typecheck, and the frontend lint, typecheck and production build, and shall not be mergeable while any of them fails.
+  - *Current:* `.github/workflows/ci.yml` runs on every pull request, every push to `main`, on demand and every Monday: backend typecheck and `npm test` against a MongoDB service container, frontend lint, typecheck and production build, and a dependency audit with an SBOM for each app. One summary check, **CI passed**, fails if any job fails; making it required in the branch protection rule for `main` is a repository setting.
 
 - **NFR-V3 API Coverage per Use Case** *(Partial)*: Each use case in Section 6.2 shall have API-level tests for its basic and alternative flows.
-  - *Current:* *Register / Login*, *Search & Filter Work*, *View Work Detail & Status History*, *Follow Interest Tag*, *Poll Government Site*, *Manage Source Configuration*, *Manage Tag Vocabulary* and *Manage Vendor Accounts* are covered. *Download TOR Document* and *Receive Notification* (matching and email are covered through `check:follow-tags`) are partly covered.
-  - *Next:* Add tests for the rest of *Receive Notification* (digest, notification center, unsubscribe), and complete the partial ones.
+  - *Current:* *Register / Login*, *Search & Filter Work*, *View Work Detail & Status History*, *Follow Interest Tag*, *Poll Government Site*, *Manage Source Configuration*, *Manage Tag Vocabulary* and *Manage Vendor Accounts* are covered. *Receive Notification* is covered by `check:follow-tags` (matching and email) and `check:notifications` (notification center, daily digest, unsubscribe). *Download TOR Document* is partly covered (`check:tor-download`, `check:tor-files`).
+  - *Next:* Complete the alternative flows of *Download TOR Document*.
 
-- **NFR-V4 End-to-End, Accessibility and Browser Tests** *(Planned)*: The main journeys of every use case shall be tested in a real browser on Chrome, Firefox, Safari (WebKit) and Edge, in Thai and English, including automated WCAG 2.1 AA checks.
+- **NFR-V4 End-to-End, Accessibility and Browser Tests** *(Partial)*: The main journeys of every use case shall be tested in a real browser on Chrome, Firefox, Safari (WebKit) and Edge, in Thai and English, including automated WCAG 2.1 AA checks.
+  - *Current:* Playwright is set up in `B2GVendor/` (`npm run test:e2e`) with two tests of the Unsubscribe page in Chromium.
+  - *Next:* The main journey of every use case, on all four browsers, in Thai and English, with automated WCAG 2.1 AA checks.
 
 - **NFR-V5 Security Testing** *(Partial)*: The controls in Section 5.3 shall be covered by automated tests, a dynamic application security scan, and a dependency vulnerability scan.
-  - *Current:* Automated checks cover CSRF, security headers, account enumeration, account lockout, sessions and cookie flags, search injection and document safety (`check:csrf`, `check:security-headers`, `check:auth-enumeration`, `check:login-lockout`, `check:login-session`, `check:search-filter`, `check:tor-files`).
-  - *Next:* Add a dynamic scan (OWASP ZAP baseline) against the full stack, a dependency audit in CI, and cross-user access tests.
+  - *Current:* Automated checks cover CSRF, security headers, account enumeration, account lockout, sessions and cookie flags, two-step sign-in, search injection and document safety (`check:csrf`, `check:security-headers`, `check:auth-enumeration`, `check:login-lockout`, `check:login-session`, `check:mfa`, `check:mfa-crypto`, `check:search-filter`, `check:tor-files`), rate limits, the outbound allow-list and security logging (`check:rate-limits`, `check:logging-outbound`, `check:security-hardening`), passwords (`check:pwned-passwords`, `check:password-hasher`, `check:password-session`), prompt injection (`check:ai-prompt`), and the production deployment's TLS, MongoDB login, secrets and containers (`check:deployment-config`, `check:transport-security`, `check:secret-files`, and `docker/verify-deployment.sh` on a running stack). CI audits the dependencies of both apps on every run (`npm audit --audit-level=high`) and keeps an SBOM. The full stack was also tested once in production mode with a real browser, antivirus, egress proxy and mail server (`docs/B2GVendor_Security_Project_Document.docx`, section 6.4).
+  - *Next:* Add a dynamic scan (OWASP ZAP baseline) against the full stack, and cross-user access tests.
 
-- **NFR-V6 Performance Testing** *(Planned)*: The targets in Section 5.1 shall be measured under load, on a dataset of realistic size, before release.
+- **NFR-V6 Performance Testing** *(Implemented)*: The targets in Section 5.1 shall be measured under load, on a dataset of realistic size, before release.
+  - *Current:* `npm run perf` (k6) and `npm run perf:lighthouse` in `Backend/`, on a seeded set of 20,000 works; the results are in Section 5.1 and `Backend/perf/README.md`.
 
 - **NFR-V7 Test Isolation** *(Implemented)*: Automated tests shall never call the live government sources, the breached-password service, or a real mail server, and shall never touch the development or production database.
 
@@ -695,10 +705,10 @@ relationship between two use cases.
 | Field | Description |
 |---|---|
 | Preconditions | Visitor is on the Landing Page. |
-| Basic Flow | 1. Visitor selects **Register** or **Log In**.<br>2. New user: enters email, password, and optionally a business profile (tax ID, company name); system creates a single unified `Account`.<br>3. Returning user: enters email/password; system hashes and validates against the stored Argon2/bcrypt hash.<br>4. System establishes a session.<br>5. System redirects the user to their previous page or the account dashboard. |
-| Alternative Flow | Invalid Credentials: display "Invalid email or password."<br>Duplicate Email: display "An account with this email already exists." |
+| Basic Flow | 1. Visitor selects **Register** or **Log In**.<br>2. New user: enters email, password, and optionally a business profile (tax ID, company name); system creates a single unified `Account`.<br>3. Returning user: enters email/password; system hashes and validates against the stored Argon2/bcrypt hash.<br>4. If the account has two-step sign-in, the system asks for the code from the authenticator app (or a recovery code) and validates it.<br>5. System establishes a session.<br>6. System redirects the user to their previous page or the account dashboard. |
+| Alternative Flow | Invalid Credentials: display "Invalid email or password."<br>Duplicate Email: display "An account with this email already exists."<br>Wrong or Used Code: display "That code is not valid", and lock the second step after repeated failures.<br>Staff Without a Second Factor: an Admin or Super Admin is taken to Account Security to set one up before any admin page opens. |
 | Post-conditions | The user is authenticated and can follow tags and manage notification settings. |
-| Traceability | US-1.1, US-1.2 → FR-1.1, FR-1.2, FR-1.3 |
+| Traceability | US-1.1, US-1.2 → FR-1.1, FR-1.2, FR-1.3, FR-1.13 |
 
 **Search & Filter Work**
 - **Actor:** Visitor
@@ -804,9 +814,9 @@ relationship between two use cases.
 |---|---|
 | Preconditions | Admin is logged in. |
 | Basic Flow | 1. Admin searches the account list by name, email, or status.<br>2. Admin adds, suspends/reactivates, or deletes an account.<br>3. System logs the action with actor and timestamp to the audit log. |
-| Alternative Flow | None. |
+| Alternative Flow | Lost Authenticator: after checking who is asking, the Admin resets the vendor's two-step sign-in, stating how the identity was checked and why, and re-entering their own password. |
 | Post-conditions | The account's status is updated and the change is auditable. |
-| Traceability | US-1.5 → FR-1.5, FR-1.6 |
+| Traceability | US-1.5 → FR-1.5, FR-1.6, FR-1.14 |
 
 ---
 
@@ -828,6 +838,7 @@ The following items are currently ambiguous or require further definition from t
   - *Update (04/11/2026):* Still open. Today no threshold is applied: the AI picks tags from the controlled vocabulary and may propose one new tag per work, and Admins correct tags afterwards (FR-3.2).
 
 - **Multi-Factor Authentication for Staff:** Whether Admin and Super Admin accounts must use a second factor is not yet decided; it is not part of the current security requirements (Section 5.3).
+  - *Update (21/11/2026):* Resolved. Admin and Super Admin accounts must use a second factor (FR-1.13, Section 5.3). Still open: hardware security keys and passkeys (WebAuthn), and whether vendors should be required to use it too.
 
 ### 7.2 Justified Assumptions
 

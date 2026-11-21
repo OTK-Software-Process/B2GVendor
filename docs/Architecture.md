@@ -121,6 +121,13 @@ flowchart TB
     class mongo,files,egp,dgt,ai,smtp,hibp store
 ```
 
+**Security services around them (docker-compose.yml):** `proxy` (Squid) is both the API's only way
+to the internet — the API and the worker sit on an `internal` network with no route out — and the
+gateway that publishes the API on port 4000. `clamav` scans every TOR file the worker downloads.
+`loki`, `alloy` and `alertmanager` are the log store, the log shipper and the alert router, on their
+own `logging` network that the application containers cannot reach. Security.md §1 and §13 have the
+details.
+
 **Why the worker is its own service rather than a thread in the API:** restarting or redeploying the
 API must not kill a poll in flight, and a failing poll should be visible in its own logs. The two
 never call each other. "Poll Now" only inserts a `PollJob` row; the worker claims it atomically
@@ -187,7 +194,7 @@ flowchart LR
 | Path | Holds | Rule |
 | :--- | :--- | :--- |
 | `app.ts` · `server.ts` · `worker.ts` | The Express app and its middleware order · the API process · the worker process | `import './audit/install'` stays the **first** import of `app.ts` and `worker.ts`: the audit plugin only covers models compiled after it |
-| `config/` | `env.ts` (every environment variable, validated once at start-up), `cookie.ts`, `polling.ts` (the 2-hour floor), `db.ts` | A bad or missing variable stops the process at boot, not at the first request |
+| `config/` | `env.ts` (every environment variable, validated once at start-up), `cookie.ts`, `polling.ts` (the 2-hour floor), `db.ts`, `mfa.ts` (the two-step key and what must stop the API from starting without it), `clock.ts` (the server's clock, the only one two-step codes are judged by) | A bad or missing variable stops the process at boot, not at the first request |
 | `routes/` | One router per area; `index.ts` mounts them under `/api/v1` | Decides *who may call* (`requireAuth`, `requireAdmin`, `requireSuperAdmin`, `requirePollAccess`, `requireTagAccess`) and *what shape is allowed* (`validate(schema)`), before any handler runs |
 | `validators/` | Zod schemas, all `.strict()` | An unknown field is a 400, not silently ignored |
 | `controllers/` | Read the request, call one service, wrap the result in the response envelope | No database queries, no business rules |
@@ -203,14 +210,17 @@ flowchart LR
 **The order of the middleware** is part of the design (`app.ts`), because a request that fails an early
 step never reaches a later one:
 
+0. `accessLog` — one JSON line per request when it finishes (Security.md §13). First, so refused
+   requests are logged too.
 1. `securityHeaders` — Helmet: `nosniff`, `X-Frame-Options: DENY`, `frame-ancestors 'none'`, HSTS in
-   production. First, so even errors and CORS preflights carry them.
+   production. Before everything else, so even errors and CORS preflights carry them.
 2. `cors` — the listed frontend origins only, with credentials.
 3. `csrfProtection` — before the body parser, so a refused request is never parsed.
 4. `express.json` — 1 MB limit.
-5. `sanitizeInput` — drops any body key that starts with `$` or contains a dot.
-6. `cookieParser`, `morgan`, then `auditContext`, which opens the actor / IP / request-id context that
-   audit entries read for the rest of the request.
+5. `sanitizeInput` — drops any body key that starts with `$`, contains a dot, or is `__proto__`,
+   `constructor` or `prototype`, and logs the attempt.
+6. `cookieParser`, then `auditContext`, which opens the actor / IP / request-id context that audit
+   entries and log lines read for the rest of the request, and returns the id in `X-Request-Id`.
 7. The routes, then `notFoundHandler`, then `errorHandler`, which turns every `AppError` (and Mongoose,
    duplicate-key and body-parser errors) into one response shape.
 
@@ -219,6 +229,7 @@ The feature areas, and where each lives:
 | Area | Services (`Backend/src/services/`) | Use case |
 | :--- | :--- | :--- |
 | Sign-up, sign-in, sessions, password reset | `auth`, `account`, `session`, `token`, `loginLockout`, `email` | 6.2.1 |
+| Two-step sign-in (authenticator app, recovery codes, staff requirement, reset) | `mfa`, with `utils/totp`, `utils/recoveryCodes`, `utils/secretBox`; the challenge step in `auth`, the lock in `loginLockout` | 6.2.1 · 6.2.10 |
 | Search and filter | `work` (query building), `utils/thaiSearch` | 6.2.2 |
 | Work detail, status history, TOR files | `work`, `fileStorage`, `utils/statusHistory` | 6.2.3 · 6.2.4 |
 | Following tags | `follow` | 6.2.5 |
@@ -252,7 +263,7 @@ flowchart LR
 
 | Path | Holds |
 | :--- | :--- |
-| `app/` | Routes: `search`, `works/[id]`, `agencies`, `login`, `register`, `verify-email`, `forgot-password`, `reset-password`, `change-password`, `account/*`, `unsubscribe/[token]`, and `admin/*` (dashboard, ingestion and run history, source-config, tags, works, accounts, users, audit-log) |
+| `app/` | Routes: `search`, `works/[id]`, `agencies`, `login`, `register`, `verify-email`, `forgot-password`, `reset-password`, `change-password`, `account/*`, `unsubscribe` (each token page reads its token from the `#` fragment; `[token]` paths redirect old links), `csp-report`, and `admin/*` (dashboard, ingestion and run history, source-config, tags, works, accounts, users, audit-log) |
 | `components/` | `Navbar`, `WorkCard`, `FilterBar`, `StatusBadge`, `TORDownloadList`, `FollowTagButton`, `Pagination`, loading / empty / retry states, and the admin pieces (`AdminSidebar`, `PollStatusBanner`, `ScheduleForm`, `AuditChanges`) |
 | `context/AppContext.tsx` | The signed-in account and role, the Thai / English switch, and the lists every screen needs (sites, tags, poll status). Drops to the signed-out state when any call reports a dead session |
 | `lib/api.ts` | The only wrapper around `fetch`: base URL from `NEXT_PUBLIC_API_URL`, cookies included, the response envelope unwrapped into a typed `ApiError` |
@@ -433,6 +444,7 @@ erDiagram
     ACCOUNT ||--o{ NOTIFICATION : "receives, one per work"
     WORK ||--o{ NOTIFICATION : "announced by"
     ACCOUNT ||--o{ SESSION : "signed in on"
+    ACCOUNT ||--o| MFA_CREDENTIAL : "second factor"
     ACCOUNT ||--o{ TOKEN : "single-use links"
     ACCOUNT ||--o{ AUDIT_LOG : "actor snapshot"
 
@@ -491,7 +503,18 @@ erDiagram
         bool emailVerified
         bool emailNotificationsEnabled
         string notificationFrequency "instant or daily"
+        bool mfaEnabled "two-step sign-in is on"
         date lockedUntil "sign-in lock, see section 7"
+    }
+    MFA_CREDENTIAL {
+        objectId accountId FK "unique, one per account"
+        string secretEnc "authenticator secret, AES-256-GCM, never selected by default"
+        date enabledAt "absent while a setup is only pending"
+        string pendingSecretEnc "handed out at setup, not active until proven"
+        int lastUsedStep "highest 30-second step accepted, so a code works once"
+        array recoveryCodes "id and hash only, usedAt once spent"
+        int failedCount "wrong codes, counted apart from passwords"
+        date lockedUntil "second-step lock"
     }
     FOLLOW {
         objectId accountId FK "unique with tagId"
@@ -530,8 +553,9 @@ erDiagram
     SESSION {
         objectId accountId FK
         string tokenHash UK "only the hash is stored"
-        date expiresAt "TTL index removes it"
+        date expiresAt "TTL index removes it; 5 minutes for a challenge"
         date revokedAt
+        bool mfaPending "a challenge: the password was right, the second step is owed"
     }
     TOKEN {
         objectId accountId FK
@@ -572,8 +596,10 @@ Load-bearing shapes:
    it. The publish-date filter reads whole **Bangkok** days (+07:00). `fiscalYear` is in the Buddhist
    Era, and `fiscalYearSource` says whether the document stated it or it was estimated from the
    project number.
-5. **Secrets are stored only as hashes.** Passwords (bcrypt), session tokens and single-use link tokens
-   are never stored in a form that can be replayed; sessions and tokens expire through TTL indexes.
+5. **Secrets are stored only as hashes.** Passwords (bcrypt), session tokens, single-use link tokens and
+   recovery codes are never stored in a form that can be replayed; sessions and tokens expire through
+   TTL indexes. The one thing that must be readable again, an authenticator's secret, is encrypted
+   (AES-256-GCM, bound to its account) in a collection of its own.
 6. **Embedded arrays are bounded by the feed, not by a cap.** `statusHistory` and `torFiles` grow only
    with real announcements and re-issued documents of one project; an `IngestionRun`'s
    `itemResults` is bounded by what one feed returns. If a document ever needs an unbounded list, it
@@ -598,6 +624,7 @@ Load-bearing shapes:
 | `ingestionruns.siteId + startedAt` | One site's run history, newest first |
 | `accounts.email` **unique** · `createdAt` | Sign-in lookup, and the newest-first account lists |
 | `sessions.tokenHash` **unique** · `expiresAt` TTL | Resolving a cookie; expiry removes the row |
+| `mfacredentials.accountId` **unique** | One second factor per account; the atomic claim of a code or recovery code targets this row |
 | `tokens.tokenHash` **unique** · `expiresAt` TTL | Resolving a link; expiry removes the row |
 | `auditlogs.createdAt`, `entityType + entityId`, `actor.id`, `action`, `requestId` | Every filter of the audit-log screen |
 
@@ -619,9 +646,15 @@ not do — because those are the ones a well-meaning change quietly breaks.
 | Super Admin accounts cannot be created, changed or deleted through the panel | Managing staff is the highest-risk action, so promoting or removing a Super Admin stays a deliberate out-of-band act | `findManageableAdmin` refuses with 403; Super Admins come from `seed:superadmin` only |
 | Every state-changing request passes an origin and JSON check before it is parsed | Cross-site request forgery against a cookie session | `csrfProtection`, mounted before `express.json`, on the same origin list as CORS |
 | Every body is validated against a strict schema and `$` / dotted keys are dropped | Mass assignment and NoSQL operator injection | `validate()` with `.strict()` schemas, and `sanitizeInput` |
-| Sign-in and sign-up never reveal whether an email has an account | Account enumeration | A dummy bcrypt for unknown emails; the same answer for an unknown email and a wrong password; generic `REGISTRATION_FAILED`; a suspended or unverified state is told only after the right password |
+| Sign-in and sign-up never reveal whether an email has an account | Account enumeration | A dummy bcrypt for unknown emails; the same answer for an unknown email and a wrong password; a taken email at sign-up answers like a new one; an unknown email is locked like a real account; a suspended or unverified state is told only after the right password |
 | Wrong passwords are counted per account, including on change-password | Attackers who rotate IPs, or hold a stolen session, must still be slowed | `reserveLoginAttempt`: 4 free failures, then locks of 1, 2, 4 … up to 30 minutes |
 | Passwords, session tokens and link tokens are stored only as hashes | A database leak cannot be replayed | `passwordHash` is `select: false`; `tokenHash` on sessions and tokens |
+| Admins and Super Admins reach nothing in the admin area without a second factor | A stolen or guessed password must not be enough for the accounts that can change other accounts and sources | `requireRole` answers `403 MFA_SETUP_REQUIRED` when `mfaSetupRequired`; `MFA_REQUIRED_FOR_STAFF` is fixed `true` in `docker-compose.prod.yml`; staff cannot turn it off |
+| A password alone never gives a session to an account with a second factor | Otherwise the second factor protects nothing | `loginWithPassword` issues a challenge (`mfaPending`, 5 minutes) that `requireAuth` refuses; only `requireMfaChallenge` accepts it, and a correct code issues a NEW session |
+| An authenticator code and a recovery code each work once | A code seen over a shoulder or in a log is worthless a moment later | `lastUsedStep` moved forward by one atomic `updateOne`; a recovery code claimed by one atomic positional update |
+| Wrong second-step codes are counted apart from wrong passwords, and a correct password never clears them | Someone who knows the password must not guess codes without end | `reserveMfaAttempt` on `mfacredentials`; only a correct code resets it |
+| A code is judged by the server's clock alone | A client-supplied time would let anyone pick the code | `config/clock.ts`; strict schemas carry no time |
+| An authenticator secret is never returned after setup, logged, or kept in the clear | A leak of the database, a response or a log must not yield a seed | `select: false`, AES-256-GCM, `toJSON` strips it; `check:mfa` searches responses, logs and the stored rows |
 | Only genuine PDFs are stored and served, always typed `application/pdf`, by content-hash key | A remote server's file name or type must never decide what we serve | `saveTorFile` checks the `%PDF-` signature; `isStoredPdf` and `safePdfFilename` on download |
 | Every admin change is audited, and secrets never reach the log | Who did what, and when, must survive | The audit plugin and `AUDITED_MODELS`; any key containing `password`, `token`, `hash`, `secret` is `[REDACTED]`; the model refuses edits and deletes |
 | At most one notification per work per user, and a paused, suspended or unverified recipient is never emailed | FR-3.6; mute means mute | Unique index; `notifyNewWorkMatches` skips paused follows and non-active accounts, and sends email only on first insert |
@@ -702,11 +735,26 @@ flowchart TB
 - **`NEXT_PUBLIC_API_URL` is a build argument** of the frontend image: it is fixed at build time, and
   it is also what the Content-Security-Policy's `connect-src` is built from.
 - **Behind a proxy:** in production the API sets `trust proxy` to 1 and marks the cookie `Secure`.
-- ⬜ The target for a real deployment (SRS §5.3 *Infrastructure Hardening*, *Data Encryption in
-  Transit*): TLS and an HTTP-to-HTTPS redirect, MongoDB with authentication and no public port,
-  containers running as a non-root user, and a dependency scan on every change. The Compose file today
-  is the local stack: Mongo is unauthenticated and published on `27017`, and the API runs over plain
-  HTTP.
+- **The Compose file above is the local stack:** plain HTTP, MongoDB with no login on a published port,
+  secrets in `.env` files. A real deployment adds `docker-compose.prod.yml` on top of it ✅ (SRS §5.3
+  *Infrastructure Hardening*, *Data Encryption in Transit*; how to use it is
+  [Deployment.md](Deployment.md)). It changes five things:
+  - **`edge`, a Caddy container, is the only one that publishes a port** (80 and 443): TLS 1.2 and 1.3,
+    Let's Encrypt certificates, the website on `APP_HOST` and the API on `API_HOST` (different host
+    names), the website's HTTP redirected to HTTPS and the API's plain HTTP refused. The local API
+    gateway on `:4000` is not published.
+  - **MongoDB needs a login and TLS**, has no published port and no route out, and has one
+    least-privilege user per service (`b2g_api`, `b2g_worker`), created on the first start.
+  - **Secrets are files**, one per secret (Docker secrets), read through `NAME_FILE` variables; each
+    service is given only its own, and none is in an environment or a `.env` file.
+  - **The application containers run as an unprivileged user** with every capability dropped, no
+    privilege escalation and a read-only file system.
+  - **`REQUIRE_SECURE_BACKENDS=true`**: the API and the worker refuse to start with a MongoDB address that
+    has no login or no TLS, and never send mail without TLS.
+
+  `docker/verify-deployment.sh local` rehearses all of it on one machine, and `probe` checks a running
+  server from outside. (The dependency scan already runs on every change: CI job *Dependencies*, with an
+  SBOM per build.)
 
 ### Configuration
 
@@ -715,7 +763,7 @@ Everything that varies by environment is an environment variable, validated in `
 
 | Group | Variables |
 | :--- | :--- |
-| Server | `NODE_ENV`, `PORT`, `MONGODB_URI`, `CORS_ORIGIN`, `APP_URL` |
+| Server | `NODE_ENV`, `PORT`, `MONGODB_URI`, `CORS_ORIGIN`, `APP_URL`, `REQUIRE_SECURE_BACKENDS` |
 | Session | `SESSION_COOKIE_NAME`, `SESSION_TTL_DAYS`, `COOKIE_SAMESITE`, `BCRYPT_ROUNDS` |
 | Email | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM` |
 | Sources | `EGP_RSS_BASE_URL`, `EGP_HTML_TOR_ENABLED`, `DATA_GO_TH_BASE_URL`, `DATA_GO_TH_API_KEY`, `DATA_GO_TH_DEFAULT_PACKAGE_ID`, `DATA_GO_TH_DEFAULT_SEARCH_QUERY` |
@@ -723,6 +771,9 @@ Everything that varies by environment is an environment variable, validated in `
 | AI | `AI_TAGGING_ENABLED`, `AI_PROVIDER`, `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `OPENROUTER_BASE_URL`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`, `VERTEX_AI_MODEL`, `GOOGLE_APPLICATION_CREDENTIALS` |
 | Topic filter | `INGESTION_TOPIC_FILTER_ENABLED` (needs `AI_TAGGING_ENABLED`) |
 | Frontend | `NEXT_PUBLIC_API_URL` |
+| Two-step sign-in | `MFA_ENCRYPTION_KEY` (32 random bytes, base64; the API refuses to start without it while staff must use two-step sign-in), `MFA_REQUIRED_FOR_STAFF` (default `true`), `MFA_ISSUER`, `MFA_TOTP_DRIFT_STEPS` (default 1) |
+| Secrets as files (production) | `MONGODB_URI_FILE`, `SMTP_PASS_FILE`, `OPENROUTER_API_KEY_FILE`, `DATA_GO_TH_API_KEY_FILE`, `MFA_ENCRYPTION_KEY_FILE`: the value comes from that file, not from the environment (`config/secretFiles.ts`) |
+| Deployment (root `.env`, read by compose) | `APP_HOST`, `API_HOST`, `ACME_EMAIL`, `SECRETS_DIR`, `EDGE_HTTP_PORT`, `EDGE_HTTPS_PORT`, `COMPOSE_FILE` |
 
 The poll interval is **not** an environment variable: an Admin sets it in the app.
 
@@ -735,13 +786,13 @@ notes of the SRS requirement it names.
 
 | Area | Delivers | State |
 | :--- | :--- | :--- |
-| Accounts and access (FR-1.x) | Sign-up with email verification, one login for everyone, sign-in lockout, password reset and change, profile, Admin roles, vendor and admin account management | ✅ |
-| Ingestion (FR-2.x) | e-GP polling, TOR download, schedule, run history, source configuration, deptId verify and suggestions, `data.go.th` enrichment, procurement facts, topic filter | ✅ — except active alerts for a failed run (FR-2.7) and a per-poll time limit 🔨 |
-| Tags and notifications (FR-3.x) | Follow, pause, unfollow, in-app and email notifications, daily digest, tag vocabulary | ✅ — agency tags are not assigned automatically (FR-3.2) 🔨; no-login email unsubscribe (FR-3.7) ⬜ |
+| Accounts and access (FR-1.x) | Sign-up with email verification, one login for everyone, sign-in lockout, password reset and change, profile, Admin roles, vendor and admin account management, two-step sign-in (authenticator app and recovery codes, required for Admin and Super Admin, with an identity-checked reset) | ✅ |
+| Ingestion (FR-2.x) | e-GP polling, TOR download, schedule, run history, source configuration, deptId verify and suggestions, `data.go.th` enrichment, procurement facts, topic filter | ✅ — except active alerts for a failed run (FR-2.7) and a time limit on a whole poll run 🔨 |
+| Tags and notifications (FR-3.x) | Follow, pause, unfollow, in-app and email notifications, daily digest, email unsubscribe without login (FR-3.7), tag vocabulary | ✅ — agency tags are not assigned automatically (FR-3.2) 🔨 |
 | Search and browse (FR-4.x) | Thai-aware search, filters, sorts, status badges, site directory | 🔨 — extracted TOR text is not indexed; budget and date-range filters are in the API but not yet on the search page |
-| Work detail and TOR (FR-5.x) | Detail page, status history, PDF download, hash dedupe | ✅ — HTTPS depends on the production deployment 🔨 |
-| Security (SRS §5.3) | CSRF, headers, validation, lockout, hashing, rate limits on sign-in, sign-up and reset | ✅ — TLS, Mongo authentication, non-root containers, dependency scan, session idle timeout, rate limits on search and poll ⬜ |
-| Verification (SRS §5.6) | Per-area `check:*` scripts against throwaway databases | 🔨 — CI, browser and accessibility tests, load tests ⬜ |
+| Work detail and TOR (FR-5.x) | Detail page, status history, PDF download, hash dedupe | ✅ — served over HTTPS by the production overlay (`docker-compose.prod.yml`) |
+| Security (SRS §5.3) | CSRF, headers, validation, lockout, hashing, rate limits on sign-in, sign-up and reset | ✅ — two-step sign-in for staff, and the dependency audit + SBOM in CI, session idle timeout, rate limits on search and poll. In a deployment (`docker-compose.prod.yml`): TLS 1.2/1.3 and Let's Encrypt, MongoDB login and TLS, secrets in the secret store, non-root containers ✅ — Let's Encrypt issuance is shown only on a public server |
+| Verification (SRS §5.6) | `npm test` runs all 52 `check:*` suites against throwaway databases; CI on every pull request (tests, lint, build, dependency audit + SBOM); k6 and Lighthouse performance suite; a Playwright browser test | ✅ — browser tests for every journey and browser, accessibility checks and a dynamic scan ⬜ |
 
 ### Open decisions
 
@@ -750,7 +801,7 @@ notes of the SRS requirement it names.
 | AI confidence threshold for discarding a suggested tag | A product decision; today no threshold is applied and Admins correct tags afterwards (SRS §7.1) |
 | One site, or one site per branch, for agencies with no agency-wide `deptId` (PEA, EGAT) | The Product Owner (SRS §7.1, §5.5) |
 | Exact `data.go.th` resource per site | Onboarding each site one at a time; not every site has one (SRS §7.1) |
-| Second factor for staff accounts | Not decided, and not in the current security requirements (SRS §7.1) |
+| Hardware security keys and passkeys (WebAuthn), and whether vendors must also use a second factor | A product decision; staff already must use an authenticator app (SRS §7.1, FR-1.13) |
 
 ---
 
@@ -762,6 +813,8 @@ notes of the SRS requirement it names.
 | Why does it exist, and for whom? | [ProjectDescription.md](ProjectDescription.md) — the requirements description and data flow |
 | What does each route accept and return? | [API.md](API.md) |
 | How do I run it? | [README.md](../README.md) — setup, seeds, backfills, Docker |
+| How do I put it on a server? | [Deployment.md](Deployment.md) — HTTPS, MongoDB login and TLS, secrets, non-root containers, and how to check them |
+| How is it secured, and why? | [Security.md](Security.md) — connections, cryptography, secrets, access rules, data protection, logging, deployment |
 | How do I add an audited model? | [README.md](../README.md#audit-log-developer-guide) |
 | What does the real e-GP feed look like? | [testAPI/readme.md](../testAPI/readme.md) — exploration scripts against the live sources |
 | Which settings exist? | `Backend/.env.example`, commented per variable |

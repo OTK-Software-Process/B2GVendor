@@ -7,6 +7,8 @@ export type ErrorCode =
   | 'ACCOUNT_SUSPENDED'
   | 'ACCOUNT_LOCKED'
   | 'NOT_AUTHENTICATED'
+  | 'INVALID_MFA_CODE'
+  | 'MFA_SETUP_REQUIRED'
   | 'FORBIDDEN'
   | 'CSRF_BLOCKED'
   | 'UNSUPPORTED_MEDIA_TYPE'
@@ -51,16 +53,6 @@ export class AppError extends Error {
     });
   }
 
-  // The public sign-up's answer to a taken email: deliberately says nothing about
-  // WHY (EMAIL_ALREADY_REGISTERED is for signed-in admins, who may know).
-  static registrationFailed(): AppError {
-    return new AppError(
-      409,
-      'REGISTRATION_FAILED',
-      'We could not create your account with these details. Please check them and try again, or sign in if you already have an account.'
-    );
-  }
-
   static invalidCredentials(): AppError {
     return new AppError(401, 'INVALID_CREDENTIALS', 'Email or password is incorrect.');
   }
@@ -84,8 +76,17 @@ export class AppError extends Error {
     );
   }
 
-  static notAuthenticated(): AppError {
-    return new AppError(401, 'NOT_AUTHENTICATED', 'You are not signed in.');
+  static invalidMfaCode(): AppError {
+    return new AppError(401, 'INVALID_MFA_CODE', 'That code is not valid. Check the code in your authenticator app, or use a recovery code.');
+  }
+
+  // A staff account that has not set up its second factor may use nothing but the setup.
+  static mfaSetupRequired(): AppError {
+    return new AppError(403, 'MFA_SETUP_REQUIRED', 'Set up two-step verification before using the admin area.');
+  }
+
+  static notAuthenticated(message = 'You are not signed in.'): AppError {
+    return new AppError(401, 'NOT_AUTHENTICATED', message);
   }
 
   static forbidden(message = 'You do not have permission to do that.'): AppError {

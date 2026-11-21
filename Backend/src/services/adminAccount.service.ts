@@ -5,13 +5,17 @@ import { Follow } from '../models/follow.model';
 import { Notification } from '../models/notification.model';
 import { Session } from '../models/session.model';
 import { Token } from '../models/token.model';
+import { MfaCredential } from '../models/mfaCredential.model';
 import { AppError } from '../utils/AppError';
 import { logger } from '../utils/logger';
+import { maskEmail } from '../utils/privacy';
 import { isEmailConfigured, sendPasswordResetEmail, sendPasswordSetupEmail } from './email.service';
 import { audit } from './audit.service';
 import { revokeAllSessions } from './session.service';
 import { invalidateTokens, issueToken } from './token.service';
 import { CreateVendorInput, UpdateVendorInput } from '../validators/adminAccount.validator';
+import { MfaResetInput } from '../validators/mfa.validator';
+import { resetByAdmin } from './mfa.service';
 
 // Vendor (role "user") account management for admins -- SRS 4.1 FR-1.5.
 // Every function here only ever touches accounts with role "user": an admin or
@@ -30,6 +34,8 @@ export interface VendorView {
   updatedAt: Date;
   followedTagsCount: number;
   lastActiveAt: Date | null;
+  /** Whether the vendor has two-step verification on (never the secret or the codes). */
+  mfaEnabled: boolean;
 }
 
 export interface VendorListFilter {
@@ -59,7 +65,8 @@ function toVendorView(account: IAccount, followedTagsCount: number, lastActiveAt
     createdAt: account.createdAt,
     updatedAt: account.updatedAt,
     followedTagsCount,
-    lastActiveAt
+    lastActiveAt,
+    mfaEnabled: !!account.mfaEnabled
   };
 }
 
@@ -161,7 +168,7 @@ export async function sendPasswordLink(account: IAccount): Promise<SetupEmailRes
     return { sent: true };
   } catch (err) {
     if (tokenIssued) await invalidateTokens(account._id, 'password_reset');
-    logger.warn('admin-accounts', `Failed to send password link to ${account.email}`, err);
+    logger.warn('admin-accounts', `Failed to send password link to ${maskEmail(account.email)}`, err);
     return { sent: false, reason: isEmailConfigured() ? 'send_failed' : 'smtp_not_configured' };
   }
 }
@@ -232,6 +239,17 @@ export async function sendVendorPasswordLink(id: string): Promise<SetupEmailResu
   return result;
 }
 
+// ASVS V7.4.5: any Admin can end every session of a vendor account -- a lost
+// phone, a shared computer, a suspected takeover -- without suspending it.
+export async function signOutVendorEverywhere(id: string): Promise<{ revoked: number }> {
+  const account = await findVendor(id);
+  const revoked = await revokeAllSessions(account._id);
+  logger.security('info', 'auth.session.revoked', { reason: 'admin_sign_out_everywhere', targetAccountId: String(account._id), targetRole: account.role, count: revoked });
+  // Sessions are not an audited model (they churn on every sign-in), so record the action by hand.
+  await audit.log({ action: 'account.sign_out_all', entity: account, metadata: { role: account.role, sessionsRevoked: revoked } });
+  return { revoked };
+}
+
 // Shared by vendor and admin deletion. Dependents go first so a failure
 // part-way leaves a still-deletable account, never orphaned rows pointing at
 // nothing.
@@ -240,7 +258,9 @@ export async function deleteAccountAndData(accountId: Types.ObjectId): Promise<v
     Session.deleteMany({ accountId }),
     Follow.deleteMany({ accountId }),
     Notification.deleteMany({ accountId }),
-    Token.deleteMany({ accountId })
+    Token.deleteMany({ accountId }),
+    // The authenticator secret and recovery codes go with the account.
+    MfaCredential.deleteMany({ accountId })
   ]);
   await Account.deleteOne({ _id: accountId });
 }
@@ -251,4 +271,12 @@ export async function deleteVendor(id: string): Promise<{ id: string; email: str
   const account = await findVendor(id);
   await deleteAccountAndData(account._id);
   return { id: account._id.toString(), email: account.email };
+}
+
+// A vendor lost their authenticator and their recovery codes (ASVS V6.4.4). Any Admin
+// may reset it, after checking who they are talking to; the identity check, the reason
+// and the administrator's own password are all required and recorded (services/mfa.service.ts).
+export async function resetVendorMfa(id: string, actor: IAccount, input: MfaResetInput): Promise<{ sessionsRevoked: number }> {
+  const account = await findVendor(id);
+  return resetByAdmin(account, { actor, actorPassword: input.password, identityCheck: input.identityCheck, reason: input.reason });
 }

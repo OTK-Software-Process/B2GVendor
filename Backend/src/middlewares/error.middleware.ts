@@ -14,6 +14,12 @@ function isDuplicateKeyError(err: unknown): err is DuplicateKeyError {
   return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 11000;
 }
 
+// MongoDB stopped a query at its maxTimeMS (code 50, MaxTimeMSExpired) -- in
+// practice a search that would have run too long (ASVS V15.2.2).
+function isQueryTimeLimitError(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 50;
+}
+
 function mongooseValidationFields(err: mongoose.Error.ValidationError): FieldErrors {
   const fields: FieldErrors = {};
   for (const [path, issue] of Object.entries(err.errors)) {
@@ -36,6 +42,29 @@ function isBodyParserError(err: unknown): err is BodyParserError {
   return typeof type === 'string' && /^(entity\.|encoding\.|charset\.|request\.)/.test(type) && typeof status === 'number' && status >= 400 && status < 500;
 }
 
+// ------------------------------------------------------------ security events
+// Refusals the auth code logs itself with more detail (auth.login.failure,
+// auth.reauth.failure, csrf.blocked) are not logged a second time here.
+const LOGGED_ELSEWHERE = new Set(['INVALID_CREDENTIALS', 'ACCOUNT_LOCKED', 'CSRF_BLOCKED']);
+const SIGN_IN_PATH = '/api/v1/auth/login';
+
+/**
+ * ASVS V16.3.2 / V16.3.3: every refused authorization (401, 403, 423), every
+ * rejected link token, and every request rejected by input validation becomes
+ * a security event. Field NAMES only, never the values that were sent.
+ */
+function logRefusal(req: Request, status: number, code: string, fields?: FieldErrors): void {
+  const path = req.originalUrl.split('?')[0];
+  const base = { status, code, method: req.method, path };
+  if (code === 'TOKEN_INVALID') {
+    logger.security('warn', 'auth.token.invalid', base);
+  } else if ((status === 401 || status === 403 || status === 423) && !LOGGED_ELSEWHERE.has(code) && path !== SIGN_IN_PATH) {
+    logger.security('warn', 'access.denied', base);
+  } else if (status === 400 || status === 413 || status === 415) {
+    logger.security('info', 'input.rejected', { ...base, ...(fields ? { fields: Object.keys(fields).slice(0, 20) } : {}) });
+  }
+}
+
 export function notFoundHandler(_req: Request, _res: Response, next: NextFunction): void {
   next(AppError.notFound());
 }
@@ -47,17 +76,20 @@ export function errorHandler(
   _next: NextFunction
 ): Response {
   if (err instanceof AppError) {
+    logRefusal(req, err.status, err.code, err.fields);
     return fail(res, err.status, err.code, err.message, err.fields, err.details);
   }
 
   if (isBodyParserError(err)) {
     // Never echo the parser's own message: it quotes the offending input.
     const problem = err.type === 'entity.too.large' ? AppError.payloadTooLarge() : AppError.badRequest('The request body is not valid JSON.');
+    logRefusal(req, problem.status, problem.code);
     return fail(res, problem.status, problem.code, problem.message);
   }
 
   if (err instanceof mongoose.Error.ValidationError) {
     const validation = AppError.validation(mongooseValidationFields(err));
+    logRefusal(req, validation.status, validation.code, validation.fields);
     return fail(res, validation.status, validation.code, validation.message, validation.fields);
   }
 
@@ -72,6 +104,12 @@ export function errorHandler(
       return fail(res, conflict.status, conflict.code, conflict.message, conflict.fields);
     }
     return fail(res, 409, 'VALIDATION_ERROR', 'That value is already in use.');
+  }
+
+  if (isQueryTimeLimitError(err)) {
+    logger.warn('error', `${req.method} ${req.originalUrl.split('?')[0]} stopped at its time limit`);
+    const slow = AppError.serviceUnavailable('The search took too long. Please narrow it down and try again.');
+    return fail(res, slow.status, slow.code, slow.message);
   }
 
   logger.error('error', `${req.method} ${req.originalUrl}`, err);

@@ -49,6 +49,11 @@ export interface AccountView {
   status: 'active' | 'suspended';
   role: 'user' | 'admin' | 'superadmin';
   permissions?: string[];
+  // Two-step sign-in: whether it is on, and whether this staff account MUST set it
+  // up before the admin area opens for it (the server enforces it; the admin
+  // layout only sends the person to the setup page).
+  mfaEnabled?: boolean;
+  mfaSetupRequired?: boolean;
 }
 
 interface ApiTag extends Omit<TagItem, 'id' | 'followerCount' | 'worksCount'> {

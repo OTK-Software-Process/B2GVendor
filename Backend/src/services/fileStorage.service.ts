@@ -29,6 +29,16 @@ export class NotPdfError extends Error {
   }
 }
 
+/**
+ * The key a file is stored under: its FULL SHA-256 (64 hex digits) + ".pdf".
+ * The key is both the file's identity and the de-duplication check, so it must
+ * be collision-resistant (ASVS V11.4.3). Files stored before this used the first
+ * 96 bits only (24 hex digits); `npm run backfill:tor-file-keys` renames them.
+ */
+export function torStorageKeyFor(buffer: Buffer): string {
+  return `${crypto.createHash('sha256').update(buffer).digest('hex')}.pdf`;
+}
+
 /** Stores a TOR PDF. Throws NotPdfError for anything that isn't one. */
 export async function saveTorFile(buffer: Buffer, suggestedFilename: string): Promise<SavedFile> {
   const filename = safePdfFilename(suggestedFilename);
@@ -36,8 +46,7 @@ export async function saveTorFile(buffer: Buffer, suggestedFilename: string): Pr
 
   await fs.mkdir(storageDir, { recursive: true });
 
-  const hash = crypto.createHash('sha256').update(buffer).digest('hex').slice(0, 24);
-  const storageKey = `${hash}.pdf`;
+  const storageKey = torStorageKeyFor(buffer);
   const filePath = path.join(storageDir, storageKey);
 
   try {

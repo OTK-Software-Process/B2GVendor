@@ -2,6 +2,7 @@ import { Router } from 'express';
 import * as adminAccountController from '../controllers/adminAccount.controller';
 import { validate } from '../middlewares/validate.middleware';
 import { createVendorSchema, listVendorsQuerySchema, updateVendorSchema } from '../validators/adminAccount.validator';
+import { mfaResetSchema } from '../validators/mfa.validator';
 import { asyncHandler } from '../utils/asyncHandler';
 
 // Mounted under /admin (requireAuth + requireAdmin applied there) -- vendor
@@ -15,4 +16,6 @@ adminAccountRouter.patch('/:id', validate(updateVendorSchema), asyncHandler(admi
 adminAccountRouter.patch('/:id/suspend', asyncHandler(adminAccountController.suspend));
 adminAccountRouter.patch('/:id/reactivate', asyncHandler(adminAccountController.reactivate));
 adminAccountRouter.post('/:id/password-link', asyncHandler(adminAccountController.sendPasswordLink));
+adminAccountRouter.post('/:id/sign-out', asyncHandler(adminAccountController.signOutEverywhere));
+adminAccountRouter.post('/:id/mfa-reset', validate(mfaResetSchema), asyncHandler(adminAccountController.resetMfa));
 adminAccountRouter.delete('/:id', asyncHandler(adminAccountController.remove));

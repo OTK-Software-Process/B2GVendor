@@ -1,0 +1,83 @@
+# The public entry point of a production deployment: Caddy (docker-compose.prod.yml,
+# service "edge"; docs/Deployment.md). It is the only container that publishes a port.
+#
+# What it does, and the ASVS 5.0 requirement each part answers:
+#   * TLS 1.2 and 1.3 only, nothing older                         V12.1.1
+#   * only Mozilla "intermediate" cipher suites (all forward secret) V12.1.2
+#   * HTTPS for the website and the API, with no way back to HTTP  V12.2.1
+#   * publicly trusted certificates: Let's Encrypt, issued and renewed by Caddy itself  V12.2.2
+#   * the website and the API on DIFFERENT host names              V3.5.4
+#   * HTTP -> HTTPS redirect for the website ONLY; the API refuses plain HTTP  V4.1.2
+#
+# Settings (all required, from the root .env; the compose file passes them in):
+#   APP_HOST    the website, e.g. app.example.com
+#   API_HOST    the API,     e.g. api.example.com   (a sibling of APP_HOST: the session
+#               cookie is SameSite=Lax, which needs both on the same registrable domain)
+#   ACME_EMAIL  where Let's Encrypt may write about a certificate that cannot be renewed
+#   TLS_ISSUER  the address ACME_EMAIL -> certificates from Let's Encrypt (production).
+#               "internal" -> Caddy's own throw-away CA: ONLY for docker/verify-deployment.sh,
+#               which tests this very file on a machine that has no public domain.
+
+{
+	email {$ACME_EMAIL}
+
+	# Caddy's management API is not needed and is not left listening.
+	admin off
+
+	servers {
+		# HTTP/1.1 and HTTP/2 over TCP. No HTTP/3 (QUIC): it would need UDP 443 published
+		# too, and gives this site nothing it needs.
+		protocols h1 h2
+
+		timeouts {
+			# A client that has not finished its request headers in 10 s is dropped
+			# (slow-connection attacks), and an idle connection is closed after 2 minutes.
+			read_header 10s
+			idle 2m
+		}
+	}
+}
+
+# One TLS policy for every site below.
+(tls_policy) {
+	tls {$TLS_ISSUER} {
+		protocols tls1.2 tls1.3
+
+		# TLS 1.2: the Mozilla "intermediate" suites that Go's TLS can offer. All six are
+		# ECDHE, so every connection has forward secrecy. (The guideline's DHE suites are
+		# not implemented in Go, and are the weakest entries of that list.)
+		# TLS 1.3 has three suites (AES-128-GCM, AES-256-GCM, ChaCha20-Poly1305), all
+		# strong, and they are not configurable. TLS 1.3 is used whenever the client
+		# supports it.
+		ciphers TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384 TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256 TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+	}
+}
+
+# ------------------------------------------------------------------ the website
+# Caddy redirects plain HTTP on this host to HTTPS by itself (a 308), because it is a
+# user-facing address that a person may type by hand.
+{$APP_HOST} {
+	import tls_policy
+	header -Server
+	encode zstd gzip
+	# Caddy does not buffer responses, so Next.js can stream them.
+	reverse_proxy frontend:3000
+}
+
+# ------------------------------------------------------------------ the API
+{$API_HOST} {
+	import tls_policy
+	header -Server
+	reverse_proxy backend:4000
+}
+
+# Plain HTTP to the API is REFUSED, not redirected (ASVS V4.1.2). A client that
+# wrongly calls http:// would otherwise be quietly sent on to https://, and the first
+# request (a session cookie, a password) has already crossed the network in the clear
+# without anyone noticing. With an error the mistake shows up the first time. Having this
+# explicit HTTP block is also what stops Caddy adding its automatic redirect for this host.
+http://{$API_HOST} {
+	header -Server
+	header Cache-Control "no-store"
+	respond "This API is only available over HTTPS." 403
+}

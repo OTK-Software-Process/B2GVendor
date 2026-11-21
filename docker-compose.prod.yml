@@ -1,0 +1,217 @@
+# Production overlay. Use it together with the base file:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# The base file is the LOCAL stack: plain HTTP, MongoDB with no login on a published
+# port, secrets in .env files. This file turns it into a deployment (docs/Deployment.md
+# explains each step; docs/Security.md section 1 lists the resulting connections).
+# What it adds, by ASVS 5.0 requirement:
+#
+#   edge      Caddy, the ONLY container that publishes a port (80 and 443): TLS 1.2/1.3
+#             with Mozilla "intermediate" ciphers, Let's Encrypt certificates, the website
+#             and the API on separate host names, HTTP -> HTTPS for the website only
+#             (docker/edge/Caddyfile)                      V3.5.4 V4.1.2 V12.1.1 V12.1.2 V12.2.1 V12.2.2
+#   mongo     a login is required, TLS is required, one least-privilege user per service,
+#             no published port                                    V12.3.1 V13.2.1 V13.2.2 V13.2.3
+#   secrets   every secret is a file from a secret store (Docker secrets), and each service
+#             is given only the files it needs                              V13.3.1 V13.3.2
+#   hardening the application containers run as an unprivileged user (see the Dockerfiles),
+#             with every capability dropped, no privilege escalation, and a read-only
+#             file system                                                          V13.2.2
+#
+# Variables (root .env; see .env.example): APP_HOST, API_HOST, ACME_EMAIL, SECRETS_DIR.
+
+x-hardened: &hardened
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  read_only: true
+  tmpfs: ["/tmp"]
+
+# The secret files. `docker/secrets/generate.sh` creates the MongoDB ones and the
+# two-step sign-in key; the four provider secrets are stored with `docker/secrets/generate.sh set NAME`. On Docker Swarm,
+# Kubernetes or a cloud secret manager, replace `file:` with that platform's secret: the
+# services read /run/secrets/<name> either way.
+secrets:
+  mongo_root_password:
+    file: ${SECRETS_DIR:-./secrets}/mongo_root_password
+  mongo_api_password:
+    file: ${SECRETS_DIR:-./secrets}/mongo_api_password
+  mongo_worker_password:
+    file: ${SECRETS_DIR:-./secrets}/mongo_worker_password
+  mongo_api_uri:
+    file: ${SECRETS_DIR:-./secrets}/mongo_api_uri
+  mongo_worker_uri:
+    file: ${SECRETS_DIR:-./secrets}/mongo_worker_uri
+  mongo_ca_pem:
+    file: ${SECRETS_DIR:-./secrets}/mongo_ca_pem
+  mongo_server_pem:
+    file: ${SECRETS_DIR:-./secrets}/mongo_server_pem
+  # Encrypts the authenticator seeds of two-step sign-in (AES-256-GCM). Only the API gets it.
+  mfa_encryption_key:
+    file: ${SECRETS_DIR:-./secrets}/mfa_encryption_key
+  smtp_pass:
+    file: ${SECRETS_DIR:-./secrets}/smtp_pass
+  openrouter_api_key:
+    file: ${SECRETS_DIR:-./secrets}/openrouter_api_key
+  data_go_th_api_key:
+    file: ${SECRETS_DIR:-./secrets}/data_go_th_api_key
+  google_credentials:
+    file: ${SECRETS_DIR:-./secrets}/google_credentials
+
+services:
+  # ------------------------------------------------------------------ the public entry
+  edge:
+    build:
+      context: ./docker/edge
+    restart: unless-stopped
+    ports:
+      - "${EDGE_HTTP_PORT:-80}:80"
+      - "${EDGE_HTTPS_PORT:-443}:443"
+    environment:
+      APP_HOST: ${APP_HOST:?set APP_HOST in .env, for example app.example.com}
+      API_HOST: ${API_HOST:?set API_HOST in .env, for example api.example.com}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+      # Public certificates from Let's Encrypt. Only docker/verify-deployment.sh sets this
+      # to "internal", to test this same file on a machine that has no public domain.
+      TLS_ISSUER: ${TLS_ISSUER:-${ACME_EMAIL}}
+    volumes:
+      - ./docker/edge/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates and the ACME account: keep them, Let's Encrypt limits how often
+      # certificates may be issued.
+      - edge-data:/data
+      - edge-config:/config
+    depends_on:
+      - frontend
+      - backend
+    # Non-root, yet able to open 80 and 443: the container's own port range starts at 0.
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: "0"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: ["/tmp"]
+    networks: [internal, default]
+
+  # ------------------------------------------------------------------ MongoDB
+  mongo:
+    # No published port, and no route out: only the API and the worker can reach it.
+    ports: !reset []
+    networks: !override [internal]
+    # The wrapper prepares private copies of the secrets, then runs the image's own
+    # entrypoint (docker/mongo/entrypoint.sh).
+    entrypoint: ["bash", "/usr/local/bin/b2g-mongo-entrypoint.sh"]
+    command:
+      - mongod
+      - --auth
+      - --tlsMode=requireTLS
+      - --tlsCertificateKeyFile=/etc/mongo-tls/server.pem
+      - --tlsCAFile=/etc/mongo-tls/ca.pem
+      # Clients prove themselves with their password; they need no certificate of their own.
+      - --tlsAllowConnectionsWithoutCertificates
+      - --tlsDisabledProtocols=TLS1_0,TLS1_1
+    environment:
+      # The root user exists for operators only; no application is given its password.
+      # The per-service users are created from docker/mongo/init-users.sh on the first start.
+      MONGO_INITDB_ROOT_USERNAME: b2g_root
+      MONGO_INITDB_ROOT_PASSWORD_FILE: /run/secrets/mongo_root_password
+      MONGO_INITDB_DATABASE: b2gvendor
+    secrets:
+      - mongo_root_password
+      - mongo_api_password
+      - mongo_worker_password
+      - mongo_server_pem
+      - mongo_ca_pem
+    volumes:
+      - ./docker/mongo/entrypoint.sh:/usr/local/bin/b2g-mongo-entrypoint.sh:ro
+      - ./docker/mongo/init-users.sh:/docker-entrypoint-initdb.d/10-app-users.sh:ro
+    # Private copies of the secrets live in memory only.
+    tmpfs:
+      - /etc/mongo-tls
+      - /etc/mongo-init
+    # What the entrypoint needs to hand the data directory and the secrets to the
+    # "mongodb" user and drop to it; nothing else.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--tls", "--tlsCAFile", "/etc/mongo-tls/ca.pem", "--host", "localhost", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  # ------------------------------------------------------------------ the API
+  backend:
+    <<: *hardened
+    environment:
+      NODE_ENV: production
+      # The process refuses to start with a MongoDB address that has no login or no TLS,
+      # and never sends mail without TLS (Backend/src/config/transportSecurity.ts).
+      REQUIRE_SECURE_BACKENDS: "true"
+      # The website and the API are on different host names (sibling subdomains, so the
+      # session cookie, SameSite=Lax, still reaches the API).
+      APP_URL: https://${APP_HOST:?set APP_HOST}
+      CORS_ORIGIN: https://${APP_HOST:?set APP_HOST}
+      COOKIE_SAMESITE: lax
+      # The secrets this service needs, as files. They are NOT in Backend/.env: the
+      # process refuses to start when one is given both ways.
+      MONGODB_URI_FILE: /run/secrets/mongo_api_uri
+      SMTP_PASS_FILE: /run/secrets/smtp_pass
+      DATA_GO_TH_API_KEY_FILE: /run/secrets/data_go_th_api_key
+      # Two-step sign-in: staff must enrol, whatever Backend/.env says, and the API
+      # refuses to start without the key that protects the authenticator seeds
+      # (docs/Security.md section 15).
+      MFA_ENCRYPTION_KEY_FILE: /run/secrets/mfa_encryption_key
+      MFA_REQUIRED_FOR_STAFF: "true"
+    secrets:
+      - mongo_api_uri
+      - mongo_ca_pem
+      - mfa_encryption_key
+      - smtp_pass
+      - data_go_th_api_key
+
+  # ------------------------------------------------------------------ the worker
+  ingestion-worker:
+    <<: *hardened
+    environment:
+      NODE_ENV: production
+      REQUIRE_SECURE_BACKENDS: "true"
+      APP_URL: https://${APP_HOST:?set APP_HOST}
+      MONGODB_URI_FILE: /run/secrets/mongo_worker_uri
+      SMTP_PASS_FILE: /run/secrets/smtp_pass
+      DATA_GO_TH_API_KEY_FILE: /run/secrets/data_go_th_api_key
+      OPENROUTER_API_KEY_FILE: /run/secrets/openrouter_api_key
+      # Only read when AI_PROVIDER=vertexai.
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/google_credentials
+    secrets:
+      - mongo_worker_uri
+      - mongo_ca_pem
+      - smtp_pass
+      - data_go_th_api_key
+      - openrouter_api_key
+      - google_credentials
+
+  # ------------------------------------------------------------------ the website
+  frontend:
+    build:
+      args:
+        # Fixed when the image is built: the address the BROWSER calls.
+        NEXT_PUBLIC_API_URL: https://${API_HOST:?set API_HOST}/api/v1
+    # Reached only through the edge. It holds no secret, and needs no way out.
+    ports: !reset []
+    networks: !override [internal]
+    <<: *hardened
+    # Next.js keeps its server cache on disk (.next/cache); that one folder stays writable.
+    tmpfs:
+      - /tmp
+      - /app/.next/cache:uid=1000,gid=1000
+
+  # ------------------------------------------------------------------ egress filter
+  proxy:
+    # The API is reached through the edge now. The egress filter (port 3128, internal)
+    # stays; the old localhost:4000 gateway is not published.
+    ports: !reset []
+
+volumes:
+  edge-data:
+  edge-config:

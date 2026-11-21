@@ -166,7 +166,7 @@ export default function RegisterPage() {
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
-                  {fieldErrors.password && <p className="mt-1 text-xs text-rose-600">{fieldErrors.password}</p>}
+                  {fieldErrors.password && <p className="mt-1 text-xs text-rose-600">{localizeAuthError(fieldErrors.password, lang)}</p>}
                 </div>
 
                 <div>

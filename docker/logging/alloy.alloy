@@ -1,0 +1,52 @@
+// Grafana Alloy: ships every compose container's stdout/stderr to Loki
+// (ASVS V16.4.3; docs/Security.md section 13). It reads the Docker log stream
+// through the Docker socket (read-only); the application containers never talk
+// to Loki themselves.
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "compose" {
+  targets = discovery.docker.containers.targets
+
+  // Only containers started by docker compose; the compose service name
+  // ("backend", "ingestion-worker", "proxy", ...) becomes the `service` label.
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    regex         = ".+"
+    action        = "keep"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label  = "project"
+  }
+}
+
+loki.source.docker "containers" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.compose.output
+  forward_to = [loki.process.levels.receiver]
+}
+
+// The backend's lines are JSON: keep their level as a label (few values), so
+// "all warnings of the API" is a cheap query. Other services pass unchanged.
+loki.process "levels" {
+  stage.json {
+    expressions = { level = "level" }
+  }
+  stage.labels {
+    values = { level = "" }
+  }
+  forward_to = [loki.write.store.receiver]
+}
+
+loki.write "store" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
