@@ -223,6 +223,21 @@ This starts the app (`mongo`, `backend`, `ingestion-worker`, `frontend`) and its
 
 Stop everything with `docker compose down` (add `-v` to also drop the Mongo volume). Ports are configurable via the root `.env` (`FRONTEND_PORT`, `BACKEND_PORT`, `MONGO_PORT`) if any of the defaults are already taken on your machine.
 
+> [!NOTE]
+> The backend, worker and frontend images run as an unprivileged user (`node`), not as root. A **new** `tor-storage` volume is set up correctly. If you already have one from an earlier version of these images, hand it over once or the worker cannot save TOR files: `docker compose stop ingestion-worker backend`, then `docker run --rm -v b2gvendor_tor-storage:/data alpine chown -R 1000:1000 /data`, then `docker compose up -d` (the volume is named `<project>_tor-storage`; see `docker volume ls`). Without Docker (`npm run dev`) nothing changes.
+
+## Production deployment
+
+The stack above is for local use: plain HTTP, MongoDB with no login on a published port, secrets in `.env` files. **For a server, add `docker-compose.prod.yml`**, which puts a TLS proxy in front (Let's Encrypt, TLS 1.2/1.3, the website and the API on separate host names, HTTP redirected for the website only), makes MongoDB require a login and TLS with one least-privilege user per service, moves every secret out of `.env` into files from a secret store, and runs the containers without privileges:
+
+```bash
+docker/secrets/generate.sh                  # random passwords, MongoDB certificates
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+docker/verify-deployment.sh probe --app app.example.com --api api.example.com
+```
+
+Step by step, rotation, backups and what was and was not proven: [docs/Deployment.md](docs/Deployment.md). `docker/verify-deployment.sh local` rehearses the whole deployment on one machine, with no public domain.
+
 ## Other useful commands
 
 ```bash
@@ -272,8 +287,9 @@ Every service has a `.env.example` — copy each to `.env` before running (the r
 
 | File | Used by |
 |---|---|
-| `.env.example` (root) | `docker-compose.yml` — host ports, frontend build arg |
+| `.env.example` (root) | `docker-compose.yml` — host ports, frontend build arg; and, commented, the production settings of `docker-compose.prod.yml` (`APP_HOST`, `API_HOST`, `ACME_EMAIL`) |
 | `Backend/.env.example` | The Express API + worker — Mongo URI, CORS origin, ingestion source URLs, AI provider config, SMTP |
+| `Backend/.env.production.example` | The API + worker in production — the same settings with **no secret** in it (secrets are files, see docs/Deployment.md) |
 | `B2GVendor/.env.example` | The Next.js frontend — backend API URL |
 | `testAPI/.env.example` | The exploration scripts — optional data.go.th API key |
 

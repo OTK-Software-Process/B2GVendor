@@ -26,5 +26,12 @@ COPY --from=build /app/public ./public
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
 
+# Run as the unprivileged "node" user the base image provides, never as root (ASVS
+# V13.2.2). The code stays owned by root: the process can read it, not change it.
+# Next.js keeps its server cache on local disk (.next/cache, see the self-hosting
+# guide, "Caching and ISR"), so that one folder belongs to "node".
+RUN mkdir -p .next/cache && chown node:node .next/cache
+USER node
+
 EXPOSE 3000
 CMD ["node", "server.js"]

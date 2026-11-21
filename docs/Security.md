@@ -5,7 +5,9 @@ read or change which field, how each class of data is protected and how long it 
 parts of the system are costly or dangerous. Each section names the OWASP ASVS 5.0 requirement it
 answers. The plan and its status live in `OWASP_ASVS_5.0_B2GVendor_Plan.xlsx` at the repository root.
 
-✅ means in place in the code on `main`; ⬜ means planned and not built yet.
+✅ means in place in the code; ⬜ means planned and not built yet. The deployment controls (TLS, the MongoDB login,
+the secret store, non-root containers) are in place as configuration, in `docker-compose.prod.yml`: how to
+use it is [Deployment.md](Deployment.md), and `docker/verify-deployment.sh` proves it on a running stack.
 
 ## Contents
 
@@ -22,6 +24,7 @@ answers. The plan and its status live in `OWASP_ASVS_5.0_B2GVendor_Plan.xlsx` at
 11. [Dependencies](#11-dependencies) — V15.1.1, V15.1.2, V15.1.4, V15.2.1
 12. [Password policy](#12-password-policy) — V6.1.2, V6.2.5, V6.2.9, V6.2.11, V6.3.7
 13. [Logging](#13-logging) — V16.1.1, V16.2.3–V16.2.5, V16.3.1–V16.3.3, V16.4.1–V16.4.3
+14. [Deployment](#14-deployment) — V3.5.4, V4.1.2, V12.1.1, V12.1.2, V12.2.1, V12.2.2, V12.3.1, V13.2.1–V13.2.3, V13.3.1, V13.3.2, V14.2.4
 
 ---
 
@@ -50,14 +53,17 @@ a network with **no route to the internet**: their only way out is the egress pr
 | Worker / API → data.go.th | `data.go.th` (`DATA_GO_TH_BASE_URL`) | HTTPS | Contract datasets, the department directory | CKAN queries | Optional `DATA_GO_TH_API_KEY` | 30 s per request |
 | API → Have I Been Pwned | `api.pwnedpasswords.com` | HTTPS | Breached-password check at sign-up, change and reset | The first 5 hex characters of the password's SHA-1, nothing else | — | Refuses the password change if unreachable |
 | Worker → AI provider | `openrouter.ai` or Google Vertex AI (`asia-southeast1`) | HTTPS | Tags, summary and price of a TOR document | The title, at most 8,000 characters of TOR text, the tag list | `OPENROUTER_API_KEY` or a Google service account | Off unless `AI_TAGGING_ENABLED=true` |
-| API / worker → SMTP | `SMTP_HOST:SMTP_PORT` (in Docker through the egress proxy as a CONNECT tunnel) | SMTP with STARTTLS (587) or TLS (465) ⬜ TLS required (V12.3.1) | Verification, reset, notification emails | Recipient, the email | `SMTP_USER` / `SMTP_PASS` | `EMAIL_SEND_CONCURRENCY` (5) |
+| API / worker → SMTP | `SMTP_HOST:SMTP_PORT` (in Docker through the egress proxy as a CONNECT tunnel) | TLS ✅ (V12.3.1): port 465 from the first byte, or STARTTLS on 587 that is **required** (never plain text), TLS 1.2 or newer, certificate and host name checked. Enforced when `REQUIRE_SECURE_BACKENDS` is on (production); a local mail catcher still works without it | Verification, reset, notification emails | Recipient, the email | `SMTP_USER` / `SMTP_PASS` (the secret file `smtp_pass`) | `EMAIL_SEND_CONCURRENCY` (5) |
 | API / worker → egress proxy | `proxy:3128` (internal network) | HTTP CONNECT | The only way out of the internal network | The calls above | — | Hosts in `docker/proxy/allowed-domains.txt` |
-| Browser → API gateway | `localhost:4000` → `backend:4000` (Squid in front of the API) | HTTP (HTTPS behind the production proxy ⬜ V12) | The API has no published port of its own | The API traffic; the caller's address appended to `X-Forwarded-For` | — | — |
+| Browser → API gateway | `localhost:4000` → `backend:4000` (Squid in front of the API) | HTTP: the **local stack only**; in production the edge below replaces it and this port is not published | The API has no published port of its own | The API traffic; the caller's address appended to `X-Forwarded-For` | — | — |
+| Browser → edge (website) | `https://APP_HOST` (443); port 80 redirects to it | HTTPS only ✅: TLS 1.2 and 1.3, Mozilla "intermediate" cipher suites, Let's Encrypt certificate (V12.1.1, V12.1.2, V12.2.1, V12.2.2) | Pages | Requests; the visitor's address goes on in `X-Forwarded-For` | — | Slow-header timeout 10 s |
+| Browser → edge (API) | `https://API_HOST` (443); plain HTTP on port 80 is **refused** (`403`), never redirected | HTTPS only ✅ (V4.1.2, V3.5.4: a different host name from the website) | JSON API, TOR downloads | Session cookie, JSON bodies | Session cookie | Rate limits (API.md §2) |
+| Edge → website, edge → API | `frontend:3000`, `backend:4000` | HTTP inside the internal Docker network | The only way in from outside | The requests above | — | — |
 | Worker → ClamAV | `clamav:3310` (internal network) | clamd INSTREAM over TCP | Scan every downloaded TOR file before it is unpacked or stored | The file | — | 110 MB per stream, 120 s |
 | ClamAV → signature mirror | `database.clamav.net` | HTTPS | Virus-signature updates (freshclam) | — | — | — |
 | Docker → Alloy → Loki | Docker socket (read-only) → `loki:3100` (logging network) | HTTP | Every container's log lines into the log store (§13) | Log lines | — | — |
 | Loki → Alertmanager | `alertmanager:9093` (logging network) | HTTP | Security alerts (§13) | Alert name, labels | — | — |
-| API / worker → MongoDB | `MONGODB_URI` | MongoDB wire protocol on the internal network ⬜ authentication and TLS (V13.2.1, V12.3.1) | All application data | Everything | ⬜ none yet | — |
+| API / worker → MongoDB | `MONGODB_URI` (a secret file) | MongoDB wire protocol on the internal network, **TLS 1.2 or newer required, login required** ✅ (V12.3.1, V13.2.1); no published port in production | All application data | Everything | One user per service, `b2g_api` and `b2g_worker`, each `readWrite` on the application database only ✅ (V13.2.2) | — |
 
 Nothing else is called. The application loads no third-party scripts, fonts or trackers in the browser
 (fonts are self-hosted at build time; the CSP allows `'self'` and the API origin only).
@@ -78,7 +84,10 @@ Every cryptographic algorithm in use (ASVS V11.1.2). All of it comes from Node's
 | Failed sign-ins for unknown emails | SHA-256 of the lower-cased address | `models/loginFailure.model.ts` | The address itself is never stored |
 | Breached-password lookup | SHA-1 | `integrations/haveIBeenPwned.client.ts` | Required by the service's k-anonymity range API; only a 5-character prefix leaves the server. Not used for any protection |
 | CSP nonces | `crypto.randomUUID()` per page request | `B2GVendor/src/proxy.ts` | 122 random bits |
-| Transport | TLS 1.2 / 1.3 ⬜ (V12.1.1) | Reverse proxy in production | Outbound calls to e-GP, data.go.th, HIBP and the AI provider already use HTTPS |
+| Transport (browser) | TLS 1.2 / 1.3 ✅ (V12.1.1, V12.1.2); TLS 1.2 limited to six ECDHE suites with AES-GCM or ChaCha20-Poly1305 (Mozilla "intermediate", minus the DHE suites Go does not implement); TLS 1.3's three suites | The edge (Caddy), `docker/edge/Caddyfile` | Certificates from Let's Encrypt (ECDSA P-256 by default), renewed automatically. HTTP/3 is switched off |
+| Transport (MongoDB) | TLS 1.2 / 1.3 (`--tlsDisabledProtocols=TLS1_0,TLS1_1`), certificate checked against a private authority | `mongod`; the API and the worker (`tlsCAFile` in their connection address) | RSA 4096 authority (5 years) and RSA 2048 server certificate (365 days, for the host name `mongo`), made by `docker/secrets/generate.sh` |
+| Transport (mail) | TLS 1.2 or newer, certificate and host name checked | `config/transportSecurity.ts` | Port 465, or STARTTLS made mandatory by `REQUIRE_SECURE_BACKENDS` |
+| Transport (outbound calls) | HTTPS | e-GP, data.go.th, HIBP and the AI provider | |
 
 Not used: encryption at rest inside the application (the MongoDB volume relies on the host's disk
 encryption), JWTs or any signed token, custom random number generation (`Math.random` is never used
@@ -90,12 +99,13 @@ Every secret the system holds, where it lives, who can reach it and how it is re
 
 | Secret | Used by | Stored in | Rotation |
 | :--- | :--- | :--- | :--- |
-| `SMTP_PASS` | API, worker | `Backend/.env` on the host ⬜ secret store (V13.3.1) | Yearly, when a person with access leaves, or at once if leaked |
-| `OPENROUTER_API_KEY` | Worker | `Backend/.env` | Same; revoke the old key in the provider's console after the switch |
-| Google service-account key (`GOOGLE_APPLICATION_CREDENTIALS`) | Worker | A JSON file on the host, outside the repository | Same; delete the old key in Google Cloud IAM |
-| `DATA_GO_TH_API_KEY` | Worker, API | `Backend/.env` | Same |
-| MongoDB credentials ⬜ (V13.2.1) | API, worker | `MONGODB_URI` in `Backend/.env` | Same, once authentication is turned on |
-| TLS private key and certificate ⬜ (V12.2.2) | Reverse proxy | The proxy host | Let's Encrypt renews every 90 days automatically |
+| `SMTP_PASS` | API, worker | A Docker secret, the file `smtp_pass`, read through `SMTP_PASS_FILE` ✅ (V13.3.1) | Yearly, when a person with access leaves, or at once if leaked |
+| `OPENROUTER_API_KEY` | Worker | The secret `openrouter_api_key` (the worker only) | Same; revoke the old key in the provider's console after the switch |
+| Google service-account key (`GOOGLE_APPLICATION_CREDENTIALS`) | Worker | The secret `google_credentials`, a JSON file (the worker only) | Same; delete the old key in Google Cloud IAM |
+| `DATA_GO_TH_API_KEY` | Worker, API | The secret `data_go_th_api_key` (both) | Same |
+| MongoDB credentials ✅ (V13.2.1) | The API (`mongo_api_uri`), the worker (`mongo_worker_uri`): each only its own. MongoDB itself: the three passwords. Operators: the root password | Docker secrets; random 40-character passwords from `docker/secrets/generate.sh`. The root password is given to MongoDB only | At once if leaked, or yearly: change it in MongoDB first, then the files ([Deployment.md](Deployment.md#5-day-to-day)) |
+| TLS private key and certificate ✅ (V12.2.2) | The edge | Caddy's `edge-data` volume (certificates and the ACME account) | Let's Encrypt certificates last 90 days and Caddy renews them by itself |
+| MongoDB certificate authority and server certificate ✅ | MongoDB (server file), the API and the worker (the authority's certificate only) | Secrets `mongo_server_pem` and `mongo_ca_pem`; the authority's private key stays on the host in `secrets/ca/`, never mounted | Server certificate: yearly, `docker/secrets/generate.sh renew-mongo-cert`. Authority: every 5 years |
 | First Super Admin's password | `npm run seed:superadmin` | Given once to the seeding command (argument or `SEED_SUPERADMIN_PASSWORD`); stored only as its bcrypt hash | The Super Admin should change it after the first sign-in |
 
 Rules:
@@ -103,6 +113,12 @@ Rules:
 - `.env` files are never committed (`.gitignore` keeps everything but `.env.example`), never baked into
   an image (`env_file:` in `docker-compose.yml` passes them at run time) and never logged. The
   website receives no backend secret at all.
+- **In production no secret is in a `.env` file.** Each is a file from the secret store (V13.3.1), read
+  through `NAME_FILE` (`config/secretFiles.ts`), so it is not in the container's environment either. Each
+  service is given only the files it needs (V13.3.2): the website none, the API and the worker each
+  their own MongoDB address, the root password only MongoDB. A secret given both as a value and as a
+  file stops the process at start-up. No password is a default (V13.2.3): the generator makes them
+  random and different, and `docker/secrets/generate.sh check` rejects a short, repeated or default one.
 - A secret is replaced by putting the new value in the environment and restarting the container;
   nothing is cached elsewhere. After a suspected leak, rotate first, then look for misuse.
 - Session and link tokens are not keys: they are random, stored only as hashes, and ended by
@@ -196,8 +212,8 @@ The rules for each level (ASVS V14.1.2), and whether the code meets them (ASVS V
 
 | Requirement | Secret | Confidential (personal) | Internal | Public |
 | :--- | :--- | :--- | :--- | :--- |
-| **Stored as** | Hash only (bcrypt or SHA-256) ✅; keys only in the environment ✅ (⬜ secret store) | Plain, in MongoDB ✅ | Plain ✅ | Plain ✅ |
-| **In transit** | TLS ⬜ (production proxy, V12) | TLS ⬜ (V12) | TLS ⬜ (V12) | TLS ⬜ (V12) |
+| **Stored as** | Hash only (bcrypt or SHA-256) ✅; keys only in secret files from the secret store ✅ (production) | Plain, in MongoDB ✅ | Plain ✅ | Plain ✅ |
+| **In transit** | TLS ✅ (production: the edge, MongoDB and mail) | TLS ✅ | TLS ✅ | TLS ✅ |
 | **In URLs** | Never: tokens go in the `#` fragment or a body ✅ (V14.2.1) | Never ✅ | — | Allowed |
 | **In logs** | Never ✅ | Only masked: emails as `s***@example.com` ✅; phone numbers redacted in the audit log ✅ | Allowed | Allowed |
 | **Returned by the API** | Never ✅ | To the owner and Admins only ✅ (§5) | To the owner and the roles in §5 ✅ | To everyone ✅ |
@@ -205,8 +221,9 @@ The rules for each level (ASVS V14.1.2), and whether the code meets them (ASVS V
 | **Integrity** | — | Strict schemas on every write ✅ | Every admin change audited ✅ | Status only from e-GP; files identified by full SHA-256 ✅ |
 | **Retention** | Expires (§8) ✅ | Until the account is deleted; unverified accounts removed after 7 days ✅ | §8 ✅ | Kept |
 
-Still open for V14.2.4: TLS for every connection and MongoDB authentication (the deployment items,
-V12 and V13.2). Everything the application itself can enforce is in place.
+V14.2.4 is met in a deployment (§14): TLS on every connection, a MongoDB login, and secrets in the secret
+store. What cannot be shown without a public server is Let's Encrypt issuing a real certificate;
+`docker/verify-deployment.sh probe` shows it once DNS points at the server.
 
 ## 8. Retention schedule
 
@@ -402,3 +419,28 @@ CR, LF and every control character, so text from a request cannot forge a log li
 - **Reading the logs:** from a container on the logging network, e.g.
   `docker compose exec alertmanager wget -qO- 'http://loki:3100/loki/api/v1/query_range?query={service="backend"}|json|event="auth.login.failure"'`,
   or attach Grafana to the logging network with Loki as its data source.
+
+## 14. Deployment
+
+How the production overlay (`docker-compose.prod.yml`, [Deployment.md](Deployment.md)) answers each ASVS 5.0
+requirement, and how each was shown. "Rehearsal" is `docker/verify-deployment.sh local`, a full stack on one
+machine; "config check" is `npm run check:deployment-config`, which reads the files and needs no server.
+
+| ASVS | Requirement | In place | Shown by |
+| :--- | :--- | :--- | :--- |
+| V3.5.4 | The website and the API on different host names | Caddy serves `APP_HOST` and `API_HOST` as separate sites ✅ | Rehearsal: a real sign-in across the two names; the cookie is `__Host-`, Secure, HttpOnly, SameSite=Lax |
+| V4.1.2 | Only user-facing endpoints redirect HTTP to HTTPS | The website redirects (Caddy's automatic `308`); the API answers plain HTTP with `403`, no redirect ✅ | Rehearsal; config check |
+| V12.1.1 | Only TLS 1.2 and 1.3, 1.3 preferred | `protocols tls1.2 tls1.3` ✅ | Rehearsal: 1.3 negotiated by default, 1.1 and 1.0 refused |
+| V12.1.2 | Only recommended cipher suites | Six ECDHE suites with AES-GCM or ChaCha20-Poly1305 ✅ | Rehearsal: every TLS 1.2 suite the client knows was tried, and only recommended ones were accepted |
+| V12.2.1 | TLS for all client connections to external-facing services | Only the edge publishes a port; nothing answers plain HTTP with content ✅ | Rehearsal; config check |
+| V12.2.2 | Publicly trusted certificates | Let's Encrypt, issued and renewed by Caddy ✅ | ⬜ Needs a public domain: `probe` against the real server |
+| V12.3.1 | TLS for every inbound and outbound connection, no fallback | MongoDB `requireTLS`; mail TLS mandatory; both enforced at start-up by `REQUIRE_SECURE_BACKENDS` ✅ | Rehearsal (MongoDB without TLS is refused); `check:transport-security` (mail, against real servers: no plain-text fallback, a wrong host name or untrusted certificate is refused) |
+| V13.2.1 | Authenticated connections between components, individual accounts | MongoDB `--auth`; `b2g_api` and `b2g_worker` ✅ | Rehearsal: no login is refused; each service connects as its own user |
+| V13.2.2 | Least privilege, non-root | `readWrite` on the application database only; application containers non-root with all capabilities dropped and a read-only file system ✅ | Rehearsal: each user sees only its own database and cannot create users; every container's user and capabilities |
+| V13.2.3 | No default credentials | Random, distinct, 40-character passwords; the root user is not named `root` or `admin` ✅ | Config check; `generate.sh check` rejects defaults |
+| V13.3.1 | A secret store, no secrets in source or build artifacts | Docker secrets, read through `NAME_FILE`; no secret in `.env` or an image ✅ | `check:secret-files`; rehearsal: no secret in any environment |
+| V13.3.2 | Least privilege on secrets | Each service lists only its own secrets ✅ | Rehearsal: what each container sees under `/run/secrets`; config check |
+
+The non-root exceptions are third-party images, which keep their own default users (Squid, ClamAV, Loki,
+Alloy, Alertmanager); Alloy needs the Docker socket, read-only, to read logs. MongoDB's entrypoint starts as
+root only to give its data directory and its secrets to the `mongodb` user, and `mongod` runs as that user.

@@ -460,9 +460,8 @@ Every requirement carries its implementation status as of 04/11/2026 (see Sectio
 - **Functional Requirements:**
   - **FR-5.1** *(Implemented)*: The system shall provide a detail page showing title, agency, method, budget, dates, current status, and linked TOR/attachments, all sourced from ingested data.
     - *Current:* The page also shows the fiscal year (marked when estimated), the submission deadline with days remaining, whether a price is a reference price or a winning bid, and a link that opens the e-GP announcement search for the work's project number. A malformed work id is refused with `400`; an id that is unknown, or belongs to a work hidden from the public site, answers `404` "This work is no longer available."
-  - **FR-5.2** *(Partial)*: The system shall provide working, HTTPS download links to every ingested TOR file and attachment.
-    - *Current:* Every stored TOR file downloads as a PDF attachment from the API; HTTPS depends on the production deployment (the local stack runs over plain HTTP).
-    - *Next:* Serve the production deployment over HTTPS only (see Section 5.3).
+  - **FR-5.2** *(Implemented)*: The system shall provide working, HTTPS download links to every ingested TOR file and attachment.
+    - *Current:* Every stored TOR file downloads as a PDF attachment from the API, over HTTPS in the production deployment (Section 5.3; the local stack runs over plain HTTP).
   - **FR-5.3** *(Implemented)*: The system shall deduplicate downloaded files by hash so an unchanged document is not re-downloaded on every poll.
   - **FR-5.4** *(Implemented)*: The system shall display a chronological status-change history on the detail page, matching the same status source of truth used in search.
     - *Current:* The history lists every announcement oldest first, and its last entry is always the work's current status.
@@ -518,9 +517,9 @@ This section outlines safeguards to prevent data loss or system failure scenario
 
 This section defines the measures required to protect user data, identity, and system integrity.
 
-- **Data Encryption in Transit** *(Partial)*: All data transmitted between client and server shall be encrypted using HTTPS (TLS 1.2 or higher).
-  - *Current:* In production mode the API sends `Strict-Transport-Security` and session cookies are marked `Secure`; the local development stack runs over plain HTTP.
-  - *Next:* Terminate TLS in the production deployment and redirect all HTTP traffic to HTTPS.
+- **Data Encryption in Transit** *(Implemented)*: All data transmitted between client and server shall be encrypted using HTTPS (TLS 1.2 or higher).
+  - *Current:* The production deployment (`docker-compose.prod.yml`, `docs/Deployment.md`) serves the website and the API only over HTTPS, on separate host names, through one proxy that accepts TLS 1.2 and 1.3 only, offers only forward-secret cipher suites and uses Let's Encrypt certificates. The website redirects plain HTTP to HTTPS; the API refuses it (`403`) instead of redirecting, so a client that wrongly calls `http://` notices at once. The connections to MongoDB and to the mail server also require TLS: with `REQUIRE_SECURE_BACKENDS` on, the API and the worker refuse to start with a MongoDB address that has no login or no TLS, and never send mail without TLS. The API sends `Strict-Transport-Security` and marks session cookies `Secure` in production. The local development stack runs over plain HTTP.
+  - *Current:* The settings are checked without a server (`check:deployment-config`, `check:transport-security`) and on a running stack (`docker/verify-deployment.sh`). That Let's Encrypt issues the certificates can only be shown on a public server, with `docker/verify-deployment.sh probe`.
 
 - **Password Storage** *(Implemented)*: For local accounts, the system shall never store passwords in plain text; all passwords must be hashed using Argon2 or bcrypt before storage (bcrypt, cost factor 12 by default).
 
@@ -552,7 +551,8 @@ This section defines the measures required to protect user data, identity, and s
 
 - **Document Handling** *(Implemented)*: Downloaded and served documents shall be limited and validated per FR-5.5.
 
-- **Infrastructure Hardening** *(Planned)*: The production deployment shall require authentication on MongoDB and not expose its port publicly, run application containers as a non-root user, and scan dependencies for known vulnerabilities on every change (Section 5.6).
+- **Infrastructure Hardening** *(Implemented)*: The production deployment shall require authentication on MongoDB and not expose its port publicly, run application containers as a non-root user, and scan dependencies for known vulnerabilities on every change (Section 5.6).
+  - *Current:* In the production deployment (`docker-compose.prod.yml`) MongoDB requires a login and TLS, has no published port and no route to the internet, and has one user per service (the API and the worker) with the `readWrite` role on the application database only; no application is given the root password. Only the proxy publishes a port. The API, the worker, the website and the proxy run as an unprivileged user with every capability dropped, no privilege escalation and a read-only file system. Every secret is a file from a secret store, and each service is given only the ones it needs; none is in an environment variable, a `.env` file or an image. The passwords are random and distinct (`docker/secrets/generate.sh`). Dependencies are audited on every change (CI job *Dependencies*). Third-party images keep their own default users.
 
 - **Privacy** *(Partial)*: Contact information, notification preferences, and followed tags shall be stored and processed in a PDPA-compliant manner, with per-channel opt-in.
   - *Current:* Email notifications can be switched off per user and are only sent to verified addresses; the in-app channel is always on.
@@ -618,7 +618,7 @@ This section defines how the requirements above are verified, and the testing wo
 - **NFR-V4 End-to-End, Accessibility and Browser Tests** *(Planned)*: The main journeys of every use case shall be tested in a real browser on Chrome, Firefox, Safari (WebKit) and Edge, in Thai and English, including automated WCAG 2.1 AA checks.
 
 - **NFR-V5 Security Testing** *(Partial)*: The controls in Section 5.3 shall be covered by automated tests, a dynamic application security scan, and a dependency vulnerability scan.
-  - *Current:* Automated checks cover CSRF, security headers, account enumeration, account lockout, sessions and cookie flags, search injection and document safety (`check:csrf`, `check:security-headers`, `check:auth-enumeration`, `check:login-lockout`, `check:login-session`, `check:search-filter`, `check:tor-files`).
+  - *Current:* Automated checks cover CSRF, security headers, account enumeration, account lockout, sessions and cookie flags, search injection and document safety (`check:csrf`, `check:security-headers`, `check:auth-enumeration`, `check:login-lockout`, `check:login-session`, `check:search-filter`, `check:tor-files`), and the production deployment's TLS, MongoDB login, secrets and containers (`check:deployment-config`, `check:transport-security`, `check:secret-files`, and `docker/verify-deployment.sh` on a running stack).
   - *Next:* Add a dynamic scan (OWASP ZAP baseline) against the full stack, a dependency audit in CI, and cross-user access tests.
 
 - **NFR-V6 Performance Testing** *(Planned)*: The targets in Section 5.1 shall be measured under load, on a dataset of realistic size, before release.

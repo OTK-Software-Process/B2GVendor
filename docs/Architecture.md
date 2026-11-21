@@ -712,12 +712,26 @@ flowchart TB
 - **`NEXT_PUBLIC_API_URL` is a build argument** of the frontend image: it is fixed at build time, and
   it is also what the Content-Security-Policy's `connect-src` is built from.
 - **Behind a proxy:** in production the API sets `trust proxy` to 1 and marks the cookie `Secure`.
-- ⬜ The target for a real deployment (SRS §5.3 *Infrastructure Hardening*, *Data Encryption in
-  Transit*): TLS and an HTTP-to-HTTPS redirect, MongoDB with authentication and no public port,
-  containers running as a non-root user. (The dependency scan already runs on every change: CI job
-  *Dependencies*, with an SBOM per build.) The Compose file today
-  is the local stack: Mongo is unauthenticated and published on `27017`, and the API runs over plain
-  HTTP.
+- **The Compose file above is the local stack:** plain HTTP, MongoDB with no login on a published port,
+  secrets in `.env` files. A real deployment adds `docker-compose.prod.yml` on top of it ✅ (SRS §5.3
+  *Infrastructure Hardening*, *Data Encryption in Transit*; how to use it is
+  [Deployment.md](Deployment.md)). It changes five things:
+  - **`edge`, a Caddy container, is the only one that publishes a port** (80 and 443): TLS 1.2 and 1.3,
+    Let's Encrypt certificates, the website on `APP_HOST` and the API on `API_HOST` (different host
+    names), the website's HTTP redirected to HTTPS and the API's plain HTTP refused. The local API
+    gateway on `:4000` is not published.
+  - **MongoDB needs a login and TLS**, has no published port and no route out, and has one
+    least-privilege user per service (`b2g_api`, `b2g_worker`), created on the first start.
+  - **Secrets are files**, one per secret (Docker secrets), read through `NAME_FILE` variables; each
+    service is given only its own, and none is in an environment or a `.env` file.
+  - **The application containers run as an unprivileged user** with every capability dropped, no
+    privilege escalation and a read-only file system.
+  - **`REQUIRE_SECURE_BACKENDS=true`**: the API and the worker refuse to start with a MongoDB address that
+    has no login or no TLS, and never send mail without TLS.
+
+  `docker/verify-deployment.sh local` rehearses all of it on one machine, and `probe` checks a running
+  server from outside. (The dependency scan already runs on every change: CI job *Dependencies*, with an
+  SBOM per build.)
 
 ### Configuration
 
@@ -726,7 +740,7 @@ Everything that varies by environment is an environment variable, validated in `
 
 | Group | Variables |
 | :--- | :--- |
-| Server | `NODE_ENV`, `PORT`, `MONGODB_URI`, `CORS_ORIGIN`, `APP_URL` |
+| Server | `NODE_ENV`, `PORT`, `MONGODB_URI`, `CORS_ORIGIN`, `APP_URL`, `REQUIRE_SECURE_BACKENDS` |
 | Session | `SESSION_COOKIE_NAME`, `SESSION_TTL_DAYS`, `COOKIE_SAMESITE`, `BCRYPT_ROUNDS` |
 | Email | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM` |
 | Sources | `EGP_RSS_BASE_URL`, `EGP_HTML_TOR_ENABLED`, `DATA_GO_TH_BASE_URL`, `DATA_GO_TH_API_KEY`, `DATA_GO_TH_DEFAULT_PACKAGE_ID`, `DATA_GO_TH_DEFAULT_SEARCH_QUERY` |
@@ -734,6 +748,8 @@ Everything that varies by environment is an environment variable, validated in `
 | AI | `AI_TAGGING_ENABLED`, `AI_PROVIDER`, `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `OPENROUTER_BASE_URL`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`, `VERTEX_AI_MODEL`, `GOOGLE_APPLICATION_CREDENTIALS` |
 | Topic filter | `INGESTION_TOPIC_FILTER_ENABLED` (needs `AI_TAGGING_ENABLED`) |
 | Frontend | `NEXT_PUBLIC_API_URL` |
+| Secrets as files (production) | `MONGODB_URI_FILE`, `SMTP_PASS_FILE`, `OPENROUTER_API_KEY_FILE`, `DATA_GO_TH_API_KEY_FILE`: the value comes from that file, not from the environment (`config/secretFiles.ts`) |
+| Deployment (root `.env`, read by compose) | `APP_HOST`, `API_HOST`, `ACME_EMAIL`, `SECRETS_DIR`, `EDGE_HTTP_PORT`, `EDGE_HTTPS_PORT`, `COMPOSE_FILE` |
 
 The poll interval is **not** an environment variable: an Admin sets it in the app.
 
@@ -750,8 +766,8 @@ notes of the SRS requirement it names.
 | Ingestion (FR-2.x) | e-GP polling, TOR download, schedule, run history, source configuration, deptId verify and suggestions, `data.go.th` enrichment, procurement facts, topic filter | ✅ — except active alerts for a failed run (FR-2.7) and a per-poll time limit 🔨 |
 | Tags and notifications (FR-3.x) | Follow, pause, unfollow, in-app and email notifications, daily digest, tag vocabulary | ✅ — agency tags are not assigned automatically (FR-3.2) 🔨; no-login email unsubscribe (FR-3.7) ⬜ |
 | Search and browse (FR-4.x) | Thai-aware search, filters, sorts, status badges, site directory | 🔨 — extracted TOR text is not indexed; budget and date-range filters are in the API but not yet on the search page |
-| Work detail and TOR (FR-5.x) | Detail page, status history, PDF download, hash dedupe | ✅ — HTTPS depends on the production deployment 🔨 |
-| Security (SRS §5.3) | CSRF, headers, validation, lockout, hashing, rate limits on sign-in, sign-up and reset | ✅ — and the dependency audit + SBOM in CI, session idle timeout, rate limits on search and poll. ⬜ TLS, Mongo authentication, non-root containers |
+| Work detail and TOR (FR-5.x) | Detail page, status history, PDF download, hash dedupe | ✅ — served over HTTPS by the production overlay (`docker-compose.prod.yml`) |
+| Security (SRS §5.3) | CSRF, headers, validation, lockout, hashing, rate limits on sign-in, sign-up and reset | ✅ — and the dependency audit + SBOM in CI, session idle timeout, rate limits on search and poll. In a deployment (`docker-compose.prod.yml`): TLS 1.2/1.3 and Let's Encrypt, MongoDB login and TLS, secrets in the secret store, non-root containers ✅ — Let's Encrypt issuance is shown only on a public server |
 | Verification (SRS §5.6) | Per-area `check:*` scripts against throwaway databases | 🔨 — CI, browser and accessibility tests, load tests ⬜ |
 
 ### Open decisions
@@ -773,6 +789,8 @@ notes of the SRS requirement it names.
 | Why does it exist, and for whom? | [ProjectDescription.md](ProjectDescription.md) — the requirements description and data flow |
 | What does each route accept and return? | [API.md](API.md) |
 | How do I run it? | [README.md](../README.md) — setup, seeds, backfills, Docker |
+| How do I put it on a server? | [Deployment.md](Deployment.md) — HTTPS, MongoDB login and TLS, secrets, non-root containers, and how to check them |
+| How is it secured, and why? | [Security.md](Security.md) — connections, cryptography, secrets, access rules, data protection, logging, deployment |
 | How do I add an audited model? | [README.md](../README.md#audit-log-developer-guide) |
 | What does the real e-GP feed look like? | [testAPI/readme.md](../testAPI/readme.md) — exploration scripts against the live sources |
 | Which settings exist? | `Backend/.env.example`, commented per variable |

@@ -7,6 +7,7 @@ node_modules/
 .env
 .env.*
 !.env.example
+!.env.production.example
 
 # Next.js (B2GVendor)
 .next/
@@ -45,6 +46,9 @@ Thumbs.db
 
 # Docker
 docker-compose.override.yml
+
+# Production secrets (docker/secrets/generate.sh): one file per secret, never committed
+/secrets/
 
 # Misc
 *.pem

@@ -1,10 +1,22 @@
 import 'dotenv/config';
 import { z } from 'zod';
+import { loadSecretFiles } from './secretFiles';
+import { mongoUriProblems } from './transportSecurity';
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().default(4000),
+  // May be given as MONGODB_URI_FILE=/run/secrets/... instead (config/secretFiles.ts).
   MONGODB_URI: z.string().min(1, 'MONGODB_URI is required'),
+  // A deployment sets this to true (docker-compose.prod.yml does). The process then
+  // refuses to start with a MongoDB address that has no login or no TLS, and the
+  // mail transport must use TLS: nothing falls back to an unencrypted connection
+  // (ASVS V12.3.1, V13.2.1; config/transportSecurity.ts). Off for local development,
+  // where MongoDB and a mail catcher run without certificates.
+  REQUIRE_SECURE_BACKENDS: z
+    .string()
+    .default('false')
+    .transform(v => v === 'true'),
   CORS_ORIGIN: z.string().default('http://localhost:3000'),
 
   APP_URL: z.string().url().default('http://localhost:3000'),
@@ -146,9 +158,20 @@ const envSchema = z.object({
   if (value.NODE_ENV === 'production' && !/^https:\/\//i.test(value.APP_URL)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['APP_URL'], message: 'APP_URL must be an https:// address in production' });
   }
+
+  // A hardened deployment talks to MongoDB only with a login and over TLS.
+  if (value.REQUIRE_SECURE_BACKENDS) {
+    for (const message of mongoUriProblems(value.MONGODB_URI)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['MONGODB_URI'], message });
+    }
+  }
 });
 
 export type Env = z.infer<typeof envSchema>;
+
+// Secrets that arrive as files (NAME_FILE=/run/secrets/name) are read first, so the
+// schema above sees them as ordinary variables.
+loadSecretFiles();
 
 export const env: Env = envSchema.parse(process.env);
 

@@ -7,6 +7,13 @@ The contract between the browser, the admin console, and the API service.
 The web app reads the base URL from `NEXT_PUBLIC_API_URL` (default `http://localhost:4000/api/v1`); the
 API itself listens on `PORT` (default `4000`). No host is hard-coded in the server.
 
+In a deployment ([Deployment.md](Deployment.md)) the API is served **only over HTTPS, on a host name of its
+own**, different from the website's: `https://api.example.com/api/v1`, called from the website at
+`https://app.example.com`. TLS 1.2 or newer is required. Plain HTTP to the API host is **refused** (`403`),
+never redirected, so a client that wrongly calls `http://` fails at once instead of being quietly sent on.
+The two host names are siblings of one domain, so the session cookie (`SameSite=Lax`) reaches the API, and
+CORS allows exactly the website's origin.
+
 Every application route lives under **`/api/v1`**. The version is in the path so that a breaking change
 to a response shape can be introduced beside the old one as `/api/v2` instead of as a silent edit. The
 one route outside it is `GET /health`.

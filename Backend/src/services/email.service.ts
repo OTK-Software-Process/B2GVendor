@@ -3,23 +3,29 @@ import { env } from '../config/env';
 import { logger } from '../utils/logger';
 import { maskEmail, tokenLink } from '../utils/privacy';
 import { proxyUrl } from '../config/egressProxy';
+import { smtpTransportOptions } from '../config/transportSecurity';
+import type SMTPTransport from 'nodemailer/lib/smtp-transport';
 
 let transporter: Transporter | null = null;
 
-function getTransporter(): Transporter | null {
+/**
+ * How the mail transport is configured, or null when no SMTP host is set. With
+ * REQUIRE_SECURE_BACKENDS the connection must use TLS and never falls back to
+ * plain text (ASVS V12.3.1; config/transportSecurity.ts).
+ */
+export function mailTransportOptions(): SMTPTransport.Options | null {
   if (!env.SMTP_HOST) return null;
+  return smtpTransportOptions(
+    { host: env.SMTP_HOST, port: env.SMTP_PORT, user: env.SMTP_USER, pass: env.SMTP_PASS },
+    { requireSecure: env.REQUIRE_SECURE_BACKENDS, proxy: proxyUrl() }
+  );
+}
 
-  if (!transporter) {
-    transporter = nodemailer.createTransport({
-      host: env.SMTP_HOST,
-      port: env.SMTP_PORT ?? 587,
-      secure: (env.SMTP_PORT ?? 587) === 465,
-      auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASS } : undefined,
-      // In the container stack the only way out is the egress proxy (config/egressProxy.ts):
-      // SMTP goes through it as an HTTP CONNECT tunnel, to the SMTP host only.
-      ...(proxyUrl() ? { proxy: proxyUrl() } : {})
-    });
-  }
+function getTransporter(): Transporter | null {
+  const options = mailTransportOptions();
+  if (!options) return null;
+
+  if (!transporter) transporter = nodemailer.createTransport(options);
 
   return transporter;
 }
