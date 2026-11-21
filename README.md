@@ -53,6 +53,14 @@ cp B2GVendor/.env.example B2GVendor/.env
 
 The defaults work out of the box against the local Mongo from step 1 (`Backend/.env`'s `MONGODB_URI=mongodb://mongo:27017/...` — change `mongo` to `localhost` if you're running the Backend directly on your host rather than in Docker: `mongodb://localhost:27017/b2gvendor`). `B2GVendor/.env` already points at `http://localhost:4000/api/v1`, matching the Backend's default port.
 
+**One value you must add: `MFA_ENCRYPTION_KEY`.** Admin and Super Admin accounts have to set up two-step sign-in (an authenticator app, plus recovery codes) before they can use any staff page, and the API refuses to start without the key that encrypts the authenticator secrets. Make one and put it in `Backend/.env`:
+
+```bash
+echo "MFA_ENCRYPTION_KEY=$(openssl rand -base64 32)" >> Backend/.env
+```
+
+(Or set `MFA_REQUIRED_FOR_STAFF=false` for a development setup with no two-step sign-in for staff. Never do that in production; see [docs/Security.md](docs/Security.md) section 15.)
+
 AI tagging and the software-only filter are **off by default** and only need touching if you want them — see [AI tagging](#ai-tagging-optional) and [Software-only filter](#restricting-ingestion-to-one-topic-optional) below. Email verification during registration and email notifications require SMTP configuration; see [Email delivery](#email-delivery).
 
 ### 4. Seed data
@@ -61,6 +69,7 @@ AI tagging and the software-only filter are **off by default** and only need tou
 cd Backend
 
 # A superadmin account you can log in with (required — there's no seeded default).
+# At first sign-in it is taken to "Account security" to set up its authenticator app.
 npm run seed:superadmin -- admin@example.com "Password123" "Admin"
 
 # Government sites + the tag vocabulary (including the "software" filter tag).
@@ -231,7 +240,7 @@ Stop everything with `docker compose down` (add `-v` to also drop the Mongo volu
 The stack above is for local use: plain HTTP, MongoDB with no login on a published port, secrets in `.env` files. **For a server, add `docker-compose.prod.yml`**, which puts a TLS proxy in front (Let's Encrypt, TLS 1.2/1.3, the website and the API on separate host names, HTTP redirected for the website only), makes MongoDB require a login and TLS with one least-privilege user per service, moves every secret out of `.env` into files from a secret store, and runs the containers without privileges:
 
 ```bash
-docker/secrets/generate.sh                  # random passwords, MongoDB certificates
+docker/secrets/generate.sh                  # random passwords, MongoDB certificates, the two-step sign-in key
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 docker/verify-deployment.sh probe --app app.example.com --api api.example.com
 ```

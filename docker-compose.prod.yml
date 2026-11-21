@@ -27,8 +27,8 @@ x-hardened: &hardened
   read_only: true
   tmpfs: ["/tmp"]
 
-# The secret files. `docker/secrets/generate.sh` creates the MongoDB ones; the four
-# provider secrets are stored with `docker/secrets/generate.sh set NAME`. On Docker Swarm,
+# The secret files. `docker/secrets/generate.sh` creates the MongoDB ones and the
+# two-step sign-in key; the four provider secrets are stored with `docker/secrets/generate.sh set NAME`. On Docker Swarm,
 # Kubernetes or a cloud secret manager, replace `file:` with that platform's secret: the
 # services read /run/secrets/<name> either way.
 secrets:
@@ -46,6 +46,9 @@ secrets:
     file: ${SECRETS_DIR:-./secrets}/mongo_ca_pem
   mongo_server_pem:
     file: ${SECRETS_DIR:-./secrets}/mongo_server_pem
+  # Encrypts the authenticator seeds of two-step sign-in (AES-256-GCM). Only the API gets it.
+  mfa_encryption_key:
+    file: ${SECRETS_DIR:-./secrets}/mfa_encryption_key
   smtp_pass:
     file: ${SECRETS_DIR:-./secrets}/smtp_pass
   openrouter_api_key:
@@ -155,9 +158,15 @@ services:
       MONGODB_URI_FILE: /run/secrets/mongo_api_uri
       SMTP_PASS_FILE: /run/secrets/smtp_pass
       DATA_GO_TH_API_KEY_FILE: /run/secrets/data_go_th_api_key
+      # Two-step sign-in: staff must enrol, whatever Backend/.env says, and the API
+      # refuses to start without the key that protects the authenticator seeds
+      # (docs/Security.md section 15).
+      MFA_ENCRYPTION_KEY_FILE: /run/secrets/mfa_encryption_key
+      MFA_REQUIRED_FOR_STAFF: "true"
     secrets:
       - mongo_api_uri
       - mongo_ca_pem
+      - mfa_encryption_key
       - smtp_pass
       - data_go_th_api_key
 

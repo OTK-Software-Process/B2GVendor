@@ -34,6 +34,27 @@ const envSchema = z.object({
 
   BCRYPT_ROUNDS: z.coerce.number().int().min(10).max(15).default(12),
 
+  // --- Two-step verification (ASVS V6.3.3, V6.4.4, V6.5.x; docs/Security.md section 15) ---
+  // The key that encrypts every account's authenticator secret: 32 random bytes in
+  // base64 (`openssl rand -base64 32`). It must be kept: lose it and every enrolled
+  // authenticator is unreadable. May be given as MFA_ENCRYPTION_KEY_FILE
+  // (config/secretFiles.ts). Only the API needs it, never the worker: the API
+  // refuses to start without it while MFA_REQUIRED_FOR_STAFF is on (config/mfa.ts).
+  MFA_ENCRYPTION_KEY: z.string().optional(),
+  // Admin and Super Admin accounts must use a second factor to use the admin area.
+  // Until they set one up, their session can reach nothing but the setup itself.
+  // Vendors may turn it on for themselves. Off only for a development setup.
+  MFA_REQUIRED_FOR_STAFF: z
+    .string()
+    .default('true')
+    .transform(v => v !== 'false'),
+  // The name an authenticator app shows beside the code.
+  MFA_ISSUER: z.string().trim().min(1).max(60).default('B2G Vendor'),
+  // How many 30-second steps either side of "now" a code may come from, to absorb
+  // the clock of a phone. 1 = the code of the step before and the step after are
+  // also accepted; 0 = only the current step. A code still works only once.
+  MFA_TOTP_DRIFT_STEPS: z.coerce.number().int().min(0).max(2).default(1),
+
   // --- Anti-automation (ASVS V2.4.1, V15.2.2) ---
   // Public search (GET /works) per client address per minute. A person paging
   // and filtering stays far below it; a scraper is slowed. The website's own

@@ -173,13 +173,13 @@ export function listSessions(accountId: string, currentSessionId: string): Promi
  * stolen session must not be able to throw the owner out. The check counts
  * toward the per-account sign-in lock, like change-password.
  */
-async function confirmPassword(accountId: string, password: string): Promise<void> {
+export async function confirmPassword(accountId: string, password: string, purpose = "end_session"): Promise<void> {
   const account = await Account.findById(accountId).select("+passwordHash");
   if (!account) throw AppError.notFound("Account not found.");
   const attempt = await reserveLoginAttempt(account._id);
   if (!attempt.allowed) throw AppError.accountLocked(attempt.retryAfterSeconds);
   if (!(await account.comparePassword(password))) {
-    logger.security("warn", "auth.reauth.failure", { purpose: "end_session", accountId: String(account._id) });
+    logger.security("warn", "auth.reauth.failure", { purpose, accountId: String(account._id) });
     throw AppError.invalidCredentials();
   }
   await clearFailedLogins(account._id);
@@ -238,6 +238,7 @@ export async function getSession(
     accountId: accountId,
     revokedAt: { $exists: false },
     expiresAt: { $gt: new Date() },
+    mfaPending: { $ne: true },
   }).sort({ lastActiveAt: -1 });
 
   if (!session) {

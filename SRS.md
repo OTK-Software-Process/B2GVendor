@@ -339,15 +339,18 @@ Every requirement carries its implementation status as of 04/11/2026 (see Sectio
   - **FR-1.10** *(Implemented)*: The system shall let a signed-in user change their password after re-entering the current one. All of the user's other sessions shall be ended; the session that made the change stays signed in. A wrong current password counts toward the same account lock as a failed sign-in, so a stolen session cannot be used to guess the password.
   - **FR-1.11** *(Implemented)*: The system shall split staff into roles. Every Admin can use the dashboard, manage vendor accounts and read the audit log, and additionally holds one role chosen by a Super Admin: **Poll Admin** (polling and run history), **Tag Admin** (tag vocabulary and the tags on each work) or **Poll and Tag Admin** (both). Only a Super Admin shall create Admin accounts, set their role, suspend/reactivate them, sign them out of every session, send them a password link, or delete them. Roles shall be enforced server-side; an Admin created before the role split has no role until a Super Admin assigns one.
   - **FR-1.12** *(Implemented)*: The system shall let a signed-in user view and edit their own profile (name, phone, business profile) and notification settings.
+  - **FR-1.13** *(Implemented)*: The system shall support two-step sign-in with a time-based one-time password (TOTP, RFC 6238) from an authenticator app, and ten single-use recovery codes. It shall be **required for Admin and Super Admin accounts**, which can use no admin function until they have set it up, and optional for vendors. After a correct password an account with a second factor receives only a short-lived challenge (5 minutes) that is accepted nowhere but the second step; a correct code, or a recovery code, then starts the session. Each code works once, a code is checked against the server's clock only, and an authenticator secret is stored encrypted and recovery codes only as hashes. Wrong codes are counted and locked apart from wrong passwords. A staff account cannot turn the factor off; a vendor can, after re-entering the password and a code.
+    - *Current:* Set up, turn off and new recovery codes are in *Account → Security* and each asks for the password again; the owner is emailed at every change and whenever a recovery code is used. Design, limits and what is stored: `docs/Security.md` §15.
+  - **FR-1.14** *(Implemented)*: The system shall let an administrator reset a lost second factor only after an identity check: an Admin resets a vendor, a Super Admin resets an Admin, and a Super Admin is reset only from the server. The administrator shall give their own password, how the identity was checked and why; every session of the account ends, its owner is emailed, and who did it, how and why is kept in the audit log.
 
 - **Traceability:**
   - US-1.1 (Register) → FR-1.1, FR-1.2, FR-1.8, FR-1.9
-  - US-1.2 (Unified Login) → FR-1.3
+  - US-1.2 (Unified Login) → FR-1.3, FR-1.13
   - US-1.3 (Restrict Access) → FR-1.4, FR-1.12
   - US-1.4 (Reset Password) → FR-1.7, FR-1.9, FR-1.10
-  - US-1.5 (Manage Accounts) → FR-1.5, FR-1.6, FR-1.11
+  - US-1.5 (Manage Accounts) → FR-1.5, FR-1.6, FR-1.11, FR-1.14
 
-- **Verification:** Covered today by the automated checks `check:auth`, `check:auth-enumeration`, `check:login-lockout`, `check:pwned-passwords`, `check:admin-accounts`, `check:admin-staff`, `check:admin-permissions` and the `check:audit-*` suites. Planned additions are listed in Section 5.6.
+- **Verification:** Covered today by the automated checks `check:auth`, `check:auth-enumeration`, `check:login-lockout`, `check:pwned-passwords`, `check:admin-accounts`, `check:admin-staff`, `check:admin-permissions`, `check:mfa`, `check:mfa-crypto` and the `check:audit-*` suites. Planned additions are listed in Section 5.6.
 
 ### 4.2 Government Data Ingestion & Source Management
 
@@ -529,8 +532,14 @@ This section defines the measures required to protect user data, identity, and s
   - A sign-up with a taken email receives the same response as a new sign-up; the address's owner is emailed that someone tried to sign up instead of receiving a verification link. A sign-in to an email with no account is counted and locked like one to a real account.
   - Password policy, breach check and email verification per FR-1.8 and FR-1.9.
 
+- **Multi-Factor Authentication** *(Implemented)*: Admin and Super Admin accounts shall sign in with a second factor, and any account may (FR-1.13, FR-1.14).
+  - A time-based one-time password (RFC 6238: HMAC-SHA1, 6 digits, 30-second step, one step of clock drift either side) is checked against the server's clock and accepted once; ten recovery codes of 80 random bits each are stored hashed and accepted once. Seeds and codes come from the operating system's random number generator.
+  - Authenticator secrets are encrypted at rest (AES-256-GCM, bound to the account) with a key held as a secret, never in the database; wrong codes are limited per account (4 free tries, then locks of 1 to 30 minutes, not cleared by a correct password) and per address (10 per 15 minutes).
+  - A lost factor is reset only by an administrator after an identity check, and the reset is audited; an owner and a Super Admin can revoke a lost authenticator.
+
 - **Session Management** *(Implemented)*: Sessions shall be server-side and revocable.
   - Session tokens are random, stored only as hashes, and sent in an `HttpOnly` cookie (`SameSite=Lax` by default, `Secure` and `__Host-` prefixed in production) that lasts at most 7 days. A session also ends after 30 minutes without activity for staff accounts and 24 hours for vendors. Signing in ends the session the browser held before.
+  - A password that is followed by a second step starts only a 5-minute challenge, which every route refuses except the second step; a correct code replaces it with a new session.
   - Sessions are ended on logout, password change (other sessions), password reset (all sessions), suspension, an Admin's "sign out everywhere" (any account), and by the owner from the list of signed-in devices on the account page, which asks for the password again.
 
 - **Role-Based Access Control** *(Implemented)*: The admin panel shall enforce strong authentication and role checks, with an explicit Admin vs. **Super Admin** split for higher-risk settings such as source configuration, and the Admin roles of FR-1.11.
@@ -618,7 +627,7 @@ This section defines how the requirements above are verified, and the testing wo
 - **NFR-V4 End-to-End, Accessibility and Browser Tests** *(Planned)*: The main journeys of every use case shall be tested in a real browser on Chrome, Firefox, Safari (WebKit) and Edge, in Thai and English, including automated WCAG 2.1 AA checks.
 
 - **NFR-V5 Security Testing** *(Partial)*: The controls in Section 5.3 shall be covered by automated tests, a dynamic application security scan, and a dependency vulnerability scan.
-  - *Current:* Automated checks cover CSRF, security headers, account enumeration, account lockout, sessions and cookie flags, search injection and document safety (`check:csrf`, `check:security-headers`, `check:auth-enumeration`, `check:login-lockout`, `check:login-session`, `check:search-filter`, `check:tor-files`), and the production deployment's TLS, MongoDB login, secrets and containers (`check:deployment-config`, `check:transport-security`, `check:secret-files`, and `docker/verify-deployment.sh` on a running stack).
+  - *Current:* Automated checks cover CSRF, security headers, account enumeration, account lockout, sessions and cookie flags, two-step sign-in, search injection and document safety (`check:csrf`, `check:security-headers`, `check:auth-enumeration`, `check:login-lockout`, `check:login-session`, `check:mfa`, `check:mfa-crypto`, `check:search-filter`, `check:tor-files`), and the production deployment's TLS, MongoDB login, secrets and containers (`check:deployment-config`, `check:transport-security`, `check:secret-files`, and `docker/verify-deployment.sh` on a running stack).
   - *Next:* Add a dynamic scan (OWASP ZAP baseline) against the full stack, a dependency audit in CI, and cross-user access tests.
 
 - **NFR-V6 Performance Testing** *(Planned)*: The targets in Section 5.1 shall be measured under load, on a dataset of realistic size, before release.
@@ -695,10 +704,10 @@ relationship between two use cases.
 | Field | Description |
 |---|---|
 | Preconditions | Visitor is on the Landing Page. |
-| Basic Flow | 1. Visitor selects **Register** or **Log In**.<br>2. New user: enters email, password, and optionally a business profile (tax ID, company name); system creates a single unified `Account`.<br>3. Returning user: enters email/password; system hashes and validates against the stored Argon2/bcrypt hash.<br>4. System establishes a session.<br>5. System redirects the user to their previous page or the account dashboard. |
-| Alternative Flow | Invalid Credentials: display "Invalid email or password."<br>Duplicate Email: display "An account with this email already exists." |
+| Basic Flow | 1. Visitor selects **Register** or **Log In**.<br>2. New user: enters email, password, and optionally a business profile (tax ID, company name); system creates a single unified `Account`.<br>3. Returning user: enters email/password; system hashes and validates against the stored Argon2/bcrypt hash.<br>4. If the account has two-step sign-in, the system asks for the code from the authenticator app (or a recovery code) and validates it.<br>5. System establishes a session.<br>6. System redirects the user to their previous page or the account dashboard. |
+| Alternative Flow | Invalid Credentials: display "Invalid email or password."<br>Duplicate Email: display "An account with this email already exists."<br>Wrong or Used Code: display "That code is not valid", and lock the second step after repeated failures.<br>Staff Without a Second Factor: an Admin or Super Admin is taken to Account Security to set one up before any admin page opens. |
 | Post-conditions | The user is authenticated and can follow tags and manage notification settings. |
-| Traceability | US-1.1, US-1.2 → FR-1.1, FR-1.2, FR-1.3 |
+| Traceability | US-1.1, US-1.2 → FR-1.1, FR-1.2, FR-1.3, FR-1.13 |
 
 **Search & Filter Work**
 - **Actor:** Visitor
@@ -804,9 +813,9 @@ relationship between two use cases.
 |---|---|
 | Preconditions | Admin is logged in. |
 | Basic Flow | 1. Admin searches the account list by name, email, or status.<br>2. Admin adds, suspends/reactivates, or deletes an account.<br>3. System logs the action with actor and timestamp to the audit log. |
-| Alternative Flow | None. |
+| Alternative Flow | Lost Authenticator: after checking who is asking, the Admin resets the vendor's two-step sign-in, stating how the identity was checked and why, and re-entering their own password. |
 | Post-conditions | The account's status is updated and the change is auditable. |
-| Traceability | US-1.5 → FR-1.5, FR-1.6 |
+| Traceability | US-1.5 → FR-1.5, FR-1.6, FR-1.14 |
 
 ---
 
@@ -828,6 +837,7 @@ The following items are currently ambiguous or require further definition from t
   - *Update (04/11/2026):* Still open. Today no threshold is applied: the AI picks tags from the controlled vocabulary and may propose one new tag per work, and Admins correct tags afterwards (FR-3.2).
 
 - **Multi-Factor Authentication for Staff:** Whether Admin and Super Admin accounts must use a second factor is not yet decided; it is not part of the current security requirements (Section 5.3).
+  - *Update (21/11/2026):* Resolved. Admin and Super Admin accounts must use a second factor (FR-1.13, Section 5.3). Still open: hardware security keys and passkeys (WebAuthn), and whether vendors should be required to use it too.
 
 ### 7.2 Justified Assumptions
 

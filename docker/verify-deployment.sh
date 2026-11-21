@@ -337,7 +337,7 @@ local_inside() {
 
   section "Secrets: each service sees only its own, and none are in the environment"
   listed() { compose exec -T "$1" sh -c 'ls /run/secrets 2>/dev/null | sort | tr "\n" " "' | tr -d '\r'; }
-  [ "$(listed backend)" = "data_go_th_api_key mongo_api_uri mongo_ca_pem smtp_pass " ] && pass "backend gets: $(listed backend)" || fail "backend gets: $(listed backend)"
+  [ "$(listed backend)" = "data_go_th_api_key mfa_encryption_key mongo_api_uri mongo_ca_pem smtp_pass " ] && pass "backend gets: $(listed backend)" || fail "backend gets: $(listed backend)"
   [ "$(listed ingestion-worker)" = "data_go_th_api_key google_credentials mongo_ca_pem mongo_worker_uri openrouter_api_key smtp_pass " ] && pass "ingestion-worker gets: $(listed ingestion-worker)" || fail "ingestion-worker gets: $(listed ingestion-worker)"
   [ -z "$(listed frontend)" ] && pass "frontend gets no secret" || fail "frontend gets: $(listed frontend)"
   [ "$(listed mongo)" = "mongo_api_password mongo_ca_pem mongo_root_password mongo_server_pem mongo_worker_password " ] && pass "mongo gets: $(listed mongo)" || fail "mongo gets: $(listed mongo)"
@@ -345,7 +345,7 @@ local_inside() {
     local env_names
     env_names="$(compose exec -T "$service" sh -c 'env | cut -d= -f1 | sort | tr "\n" " "' | tr -d '\r')"
     case "$env_names" in
-      *" MONGODB_URI "*|*" SMTP_PASS "*|*" OPENROUTER_API_KEY "*|*" DATA_GO_TH_API_KEY "*) fail "$service has a secret in its environment" ;;
+      *" MONGODB_URI "*|*" SMTP_PASS "*|*" OPENROUTER_API_KEY "*|*" DATA_GO_TH_API_KEY "*|*" MFA_ENCRYPTION_KEY "*) fail "$service has a secret in its environment" ;;
       *) pass "$service has no secret value in its environment (only NAME_FILE paths)" ;;
     esac
   done
@@ -422,6 +422,62 @@ local_application() {
 
   headers="$(https_curl "$API" '/api/v1/auth/login' -X POST -H 'Content-Type: application/json' -H 'Origin: https://evil.example' -d "{\"email\":\"$email\",\"password\":\"$password\"}" -D - -o /dev/null 2>&1)" || true
   head -n 1 <<<"$headers" | grep -q ' 403' && pass "a sign-in from another origin is blocked (CSRF_BLOCKED)" || fail "a cross-origin sign-in was not blocked: $(head -n 1 <<<"$headers")"
+
+  local_two_step "$email" "$password" "$jar"
+}
+
+# Two-step sign-in inside the deployment: staff are held to it, the key is read from its
+# secret file, and the whole flow (enrol, sign in with a recovery code, a code works once)
+# runs through the edge against the least-privilege database user.
+local_two_step() {
+  local email="$1" password="$2" jar="$3" status secret code recovery jar2
+  section "Two-step sign-in (staff must enrol; the seed key comes from its secret file)"
+
+  status="$(https_curl "$API" '/api/v1/admin/accounts' -b "$jar" -H "Origin: https://$APP" -o "$work/staff.json" -w '%{http_code}' 2>/dev/null || true)"
+  if [ "$status" = "403" ] && grep -q 'MFA_SETUP_REQUIRED' "$work/staff.json"; then pass "a Super Admin who has not enrolled is refused on staff routes (403 MFA_SETUP_REQUIRED)"; else fail "a staff route without two-step enrolment answered $status: $(cut -c1-150 "$work/staff.json" 2>/dev/null)"; fi
+
+  status="$(https_curl "$API" '/api/v1/account/mfa/setup' -X POST -H 'Content-Type: application/json' -H "Origin: https://$APP" -b "$jar" -d "{\"password\":\"$password\"}" -o "$work/setup.json" -w '%{http_code}' 2>/dev/null || true)"
+  secret="$(grep -o '"secret":"[A-Z2-7]*"' "$work/setup.json" 2>/dev/null | head -n 1 | cut -d'"' -f4)"
+  if [ "$status" = "200" ] && [ "${#secret}" -eq 32 ]; then pass "setup hands out a 160-bit secret (the encryption key was read from its secret file)"; else fail "setup answered $status: $(cut -c1-150 "$work/setup.json" 2>/dev/null)"; return; fi
+
+  # The code is made INSIDE the API container, from its own compiled code, so no tool
+  # on this machine is needed.
+  code="$(compose exec -T backend node -e "const t=require('./dist/utils/totp');process.stdout.write(t.totpAt(process.argv[1],Date.now()))" "$secret" 2>/dev/null | tr -d '\r')"
+  status="$(https_curl "$API" '/api/v1/account/mfa/enable' -X POST -H 'Content-Type: application/json' -H "Origin: https://$APP" -b "$jar" -d "{\"code\":\"$code\"}" -o "$work/enable.json" -w '%{http_code}' 2>/dev/null || true)"
+  recovery="$(grep -o '"recoveryCodes":\["[A-Z0-9-]*"' "$work/enable.json" 2>/dev/null | head -n 1 | cut -d'"' -f4)"
+  if [ "$status" = "200" ] && [ -n "$recovery" ] && [ "$(grep -o '[A-Z0-9]\{4\}\(-[A-Z0-9]\{4\}\)\{4\}' "$work/enable.json" | sort -u | wc -l | tr -d ' ')" = "10" ]; then pass "a code from the authenticator enables it, and ten recovery codes are shown once"; else fail "enabling answered $status: $(cut -c1-150 "$work/enable.json" 2>/dev/null)"; return; fi
+
+  status="$(https_curl "$API" '/api/v1/admin/accounts' -b "$jar" -H "Origin: https://$APP" -o /dev/null -w '%{http_code}' 2>/dev/null || true)"
+  [ "$status" = "200" ] && pass "once enrolled, the same session reaches the staff routes (200)" || fail "a staff route after enrolment answered $status"
+
+  # A new sign-in now stops after the password: it holds a challenge, not a session.
+  jar2="$work/cookies-second.txt"
+  https_curl "$API" '/api/v1/auth/login' -X POST -H 'Content-Type: application/json' -H "Origin: https://$APP" -d "{\"email\":\"$email\",\"password\":\"$password\"}" -c "$jar2" -o "$work/login2.json" >/dev/null 2>&1 || true
+  grep -q '"mfaRequired":true' "$work/login2.json" && pass "the next sign-in answers mfaRequired after the password" || fail "the next sign-in did not ask for the second step: $(cut -c1-150 "$work/login2.json")"
+  status="$(https_curl "$API" '/api/v1/auth/me' -b "$jar2" -H "Origin: https://$APP" -o /dev/null -w '%{http_code}' 2>/dev/null || true)"
+  [ "$status" = "401" ] && pass "the challenge cookie is not a session (/auth/me answers 401)" || fail "the challenge cookie was accepted as a session ($status)"
+
+  # The code that enabled it is spent: a code works once.
+  status="$(https_curl "$API" '/api/v1/auth/mfa/verify' -X POST -H 'Content-Type: application/json' -H "Origin: https://$APP" -b "$jar2" -c "$jar2" -d "{\"code\":\"$code\"}" -o /dev/null -w '%{http_code}' 2>/dev/null || true)"
+  [ "$status" = "401" ] && pass "the code that enabled it cannot be used again (401)" || fail "a spent code answered $status"
+
+  status="$(https_curl "$API" '/api/v1/auth/mfa/verify' -X POST -H 'Content-Type: application/json' -H "Origin: https://$APP" -b "$jar2" -c "$jar2" -d "{\"code\":\"$recovery\"}" -o "$work/verify.json" -w '%{http_code}' 2>/dev/null || true)"
+  if [ "$status" = "200" ] && grep -q '"recoveryCodesRemaining":9' "$work/verify.json"; then pass "a recovery code completes the sign-in (9 left)"; else fail "a recovery code answered $status: $(cut -c1-150 "$work/verify.json")"; fi
+  status="$(https_curl "$API" '/api/v1/auth/me' -b "$jar2" -H "Origin: https://$APP" -o /dev/null -w '%{http_code}' 2>/dev/null || true)"
+  [ "$status" = "200" ] && pass "the session issued after the second step is accepted" || fail "the full session was refused ($status)"
+
+  # A recovery code works once too.
+  jar2="$work/cookies-third.txt"
+  https_curl "$API" '/api/v1/auth/login' -X POST -H 'Content-Type: application/json' -H "Origin: https://$APP" -d "{\"email\":\"$email\",\"password\":\"$password\"}" -c "$jar2" -o /dev/null >/dev/null 2>&1 || true
+  status="$(https_curl "$API" '/api/v1/auth/mfa/verify' -X POST -H 'Content-Type: application/json' -H "Origin: https://$APP" -b "$jar2" -d "{\"code\":\"$recovery\"}" -o /dev/null -w '%{http_code}' 2>/dev/null || true)"
+  [ "$status" = "401" ] && pass "a recovery code cannot be used twice (401)" || fail "a used recovery code answered $status"
+
+  local seeds
+  seeds="$(mongo_attempt backend "uri" "async c => String((await c.db.collection('mfacredentials').findOne({})).secretEnc)")"
+  case "$seeds" in
+    "RESULT v1."*) if [ "${seeds#*"$secret"}" = "$seeds" ]; then pass "the seed is stored encrypted in the database (v1.<iv>.<tag>.<ciphertext>), not in the clear"; else fail "the seed is stored in the clear"; fi ;;
+    *) fail "the stored seed does not look encrypted: ${seeds:0:30}" ;;
+  esac
 }
 
 # ======================================================================== main

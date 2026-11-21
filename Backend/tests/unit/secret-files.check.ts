@@ -33,8 +33,8 @@ function main(): void {
   try {
     // 1. the four secrets are the ones that can come from a file
     record(
-      [...SECRET_VARIABLES].sort().join(',') === ['DATA_GO_TH_API_KEY', 'MONGODB_URI', 'OPENROUTER_API_KEY', 'SMTP_PASS'].sort().join(','),
-      'the secrets that can come from a file are MONGODB_URI, SMTP_PASS, OPENROUTER_API_KEY and DATA_GO_TH_API_KEY'
+      [...SECRET_VARIABLES].sort().join(',') === ['DATA_GO_TH_API_KEY', 'MFA_ENCRYPTION_KEY', 'MONGODB_URI', 'OPENROUTER_API_KEY', 'SMTP_PASS'].sort().join(','),
+      'the secrets that can come from a file are MONGODB_URI, SMTP_PASS, OPENROUTER_API_KEY, DATA_GO_TH_API_KEY and MFA_ENCRYPTION_KEY'
     );
 
     // 2. a value is read, with one trailing newline removed

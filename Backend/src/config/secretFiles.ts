@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 // This is the same `_FILE` convention the official mongo and postgres images use.
 
 /** The variables that may be supplied as `<NAME>_FILE`. Only secrets belong here. */
-export const SECRET_VARIABLES = ['MONGODB_URI', 'SMTP_PASS', 'OPENROUTER_API_KEY', 'DATA_GO_TH_API_KEY'] as const;
+export const SECRET_VARIABLES = ['MONGODB_URI', 'SMTP_PASS', 'OPENROUTER_API_KEY', 'DATA_GO_TH_API_KEY', 'MFA_ENCRYPTION_KEY'] as const;
 
 export class SecretFileError extends Error {
   constructor(message: string) {

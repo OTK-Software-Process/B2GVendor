@@ -117,7 +117,7 @@ function checkCompose(dir: string): void {
   const secretsOf = (name: string): string => (services[name].secrets ?? []).map(s => s.source).sort().join(' ');
   const expectedSecrets: Record<string, string> = {
     mongo: 'mongo_api_password mongo_ca_pem mongo_root_password mongo_server_pem mongo_worker_password',
-    backend: 'data_go_th_api_key mongo_api_uri mongo_ca_pem smtp_pass',
+    backend: 'data_go_th_api_key mfa_encryption_key mongo_api_uri mongo_ca_pem smtp_pass',
     'ingestion-worker': 'data_go_th_api_key google_credentials mongo_ca_pem mongo_worker_uri openrouter_api_key smtp_pass',
     frontend: '',
     edge: ''
@@ -128,6 +128,10 @@ function checkCompose(dir: string): void {
   const apiUriOnlyForApi = !(services['ingestion-worker'].secrets ?? []).some(s => s.source === 'mongo_api_uri') && !(services.backend.secrets ?? []).some(s => s.source === 'mongo_worker_uri');
   record(apiUriOnlyForApi, 'each service gets only ITS OWN MongoDB address (the API cannot use the worker\'s login, nor the worker the API\'s)');
   record(!['backend', 'ingestion-worker', 'frontend', 'edge'].some(name => (services[name].secrets ?? []).some(s => s.source === 'mongo_root_password')), 'no application service is given the MongoDB root password');
+  // The key that protects every authenticator seed goes to the API alone: the worker, the
+  // website, the edge and the database never need to read a seed.
+  const mfaKeyHolders = Object.entries(services).filter(([, service]) => (service.secrets ?? []).some(s => s.source === 'mfa_encryption_key')).map(([name]) => name);
+  record(mfaKeyHolders.join() === 'backend', 'only the API is given the key that encrypts authenticator seeds (mfa_encryption_key)', mfaKeyHolders.join(','));
 
   // 5. the secret files compose mounts are the ones the generator makes and checks
   const generator = read('docker/secrets/generate.sh');
@@ -141,7 +145,7 @@ function checkCompose(dir: string): void {
   for (const name of ['backend', 'ingestion-worker']) {
     const environment = services[name].environment ?? {};
     record(environment.REQUIRE_SECURE_BACKENDS === 'true', `${name}: REQUIRE_SECURE_BACKENDS=true (no MongoDB without a login and TLS, no mail without TLS)`);
-    const direct = ['MONGODB_URI', 'SMTP_PASS', 'OPENROUTER_API_KEY', 'DATA_GO_TH_API_KEY', 'GOOGLE_APPLICATION_CREDENTIALS_JSON'].filter(variable => variable in environment);
+    const direct = ['MONGODB_URI', 'SMTP_PASS', 'OPENROUTER_API_KEY', 'DATA_GO_TH_API_KEY', 'MFA_ENCRYPTION_KEY', 'GOOGLE_APPLICATION_CREDENTIALS_JSON'].filter(variable => variable in environment);
     record(direct.length === 0, `${name}: no secret is passed as a value`, direct.join(','));
     const fileVariables = Object.keys(environment).filter(variable => variable.endsWith('_FILE'));
     const secretNames = new Set((services[name].secrets ?? []).map(s => s.source));
@@ -152,6 +156,7 @@ function checkCompose(dir: string): void {
   const backendEnvironment = services.backend.environment ?? {};
   record(backendEnvironment.CORS_ORIGIN === 'https://app.example.test', 'the API allows exactly the website\'s origin (CORS_ORIGIN)', String(backendEnvironment.CORS_ORIGIN));
   record(backendEnvironment.COOKIE_SAMESITE === 'lax' && backendEnvironment.NODE_ENV === 'production', 'the session cookie is SameSite=Lax and Secure (production), valid across the sibling hosts');
+  record(backendEnvironment.MFA_REQUIRED_FOR_STAFF === 'true' && backendEnvironment.MFA_ENCRYPTION_KEY_FILE === '/run/secrets/mfa_encryption_key', 'the API requires two-step sign-in for staff in production, with its key from a secret file (a value in Backend/.env cannot switch it off)');
 
   // 7. hardening of what we build and run
   for (const name of ['backend', 'ingestion-worker', 'frontend', 'edge']) {
@@ -263,8 +268,8 @@ function checkGenerator(parent: string): void {
   const dir = path.join(parent, 'secrets');
 
   const created = generator(dir, []);
-  record(created.status === 0, 'docker/secrets/generate.sh creates the MongoDB secrets', created.stderr.slice(0, 120));
-  const files = ['mongo_root_password', 'mongo_api_password', 'mongo_worker_password', 'mongo_api_uri', 'mongo_worker_uri', 'mongo_ca_pem', 'mongo_server_pem'];
+  record(created.status === 0, 'docker/secrets/generate.sh creates the MongoDB secrets and the two-step sign-in key', created.stderr.slice(0, 120));
+  const files = ['mongo_root_password', 'mongo_api_password', 'mongo_worker_password', 'mongo_api_uri', 'mongo_worker_uri', 'mongo_ca_pem', 'mongo_server_pem', 'mfa_encryption_key'];
   record(files.every(file => existsSync(path.join(dir, file))), 'every generated file exists');
   record(mode(dir) === '700', 'the secrets directory is private to its owner (0700)', mode(dir));
   record(!files.some(file => (statSync(path.join(dir, file)).mode & 0o022) !== 0), 'no secret file is writable by group or others');
@@ -286,6 +291,11 @@ function checkGenerator(parent: string): void {
   record(mode(path.join(dir, 'ca', 'ca.key')) === '600', 'the authority\'s private key is kept apart and readable only by its owner', mode(path.join(dir, 'ca', 'ca.key')));
   const subject = run('openssl', ['x509', '-in', path.join(dir, 'mongo_server_pem'), '-noout', '-ext', 'subjectAltName,extendedKeyUsage']).stdout;
   record(/DNS:mongo/.test(subject) && /TLS Web Server Authentication/.test(subject), 'the server certificate is for the host name "mongo" and for server authentication only', subject.replace(/\s+/g, ' ').trim());
+
+  // the seed-encryption key: base64 of exactly 32 random bytes, different on each deployment
+  const mfaKey = readFileSync(path.join(dir, 'mfa_encryption_key'), 'utf8').trim();
+  record(Buffer.from(mfaKey, 'base64').length === 32 && Buffer.from(mfaKey, 'base64').toString('base64') === mfaKey, 'mfa_encryption_key is base64 of exactly 32 bytes (AES-256)', `${Buffer.from(mfaKey, 'base64').length} bytes`);
+  record(!passwords.includes(mfaKey) && !apiUri.includes(mfaKey), 'the seed-encryption key is its own secret (not a password, not in a connection address)');
 
   // idempotent: running it again never replaces a secret
   const before = files.map(file => readFileSync(path.join(dir, file), 'utf8'));
@@ -329,6 +339,9 @@ function checkGenerator(parent: string): void {
   const other = path.join(parent, 'other-secrets');
   generator(other, []);
   rejects('a server certificate that the authority did not sign', /does not verify/, () => put('mongo_server_pem', readFileSync(path.join(other, 'mongo_server_pem'), 'utf8')), () => put('mongo_server_pem', serverPem));
+  saved = backup('mfa_encryption_key');
+  rejects('a seed-encryption key of the wrong length', /mfa_encryption_key must be base64 of exactly 32 bytes/, () => put('mfa_encryption_key', 'dG9vLXNob3J0\n'), () => put('mfa_encryption_key', saved));
+  rejects('a missing seed-encryption key', /mfa_encryption_key is missing/, () => rmSync(path.join(dir, 'mfa_encryption_key')), () => put('mfa_encryption_key', saved));
   rejects('a missing secret', /smtp_pass is missing/, () => rmSync(path.join(dir, 'smtp_pass')), () => put('smtp_pass', 'smtp-secret-value\n'));
   chmodSync(path.join(dir, 'smtp_pass'), 0o644);
   rejects('a secret file that everyone may write', /writable by everyone/, () => chmodSync(path.join(dir, 'smtp_pass'), 0o666), () => chmodSync(path.join(dir, 'smtp_pass'), 0o644));
@@ -346,7 +359,7 @@ function checkGenerator(parent: string): void {
 function checkSettingsFiles(): void {
   const uncommented = (relative: string): string[] => read(relative).split('\n').filter(line => /^[A-Z][A-Z0-9_]*=/.test(line)).map(line => line.split('=')[0]);
   const production = uncommented('Backend/.env.production.example');
-  const secretVariables = ['MONGODB_URI', 'SMTP_PASS', 'OPENROUTER_API_KEY', 'DATA_GO_TH_API_KEY'];
+  const secretVariables = ['MONGODB_URI', 'SMTP_PASS', 'OPENROUTER_API_KEY', 'DATA_GO_TH_API_KEY', 'MFA_ENCRYPTION_KEY'];
   record(!production.some(name => secretVariables.includes(name) || name.endsWith('_FILE')), 'Backend/.env.production.example sets no secret and no NAME_FILE (compose provides those)', production.filter(n => secretVariables.includes(n)).join(','));
   record(!production.includes('NODE_ENV') && !production.includes('CORS_ORIGIN') && !production.includes('APP_URL'), 'Backend/.env.production.example leaves NODE_ENV, APP_URL and CORS_ORIGIN to compose, so they cannot disagree with APP_HOST');
   const rootExample = read('.env.example');

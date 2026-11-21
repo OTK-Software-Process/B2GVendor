@@ -3,6 +3,7 @@ import * as adminStaffController from '../controllers/adminStaff.controller';
 import { requireSuperAdmin } from '../middlewares/requireRole';
 import { validate } from '../middlewares/validate.middleware';
 import { createAdminSchema, listStaffQuerySchema, updateAdminSchema } from '../validators/adminStaff.validator';
+import { mfaResetSchema } from '../validators/mfa.validator';
 import { asyncHandler } from '../utils/asyncHandler';
 
 // Mounted under /admin (requireAuth + requireAdmin applied there). Managing
@@ -21,4 +22,5 @@ adminStaffRouter.patch('/:id/suspend', asyncHandler(adminStaffController.suspend
 adminStaffRouter.patch('/:id/reactivate', asyncHandler(adminStaffController.reactivate));
 adminStaffRouter.post('/:id/sign-out', asyncHandler(adminStaffController.signOutEverywhere));
 adminStaffRouter.post('/:id/password-link', asyncHandler(adminStaffController.sendPasswordLink));
+adminStaffRouter.post('/:id/mfa-reset', validate(mfaResetSchema), asyncHandler(adminStaffController.resetMfa));
 adminStaffRouter.delete('/:id', asyncHandler(adminStaffController.remove));

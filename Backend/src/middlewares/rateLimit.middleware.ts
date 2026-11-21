@@ -68,3 +68,23 @@ export const pollLimiter = createLimiter(
   'Too many poll requests. Please wait a moment and try again.',
   req => (req.account ? `account:${String(req.account._id)}` : `ip:${req.ip}`)
 );
+
+// The second-factor answer at sign-in, per client address. (The per-account lock in
+// loginLockout.service.ts is what stops guessing spread over many addresses; this
+// stops one address flooding the route.)
+export const mfaVerifyLimiter = createLimiter(
+  'mfa-verify',
+  15 * MINUTE,
+  10,
+  'Too many verification attempts. Please try again in a few minutes.'
+);
+
+// Changing a second factor (set up, turn off, new recovery codes), per signed-in
+// account: each needs the password and a code, so a handful is plenty.
+export const mfaManageLimiter = createLimiter(
+  'mfa-manage',
+  15 * MINUTE,
+  10,
+  'Too many attempts. Please try again in a few minutes.',
+  req => (req.account ? `account:${String(req.account._id)}` : `ip:${req.ip}`)
+);

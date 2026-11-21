@@ -23,7 +23,17 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     }
   }, [authChecked, isVisitor, pathname, router]);
 
-  if (!authChecked || isVisitor) {
+  // An Admin or Super Admin who has not set up two-step sign-in can use nothing in the
+  // admin area (the server answers 403 MFA_SETUP_REQUIRED): take them to set it up, and
+  // bring them back here afterwards.
+  const mustSetUpMfa = !isVisitor && !!account?.mfaSetupRequired;
+  useEffect(() => {
+    if (authChecked && mustSetUpMfa) {
+      router.replace(`/account/security?next=${encodeURIComponent(pathname)}`);
+    }
+  }, [authChecked, mustSetUpMfa, pathname, router]);
+
+  if (!authChecked || isVisitor || mustSetUpMfa) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white text-slate-500 text-sm">
         {lang === 'en' ? 'Checking access…' : 'กำลังตรวจสอบสิทธิ์การเข้าใช้งาน…'}

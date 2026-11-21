@@ -7,6 +7,8 @@ export type ErrorCode =
   | 'ACCOUNT_SUSPENDED'
   | 'ACCOUNT_LOCKED'
   | 'NOT_AUTHENTICATED'
+  | 'INVALID_MFA_CODE'
+  | 'MFA_SETUP_REQUIRED'
   | 'FORBIDDEN'
   | 'CSRF_BLOCKED'
   | 'UNSUPPORTED_MEDIA_TYPE'
@@ -72,6 +74,15 @@ export class AppError extends Error {
       undefined,
       { retryAfterSeconds }
     );
+  }
+
+  static invalidMfaCode(): AppError {
+    return new AppError(401, 'INVALID_MFA_CODE', 'That code is not valid. Check the code in your authenticator app, or use a recovery code.');
+  }
+
+  // A staff account that has not set up its second factor may use nothing but the setup.
+  static mfaSetupRequired(): AppError {
+    return new AppError(403, 'MFA_SETUP_REQUIRED', 'Set up two-step verification before using the admin area.');
   }
 
   static notAuthenticated(message = 'You are not signed in.'): AppError {

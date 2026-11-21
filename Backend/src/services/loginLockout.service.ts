@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { Types } from 'mongoose';
 import { Account } from '../models/account.model';
 import { LoginFailure } from '../models/loginFailure.model';
+import { MfaCredential } from '../models/mfaCredential.model';
 import { audit } from './audit.service';
 
 // Per-ACCOUNT brute-force protection. loginLimiter only counts per IP, which an
@@ -54,24 +55,34 @@ function claimed(doc: { lockedUntil?: Date | null } | null, now: Date): AttemptR
  * same atomic update once the count is past the free attempts. Shared by real
  * accounts and by unknown addresses, so both lock at exactly the same moment.
  */
-function claimAttemptUpdate(now: Date) {
+// The names of the three fields a lock is kept in. The same logic guards an
+// account's password, an unknown address, and an account's second factor.
+interface LockFields {
+  count: string;
+  last: string;
+  lock: string;
+}
+const SIGN_IN_FIELDS: LockFields = { count: 'failedLoginCount', last: 'lastFailedLoginAt', lock: 'lockedUntil' };
+const MFA_FIELDS: LockFields = { count: 'failedCount', last: 'lastFailedAt', lock: 'lockedUntil' };
+
+function claimAttemptUpdate(now: Date, fields: LockFields = SIGN_IN_FIELDS) {
   const forgetBefore = new Date(now.getTime() - FORGET_AFTER_MS);
   const failures = {
     $cond: [
-      { $lt: [{ $ifNull: ['$lastFailedLoginAt', new Date(0)] }, forgetBefore] },
+      { $lt: [{ $ifNull: [`$${fields.last}`, new Date(0)] }, forgetBefore] },
       1,
-      { $add: [{ $ifNull: ['$failedLoginCount', 0] }, 1] }
+      { $add: [{ $ifNull: [`$${fields.count}`, 0] }, 1] }
     ]
   };
   const lockMs = {
-    $min: [MAX_LOCK_MS, { $multiply: [BASE_LOCK_MS, { $pow: [2, { $subtract: ['$failedLoginCount', FREE_ATTEMPTS + 1] }] }] }]
+    $min: [MAX_LOCK_MS, { $multiply: [BASE_LOCK_MS, { $pow: [2, { $subtract: [`$${fields.count}`, FREE_ATTEMPTS + 1] }] }] }]
   };
   return [
-    { $set: { failedLoginCount: failures, lastFailedLoginAt: now } },
+    { $set: { [fields.count]: failures, [fields.last]: now } },
     {
       $set: {
-        lockedUntil: {
-          $cond: [{ $gt: ['$failedLoginCount', FREE_ATTEMPTS] }, { $add: [now, lockMs] }, '$$REMOVE']
+        [fields.lock]: {
+          $cond: [{ $gt: [`$${fields.count}`, FREE_ATTEMPTS] }, { $add: [now, lockMs] }, '$$REMOVE']
         }
       }
     }
@@ -146,4 +157,29 @@ export async function clearFailedLogins(accountId: Types.ObjectId): Promise<void
   await audit.withoutAuto(() =>
     Account.updateOne({ _id: accountId }, { $set: { failedLoginCount: 0 }, $unset: { lockedUntil: 1, lastFailedLoginAt: 1 } }).exec()
   );
+}
+
+// ------------------------------------------------------------------ second factor
+
+/**
+ * The same brute-force protection for the second factor, in counters of its own
+ * (on the account's MfaCredential): 4 free wrong codes, then locks of 1, 2, 4 ...
+ * up to 30 minutes. They are NOT cleared by a correct password, only by a correct
+ * code: otherwise anyone who knows the password could sign in again after every
+ * few wrong guesses and never be locked out of guessing the code.
+ */
+export async function reserveMfaAttempt(accountId: Types.ObjectId, now = new Date()): Promise<AttemptReservation> {
+  const updated = await MfaCredential.findOneAndUpdate({ accountId, ...notLockedAt(now) }, claimAttemptUpdate(now, MFA_FIELDS), {
+    new: true,
+    projection: { _id: 1, lockedUntil: 1 }
+  }).exec();
+  const ok = claimed(updated, now);
+  if (ok) return ok;
+
+  const current = await MfaCredential.findOne({ accountId }).select('lockedUntil').lean();
+  return { allowed: false, retryAfterSeconds: Math.max(1, lockSecondsLeft(current?.lockedUntil, now)) };
+}
+
+export async function clearMfaFailures(accountId: Types.ObjectId): Promise<void> {
+  await MfaCredential.updateOne({ accountId }, { $set: { failedCount: 0 }, $unset: { lockedUntil: 1, lastFailedAt: 1 } }).exec();
 }

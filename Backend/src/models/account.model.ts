@@ -27,6 +27,12 @@ export interface IAccount extends Document {
   role: AccountRole;
   permissions: Permission[];
   emailVerified: boolean;
+  // Whether two-step verification is on. The secret and the recovery codes are NOT here:
+  // they live in their own collection (models/mfaCredential.model.ts), which no account
+  // query returns. A flag is all the sign-in and the screens need.
+  mfaEnabled: boolean;
+  // Virtual: a staff account that must use a second factor and has not set it up yet.
+  readonly mfaSetupRequired: boolean;
 
   // Email verification and notification preferences. In-app notifications
   // are always created regardless of these; verification and preferences
@@ -173,6 +179,7 @@ const AccountSchema = new Schema<IAccount>(
     permissions: { type: [{ type: String, enum: PERMISSIONS }], default: [] },
     // Keep existing/provisioned accounts working; self-registration explicitly starts false.
     emailVerified: { type: Boolean, default: true },
+    mfaEnabled: { type: Boolean, default: false },
     emailNotificationsEnabled: { type: Boolean, default: true },
     notificationFrequency: {
       type: String,
@@ -203,6 +210,13 @@ const AccountSchema = new Schema<IAccount>(
 );
 
 AccountSchema.index({ createdAt: -1 });
+
+// A staff account that must use a second factor and has not set it up: it can reach
+// nothing but the setup (middlewares/requireRole.ts). Read at call time, so the
+// requirement can be switched with MFA_REQUIRED_FOR_STAFF without a migration.
+AccountSchema.virtual("mfaSetupRequired").get(function (this: IAccount) {
+  return isStaffRole(this.role) && env.MFA_REQUIRED_FOR_STAFF && !this.mfaEnabled;
+});
 
 AccountSchema.pre("validate", function (next) {
   if (this.type === "business" && !this.businessProfile) {

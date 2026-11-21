@@ -8,6 +8,8 @@ import { deleteAccountAndData, SetupEmailResult, sendPasswordLink } from './admi
 import { audit } from './audit.service';
 import { revokeAllSessions } from './session.service';
 import { CreateAdminInput, UpdateAdminInput } from '../validators/adminStaff.validator';
+import { MfaResetInput } from '../validators/mfa.validator';
+import { resetByAdmin } from './mfa.service';
 
 // Admin (staff) account management. Reserved for Super Admins (enforced by the
 // router). Rules of engagement:
@@ -39,6 +41,10 @@ export interface StaffView {
   activeSessions: number;
   /** false for Super Admins: shown, but not changeable here. */
   manageable: boolean;
+  /** Whether two-step verification is on for this account (never the secret or the codes). */
+  mfaEnabled: boolean;
+  /** Must use it and has not set it up yet: the account can reach nothing but the setup. */
+  mfaSetupRequired: boolean;
 }
 
 export interface StaffListFilter {
@@ -70,7 +76,9 @@ function toStaffView(account: IAccount, lastActiveAt: Date | null, activeSession
     updatedAt: account.updatedAt,
     lastActiveAt,
     activeSessions,
-    manageable: role === 'admin'
+    manageable: role === 'admin',
+    mfaEnabled: !!account.mfaEnabled,
+    mfaSetupRequired: account.mfaSetupRequired
   };
 }
 
@@ -86,7 +94,7 @@ async function loadActivity(accountIds: Types.ObjectId[]) {
         last: { $max: '$lastActiveAt' },
         live: {
           $sum: {
-            $cond: [{ $and: [{ $not: ['$revokedAt'] }, { $gt: ['$expiresAt', now] }] }, 1, 0]
+            $cond: [{ $and: [{ $not: ['$revokedAt'] }, { $not: ['$mfaPending'] }, { $gt: ['$expiresAt', now] }] }, 1, 0]
           }
         }
       }
@@ -244,4 +252,14 @@ export async function deleteAdmin(id: string): Promise<{ id: string; email: stri
   const account = await findManageableAdmin(id);
   await deleteAccountAndData(account._id);
   return { id: account._id.toString(), email: account.email };
+}
+
+// An Admin lost their authenticator and recovery codes (ASVS V6.4.4). Only a Super Admin
+// may reset it, and only for a plain Admin (a Super Admin's own factor is reset from the
+// command line: docs/Security.md section 15). The Super Admin re-enters their own password,
+// states how the identity was checked and why; all of it is recorded. The Admin must set up
+// a new factor at the next sign-in.
+export async function resetAdminMfa(id: string, actor: IAccount, input: MfaResetInput): Promise<{ sessionsRevoked: number }> {
+  const account = await findManageableAdmin(id);
+  return resetByAdmin(account, { actor, actorPassword: input.password, identityCheck: input.identityCheck, reason: input.reason });
 }

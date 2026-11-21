@@ -888,6 +888,8 @@ export interface BackendVendor {
   updatedAt: string;
   followedTagsCount: number;
   lastActiveAt: string | null;
+  /** Two-step sign-in is on for this vendor. */
+  mfaEnabled: boolean;
 }
 
 export interface BackendVendorList {
@@ -951,6 +953,22 @@ export function signOutVendorAccount(id: string): Promise<{ revoked: number }> {
   return api.post<{ revoked: number }>(`/admin/accounts/${encodeURIComponent(id)}/sign-out`);
 }
 
+// Removing someone's two-step sign-in after they lost their authenticator and their
+// recovery codes (ASVS V6.4.4): the administrator's OWN password, how the person's
+// identity was checked, and what was done. All of it goes in the audit log.
+export const MFA_IDENTITY_CHECKS = ['in_person', 'video_call', 'callback_to_known_number', 'other_documented'] as const;
+export type BackendIdentityCheck = (typeof MFA_IDENTITY_CHECKS)[number];
+
+export interface BackendMfaResetInput {
+  password: string;
+  identityCheck: BackendIdentityCheck;
+  reason: string;
+}
+
+export function resetVendorMfa(id: string, input: BackendMfaResetInput): Promise<{ sessionsRevoked: number }> {
+  return api.post<{ sessionsRevoked: number }>(`/admin/accounts/${encodeURIComponent(id)}/mfa-reset`, input);
+}
+
 // The signed-in account's own sessions (account page). Ending one asks for the password again.
 export interface BackendSessionView {
   id: string;
@@ -1004,6 +1022,9 @@ export interface BackendStaff {
   /** Live (not revoked, not expired) sessions: who could act right now. */
   activeSessions: number;
   manageable: boolean;
+  /** Two-step sign-in is on, and whether this account still has to set it up. */
+  mfaEnabled: boolean;
+  mfaSetupRequired: boolean;
 }
 
 export interface BackendStaffList {
@@ -1050,6 +1071,11 @@ export function suspendAdminAccount(id: string): Promise<BackendStaff> {
 
 export function reactivateAdminAccount(id: string): Promise<BackendStaff> {
   return api.patch<BackendStaff>(`/admin/staff/${encodeURIComponent(id)}/reactivate`);
+}
+
+// Super Admin only, and only for a plain Admin: a Super Admin is reset on the server.
+export function resetAdminMfa(id: string, input: BackendMfaResetInput): Promise<{ sessionsRevoked: number }> {
+  return api.post<{ sessionsRevoked: number }>(`/admin/staff/${encodeURIComponent(id)}/mfa-reset`, input);
 }
 
 export function signOutAdminAccount(id: string): Promise<{ revoked: number }> {

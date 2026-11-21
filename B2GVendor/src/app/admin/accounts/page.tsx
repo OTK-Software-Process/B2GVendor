@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { ApiError } from '@/lib/api';
 import { ConfirmModal } from '@/components/ConfirmModal';
+import { MfaResetModal } from '@/components/MfaResetModal';
 import { formatDate, setupEmailMessage, Translate } from '@/lib/adminUi';
 import { ErrorRetry } from '@/components/ErrorRetry';
 import { initialQueryParam } from '@/lib/auditUi';
@@ -16,6 +17,7 @@ import {
   deleteVendor,
   fetchVendors,
   reactivateVendor,
+  resetVendorMfa,
   sendVendorPasswordLink,
   signOutVendorAccount,
   suspendVendor,
@@ -35,7 +37,8 @@ import {
   ChevronRight,
   AlertTriangle,
   Loader2,
-  LogOut
+  LogOut,
+  ShieldOff
 } from 'lucide-react';
 
 const PAGE_SIZE = 20;
@@ -66,6 +69,8 @@ function VendorFormModal({
   const [saving, setSaving] = useState(false);
   const [sendingLink, setSendingLink] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [resettingMfa, setResettingMfa] = useState(false);
+  const [mfaWasReset, setMfaWasReset] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [linkNotice, setLinkNotice] = useState<{ ok: boolean; text: string } | null>(null);
@@ -169,6 +174,7 @@ function VendorFormModal({
     ) : null;
 
   return (
+    <>
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 animate-fade-in">
       <div role="dialog" aria-modal="true" aria-labelledby="vendor-form-title" className="bg-white border border-slate-200 rounded-3xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto space-y-5 animate-scale-in">
         <div className="flex items-center justify-between">
@@ -255,6 +261,17 @@ function VendorFormModal({
                 {signingOut ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogOut className="w-3.5 h-3.5" />}
                 {t('ออกจากระบบทุกอุปกรณ์', 'Sign out everywhere')}
               </button>
+              {vendor.mfaEnabled && !mfaWasReset && (
+                <button
+                  type="button"
+                  onClick={() => setResettingMfa(true)}
+                  disabled={sendingLink || signingOut}
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-amber-200 text-xs font-bold text-amber-700 hover:bg-amber-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  <ShieldOff className="w-3.5 h-3.5" />
+                  {t('รีเซ็ตการยืนยันตัวตนสองขั้นตอน', 'Reset two-step sign-in')}
+                </button>
+              )}
             </div>
             {vendor.status === 'suspended' && (
               <p className="text-[11px] text-slate-500">{t('บัญชีถูกระงับ — เปิดใช้งานก่อนจึงจะส่งลิงก์ได้', 'Suspended account — reactivate it before sending a link.')}</p>
@@ -288,6 +305,26 @@ function VendorFormModal({
         </div>
       </div>
     </div>
+    {resettingMfa && vendor && (
+      <MfaResetModal
+        name={vendor.name}
+        email={vendor.email}
+        onSubmit={input => resetVendorMfa(vendor.id, input)}
+        onClose={() => setResettingMfa(false)}
+        onDone={({ sessionsRevoked }) => {
+          setResettingMfa(false);
+          setMfaWasReset(true);
+          setLinkNotice({
+            ok: true,
+            text: t(
+              `รีเซ็ตการยืนยันตัวตนสองขั้นตอนของ ${vendor.name} แล้ว (ออกจากระบบ ${sessionsRevoked} เซสชัน) และส่งอีเมลแจ้งเจ้าของบัญชีแล้ว`,
+              `Two-step sign-in reset for ${vendor.name} (${sessionsRevoked} session(s) ended). Its owner has been emailed.`
+            )
+          });
+        }}
+      />
+    )}
+    </>
   );
 }
 

@@ -4,9 +4,14 @@
 #
 #   docker/secrets/generate.sh                 create what is missing: random passwords for
 #                                              MongoDB and its three users, the connection
-#                                              address of each service, and the MongoDB TLS
-#                                              certificate authority and server certificate.
+#                                              address of each service, the MongoDB TLS
+#                                              certificate authority and server certificate,
+#                                              and the key that encrypts the two-step sign-in
+#                                              seeds (mfa_encryption_key).
 #                                              Never overwrites a file that already exists.
+#                                              Keep a copy of mfa_encryption_key somewhere safe:
+#                                              without it every enrolled authenticator is
+#                                              unreadable (people must re-enrol; docs/Deployment.md).
 #   docker/secrets/generate.sh set NAME        store a secret that comes from a provider
 #                                              (smtp_pass, openrouter_api_key,
 #                                              data_go_th_api_key, google_credentials). The
@@ -33,7 +38,7 @@ db_name="b2gvendor"
 mongo_host="mongo"
 
 # What compose mounts, by name.
-generated="mongo_root_password mongo_api_password mongo_worker_password mongo_api_uri mongo_worker_uri mongo_ca_pem mongo_server_pem"
+generated="mongo_root_password mongo_api_password mongo_worker_password mongo_api_uri mongo_worker_uri mongo_ca_pem mongo_server_pem mfa_encryption_key"
 provided="smtp_pass openrouter_api_key data_go_th_api_key google_credentials"
 
 say() { printf '%s\n' "$*"; }
@@ -130,6 +135,10 @@ cmd_generate() {
   chmod 0644 "$dir/mongo_ca_pem"
   if have mongo_server_pem; then say "  keeping mongo_server_pem"; else make_server_certificate; fi
 
+  # The key that encrypts every authenticator seed in the database (AES-256-GCM, 32 bytes).
+  # Never replaced once it exists: a new key could not read the seeds the old one wrote.
+  if have mfa_encryption_key; then say "  keeping mfa_encryption_key"; else say "  generating mfa_encryption_key"; write_secret mfa_encryption_key "$(openssl rand -base64 32)"; fi
+
   say ""
   missing=""
   for name in $provided; do have "$name" || missing="$missing $name"; done
@@ -220,6 +229,13 @@ cmd_check() {
     uri="$(head -n 1 "$dir/mongo_${service}_uri")"
     if [ "$uri" = "$(connection_address "$service")" ]; then ok "mongo_${service}_uri is b2g_${service}'s address, with its password, requiring TLS"; else bad "mongo_${service}_uri does not match mongo_${service}_password (regenerate: delete it and run the script)"; fi
   done
+
+  # The seed-encryption key: base64 of exactly 32 random bytes, and not the example from the docs.
+  if [ -s "$dir/mfa_encryption_key" ]; then
+    local key_bytes
+    key_bytes="$(head -n 1 "$dir/mfa_encryption_key" | openssl base64 -d -A 2>/dev/null | wc -c | tr -d ' ')"
+    if [ "$key_bytes" = "32" ]; then ok "mfa_encryption_key is 32 bytes (AES-256)"; else bad "mfa_encryption_key must be base64 of exactly 32 bytes (it decodes to ${key_bytes:-0}); make one with: openssl rand -base64 32"; fi
+  fi
 
   # The certificates: signed by our authority, valid for the host name, not about to expire.
   if [ -s "$dir/mongo_server_pem" ] && [ -s "$dir/mongo_ca_pem" ]; then

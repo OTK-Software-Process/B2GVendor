@@ -38,6 +38,11 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
     if (!session || session.revokedAt || session.expiresAt.getTime() <= Date.now()) {
       throw AppError.notAuthenticated();
     }
+    // A challenge (the password was right, the second factor is still owed) is not a
+    // sign-in: it is good for answering the second factor and nothing else.
+    if (session.mfaPending) {
+      throw AppError.notAuthenticated();
+    }
 
     const account = await Account.findById(session.accountId);
     if (!account) {
@@ -66,6 +71,32 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
       await Session.updateOne({ _id: session._id }, { lastActiveAt: now });
     }
 
+    next();
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * For the second-factor answer only: accepts the CHALLENGE session a correct
+ * password produced, and nothing else. (requireAuth refuses exactly that session.)
+ */
+export async function requireMfaChallenge(req: Request, _res: Response, next: NextFunction): Promise<void> {
+  try {
+    const raw = req.cookies?.[SESSION_COOKIE_NAME];
+    if (typeof raw !== 'string' || raw.length === 0) throw AppError.notAuthenticated();
+
+    const session = await Session.findOne({ tokenHash: hashSessionToken(raw) });
+    if (!session || !session.mfaPending || session.revokedAt || session.expiresAt.getTime() <= Date.now()) {
+      throw AppError.notAuthenticated('Your sign-in expired. Please enter your password again.');
+    }
+
+    const account = await Account.findById(session.accountId);
+    if (!account) throw AppError.notAuthenticated();
+    if (account.status === 'suspended') throw AppError.accountSuspended();
+
+    req.account = account;
+    req.authSession = session;
     next();
   } catch (err) {
     next(err);

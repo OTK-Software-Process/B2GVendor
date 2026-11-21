@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import * as adminStaffService from '../services/adminStaff.service';
 import { created, ok } from '../utils/apiResponse';
 import { CreateAdminInput, UpdateAdminInput } from '../validators/adminStaff.validator';
+import { MfaResetInput } from '../validators/mfa.validator';
+import { AppError } from '../utils/AppError';
 
 export async function list(req: Request, res: Response): Promise<void> {
   ok(res, await adminStaffService.listStaff(req.query as adminStaffService.StaffListFilter));
@@ -37,4 +39,9 @@ export async function sendPasswordLink(req: Request, res: Response): Promise<voi
 
 export async function remove(req: Request, res: Response): Promise<void> {
   ok(res, await adminStaffService.deleteAdmin(req.params.id));
+}
+
+export async function resetMfa(req: Request, res: Response): Promise<void> {
+  if (!req.account) throw AppError.notAuthenticated();
+  ok(res, await adminStaffService.resetAdminMfa(req.params.id, req.account, req.body as MfaResetInput));
 }

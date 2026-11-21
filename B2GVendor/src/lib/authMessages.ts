@@ -18,6 +18,19 @@ const PASSWORD_TOO_LONG = 'Password must be at most 128 characters';
 const PASSWORD_TOO_GUESSABLE =
   'This password is too easy to guess: it is mostly the name of this site, your name or your email address. Add words of your own.';
 
+// Two-step sign-in (Backend/src/services/mfa.service.ts, utils/AppError.ts).
+const MFA_INVALID_CODE =
+  'That code is not valid. Check the code in your authenticator app, or use a recovery code.';
+const MFA_SETUP_REQUIRED = 'Set up two-step verification before using the admin area.';
+const MFA_SETUP_EXPIRED = 'The setup has expired. Start again to get a new secret.';
+const MFA_ALREADY_ON = 'Two-step verification is already on. Turn it off first to set up a new authenticator.';
+const MFA_REQUIRED_FOR_ROLE =
+  'Two-step verification is required for your role and cannot be turned off. If you lost your authenticator, ask a Super Admin to reset it.';
+const MFA_NOT_ON = 'Two-step verification is not on for this account.';
+const MFA_UNAVAILABLE = 'Two-step verification is not available on this server.';
+const MFA_VERIFY_RATE_LIMIT = 'Too many verification attempts. Please try again in a few minutes.';
+const MFA_MANAGE_RATE_LIMIT = 'Too many attempts. Please try again in a few minutes.';
+
 export function localizeAuthError(message: string, lang: AppLang): string {
   if (lang === 'en') {
     return message;
@@ -25,10 +38,28 @@ export function localizeAuthError(message: string, lang: AppLang): string {
 
   const locked = ACCOUNT_LOCKED_MESSAGE.exec(message);
   if (locked) {
-    return `กรอกรหัสผ่านผิดหลายครั้ง บัญชีถูกล็อกชั่วคราว กรุณาลองใหม่ในอีก ${locked[1]} นาที`;
+    return `กรอกรหัสผิดหลายครั้ง บัญชีถูกล็อกชั่วคราว กรุณาลองใหม่ในอีก ${locked[1]} นาที`;
   }
 
   switch (message) {
+    case MFA_INVALID_CODE:
+      return 'รหัสไม่ถูกต้อง กรุณาตรวจสอบรหัสในแอปยืนยันตัวตน หรือใช้รหัสกู้คืน';
+    case MFA_SETUP_REQUIRED:
+      return 'กรุณาตั้งค่าการยืนยันตัวตนสองขั้นตอนก่อนใช้งานส่วนผู้ดูแลระบบ';
+    case MFA_SETUP_EXPIRED:
+      return 'การตั้งค่าหมดอายุแล้ว กรุณาเริ่มใหม่เพื่อรับรหัสลับใหม่';
+    case MFA_ALREADY_ON:
+      return 'เปิดใช้การยืนยันตัวตนสองขั้นตอนอยู่แล้ว หากต้องการเปลี่ยนแอป ให้ปิดก่อนแล้วตั้งค่าใหม่';
+    case MFA_REQUIRED_FOR_ROLE:
+      return 'บทบาทของคุณต้องใช้การยืนยันตัวตนสองขั้นตอน จึงปิดไม่ได้ หากทำแอปหาย ให้ขอให้ผู้ดูแลระบบสูงสุดรีเซ็ตให้';
+    case MFA_NOT_ON:
+      return 'บัญชีนี้ยังไม่ได้เปิดใช้การยืนยันตัวตนสองขั้นตอน';
+    case MFA_UNAVAILABLE:
+      return 'เซิร์ฟเวอร์นี้ยังไม่รองรับการยืนยันตัวตนสองขั้นตอน';
+    case MFA_VERIFY_RATE_LIMIT:
+      return 'ลองยืนยันรหัสบ่อยเกินไป กรุณาลองใหม่ในอีกสักครู่';
+    case MFA_MANAGE_RATE_LIMIT:
+      return 'ลองบ่อยเกินไป กรุณาลองใหม่ในอีกสักครู่';
     case SIGN_IN_RATE_LIMIT_MESSAGE:
       return 'พยายามเข้าสู่ระบบบ่อยเกินไป กรุณาลองใหม่ในอีกสักครู่';
     case PASSWORD_RESET_RATE_LIMIT_MESSAGE:

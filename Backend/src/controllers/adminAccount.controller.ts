@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import * as adminAccountService from '../services/adminAccount.service';
 import { created, ok } from '../utils/apiResponse';
 import { CreateVendorInput, UpdateVendorInput } from '../validators/adminAccount.validator';
+import { MfaResetInput } from '../validators/mfa.validator';
+import { AppError } from '../utils/AppError';
 
 export async function list(req: Request, res: Response): Promise<void> {
   ok(res, await adminAccountService.listVendors(req.query as adminAccountService.VendorListFilter));
@@ -37,4 +39,9 @@ export async function sendPasswordLink(req: Request, res: Response): Promise<voi
 
 export async function remove(req: Request, res: Response): Promise<void> {
   ok(res, await adminAccountService.deleteVendor(req.params.id));
+}
+
+export async function resetMfa(req: Request, res: Response): Promise<void> {
+  if (!req.account) throw AppError.notAuthenticated();
+  ok(res, await adminAccountService.resetVendorMfa(req.params.id, req.account, req.body as MfaResetInput));
 }

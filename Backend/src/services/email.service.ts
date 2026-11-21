@@ -169,6 +169,45 @@ export async function sendPasswordChangedEmail(to: string, name: string, how: 'c
   });
 }
 
+export type MfaNotice = 'enabled' | 'disabled' | 'recovery_codes_regenerated' | 'recovery_code_used' | 'reset';
+
+const MFA_NOTICE_TEXT: Record<MfaNotice, { th: string; en: string; severe: boolean }> = {
+  enabled: { th: 'เปิดการยืนยันตัวตนสองขั้นตอน (แอปยืนยันตัวตน)', en: 'turned on two-step verification (authenticator app)', severe: false },
+  disabled: { th: 'ปิดการยืนยันตัวตนสองขั้นตอน', en: 'turned off two-step verification', severe: true },
+  recovery_codes_regenerated: { th: 'สร้างรหัสกู้คืนชุดใหม่ (ชุดเดิมใช้ไม่ได้อีกแล้ว)', en: 'generated new recovery codes (the old ones no longer work)', severe: true },
+  recovery_code_used: { th: 'ใช้รหัสกู้คืนเพื่อเข้าสู่ระบบ', en: 'a recovery code was used to sign in', severe: true },
+  reset: { th: 'ผู้ดูแลระบบรีเซ็ตการยืนยันตัวตนสองขั้นตอนของคุณหลังจากตรวจสอบตัวตน และอุปกรณ์ทั้งหมดถูกออกจากระบบแล้ว', en: 'an administrator reset your two-step verification after checking your identity, and all your devices were signed out', severe: true }
+};
+
+/**
+ * Sent after every change to a second factor (ASVS V6.3.7 in spirit): turning it
+ * on or off, new recovery codes, a recovery code used to sign in, an Admin reset.
+ * It says what happened and when and points at the way to take the account back;
+ * it carries no link that changes anything and never a code or a secret. Best
+ * effort: the change has already happened.
+ */
+export async function sendMfaNoticeEmail(to: string, name: string, what: MfaNotice): Promise<void> {
+  const resetUrl = `${env.APP_URL}/forgot-password`;
+  const when = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', dateStyle: 'long', timeStyle: 'short' });
+  const notice = MFA_NOTICE_TEXT[what];
+
+  await send({
+    to,
+    subject: 'มีการเปลี่ยนแปลงการยืนยันตัวตนสองขั้นตอน | A change to your B2G Vendor two-step verification',
+    text:
+      `สวัสดีคุณ ${name}\n\nบัญชี B2G Vendor ของคุณ: ${notice.th} เมื่อ ${when}\n` +
+      (notice.severe ? `หากไม่ใช่คุณ กรุณาตั้งรหัสผ่านใหม่ทันทีที่ ${resetUrl} และแจ้งผู้ดูแลระบบ\n\n` : '\n') +
+      `Your B2G Vendor account: ${notice.en} on ${when} (Bangkok time).\n` +
+      (notice.severe ? `If this was not you, reset your password now: ${resetUrl} and tell an administrator.` : 'If this was not you, reset your password and tell an administrator.'),
+    html: layout(
+      'มีการเปลี่ยนแปลงการยืนยันตัวตนสองขั้นตอน',
+      `สวัสดีคุณ ${name} — ${notice.th} เมื่อ ${when} หากเป็นคุณ ไม่ต้องดำเนินการใด ๆ หากไม่ใช่คุณ กรุณาตั้งรหัสผ่านใหม่ทันทีและแจ้งผู้ดูแลระบบ`,
+      'ตั้งรหัสผ่านใหม่',
+      resetUrl
+    )
+  });
+}
+
 /**
  * Sent instead of a verification email when someone signs up with an email that
  * already has an account. The sign-up itself answers exactly as for a new

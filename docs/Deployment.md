@@ -91,12 +91,13 @@ Edit `.env`: set `APP_HOST`, `API_HOST` and `ACME_EMAIL`, and add the line
 `COMPOSE_FILE=docker-compose.yml:docker-compose.prod.yml`, so that a plain `docker compose` can never
 start the local stack by mistake. Edit `Backend/.env`: set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER` and
 `MAIL_FROM`. **Put no secret in either file**: the API and the worker refuse to start if
-`MONGODB_URI`, `SMTP_PASS`, `OPENROUTER_API_KEY` or `DATA_GO_TH_API_KEY` is set there as well as in
-a secret file.
+`MONGODB_URI`, `SMTP_PASS`, `OPENROUTER_API_KEY`, `DATA_GO_TH_API_KEY` or `MFA_ENCRYPTION_KEY` is set
+there as well as in a secret file.
 
 **2. Secrets.** The generator makes the MongoDB ones (random 40-character passwords for the root
 user and the two service users, each service's connection address, and a private certificate
-authority with a server certificate):
+authority with a server certificate) and the key that encrypts the authenticator secrets of two-step
+sign-in (`mfa_encryption_key`, 32 random bytes, base64):
 
 ```bash
 docker/secrets/generate.sh
@@ -114,8 +115,12 @@ docker/secrets/generate.sh check
 ```
 
 `check` stops you if a password is short, repeated or a default value, an address and its password
-disagree, a certificate does not verify or is about to expire, or a file is writable by everyone. The
-`secrets/` folder is private to you (mode 0700) and git ignores it.
+disagree, a certificate does not verify or is about to expire, the two-step key is not exactly 32
+bytes, or a file is writable by everyone. The `secrets/` folder is private to you (mode 0700) and git
+ignores it.
+
+**Back up `secrets/mfa_encryption_key` somewhere safe, apart from the database backups.** It is never
+replaced once it exists, and without it every enrolled authenticator is unreadable (section 5).
 
 **3. Start.**
 
@@ -129,7 +134,9 @@ and asks Let's Encrypt for two certificates. ClamAV downloads its signatures for
 then a TOR file scan fails closed and is retried at the next poll.
 
 **4. The first Super Admin, and the sites.** The production image has no `tsx`, so run the compiled
-scripts. Type the password without echo, so it is not left in your shell history:
+scripts. Staff must use two-step sign-in, so the first sign-in of this account is taken straight to
+**Account security** to scan a QR code with an authenticator app and save its ten recovery codes; until
+that is done every staff page answers `403 MFA_SETUP_REQUIRED`. Type the password without echo, so it is not left in your shell history:
 
 ```bash
 read -rs SEED_SUPERADMIN_PASSWORD; export SEED_SUPERADMIN_PASSWORD
@@ -167,9 +174,12 @@ docker/verify-deployment.sh local
 It builds and starts MongoDB, the API, the worker, the website and the edge with throw-away secrets and
 Caddy's own test CA, on host names under `.localhost`; runs the probe above; then checks what only the
 inside can show: only the edge publishes a port; who runs as root; which secrets each service can read;
-that none is in a service's environment; that MongoDB refuses a connection with no login or no TLS; that
-each MongoDB user sees only the application database; and that a real sign-in works across the two host
-names, with the right cookie attributes. It removes everything afterwards (`--keep` to look around).
+that none is in a service's environment (the two-step key included, and only the API is given it); that
+MongoDB refuses a connection with no login or no TLS; that each MongoDB user sees only the application
+database; that a real sign-in works across the two host names, with the right cookie attributes; and
+that two-step sign-in works end to end (a Super Admin who has not enrolled is refused, enrolling with a
+code made from the secret, a recovery code completes a sign-in once and only once, and the seed in the
+database is encrypted). It removes everything afterwards (`--keep` to look around).
 
 The settings themselves are also checked without any server, by `npm run check:deployment-config` in
 `Backend/` (and so by `npm test`).
@@ -201,6 +211,7 @@ docker compose restart mongo
 | Secret | How |
 | :--- | :--- |
 | `smtp_pass`, `openrouter_api_key`, `data_go_th_api_key`, `google_credentials` | `docker/secrets/generate.sh set NAME`, then `docker compose up -d --force-recreate backend ingestion-worker` |
+| `mfa_encryption_key` | **Do not replace it casually**: the seeds already in the database were written with the old key. See "Two-step sign-in" below |
 | `mongo_api_password` or `mongo_worker_password` | Change it inside MongoDB **first**, then the files (below) |
 | `mongo_root_password` | The same, for the user `b2g_root` in the `admin` database |
 
@@ -219,6 +230,34 @@ rm secrets/mongo_api_uri && docker/secrets/generate.sh     # rebuilds the addres
 docker compose up -d --force-recreate backend
 unset NEW
 ```
+
+**Two-step sign-in.** Admin and Super Admin accounts must set up an authenticator app before they can use
+any staff page; vendors may turn it on for themselves (Account → Security). This is always on in
+production (`MFA_REQUIRED_FOR_STAFF` is fixed to `true` in `docker-compose.prod.yml`). What an operator
+needs to know:
+
+- **The server's clock matters.** A code is checked against the server's time, with one 30-second step
+  of drift either way, and a code that was used is refused. Keep the host synchronised (NTP: `timedatectl
+  status` should say `System clock synchronized: yes`); a server whose clock is minutes out will refuse
+  every correct code.
+- **A person lost their authenticator and their recovery codes.** An Admin resets a vendor, and the Super
+  Admin resets an Admin, from the Accounts and Admin users pages (**Reset two-step sign-in**), after
+  checking who is asking by a means other than the sign-in itself. The form records how it was
+  checked and why, asks for the administrator's own password, ends every session of that account and
+  emails its owner; the person signs in with the password alone and sets up again. The audit log keeps
+  who, whom, how it was checked and why.
+- **The last Super Admin cannot be reset from the website** (there is nobody above them). On the server:
+
+  ```bash
+  docker compose exec backend node dist/scripts/resetMfa.js you@example.com "Identity confirmed by <who, how>"
+  ```
+
+  It needs access to the container, which is the check; it writes the same audit entry.
+- **`mfa_encryption_key` lost or leaked.** Lost: no authenticator can be read, and nobody can sign in who
+  had one enabled. Put a new key in `secrets/`, restart `backend`, and reset each account that had
+  two-step sign-in (the script above takes an email address). Leaked: the seeds are only useful together
+  with a copy of the database, but treat it as a breach of the database and have everyone re-enrol.
+  Keep a copy of the key apart from the backups of the database.
 
 **Backing up.** The data that matters is MongoDB. A dump (as the root user), to store off the server,
 encrypted:
@@ -264,7 +303,8 @@ Check with `docker volume ls`.)
 | `docker-compose.prod.yml` | The production overlay: the edge, MongoDB's login and TLS, secrets, hardening |
 | `docker/edge/Caddyfile`, `docker/edge/Dockerfile` | The TLS proxy and its non-root image |
 | `docker/mongo/entrypoint.sh`, `docker/mongo/init-users.sh` | MongoDB's private copies of its secrets, and the creation of the two service users |
-| `docker/secrets/generate.sh` | Creates, stores, checks and renews the secrets |
+| `docker/secrets/generate.sh` | Creates, stores, checks and renews the secrets (the two-step sign-in key included) |
+| `Backend/src/scripts/resetMfa.ts` | Resets a Super Admin's two-step sign-in from the server (`node dist/scripts/resetMfa.js`) |
 | `docker/verify-deployment.sh` | `probe` a running deployment · `local` rehearsal |
 | `Backend/.env.production.example` | The API and worker settings, with no secret in them |
 | `Backend/src/config/secretFiles.ts` | Reads `NAME_FILE` secrets |

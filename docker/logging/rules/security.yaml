@@ -16,6 +16,18 @@ groups:
         annotations:
           summary: More than 3 accounts locked in 15 minutes
 
+      - alert: ManyFailedSecondFactors
+        expr: sum(count_over_time({service="backend"} | json | event="auth.mfa.failure" [10m])) > 15
+        labels: { severity: warning }
+        annotations:
+          summary: More than 15 wrong, replayed or locked-out two-step codes in 10 minutes (someone who knows a password is guessing codes?)
+
+      - alert: TwoStepReset
+        expr: sum(count_over_time({service="backend"} | json | event="account.mfa.reset" [15m])) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: An administrator (or the server command line) removed someone's two-step sign-in; check the audit log for who, how the identity was checked and why
+
       - alert: CsrfBlocked
         expr: sum(count_over_time({service="backend"} | json | event="csrf.blocked" [10m])) > 5
         labels: { severity: warning }

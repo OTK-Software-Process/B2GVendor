@@ -31,8 +31,8 @@ flowchart LR
 
     subgraph api["API · /api/v1"]
         pub["GET /works ✅<br/>GET /works/fiscal-years ✅<br/>GET /works/:id ✅<br/>GET /works/:id/tor/:index ✅<br/>GET /tags ✅<br/>GET /gov-sites ✅"]
-        auth["POST /auth/register ✅<br/>POST /auth/verify-email ✅<br/>POST /auth/login ✅<br/>POST /auth/forgot-password ✅<br/>POST /auth/reset-password ✅"]
-        me["GET /auth/me ✅<br/>POST /auth/logout ✅<br/>/account/* ✅<br/>/follows/tags ✅<br/>/notifications ✅"]
+        auth["POST /auth/register ✅<br/>POST /auth/verify-email ✅<br/>POST /auth/login ✅<br/>POST /auth/mfa/verify ✅<br/>POST /auth/forgot-password ✅<br/>POST /auth/reset-password ✅"]
+        me["GET /auth/me ✅<br/>POST /auth/logout ✅<br/>/account/* ✅<br/>/account/mfa/* ✅<br/>/follows/tags ✅<br/>/notifications ✅"]
         adminq["/admin/dashboard ✅<br/>/admin/accounts ✅<br/>/admin/audit-log ✅<br/>/admin/ingestion ✅<br/>/admin/gov-sites poll ✅<br/>/admin/tags ✅<br/>/admin/works ✅<br/>/admin/data-go-th ✅"]
         sa["/admin/gov-sites add, edit ✅<br/>/admin/staff ✅"]
         unsub["email unsubscribe ⬜"]
@@ -127,7 +127,9 @@ read-only pages. A Super Admin passes every check.
 | Admin accounts (`/admin/staff`) | — | — | — | — | — | — | ✅ |
 
 A request with no valid session answers `401 NOT_AUTHENTICATED`. A signed-in caller without the role
-answers `403 FORBIDDEN`, decided **before** the body or the id is looked at. A suspended account answers
+answers `403 FORBIDDEN`, decided **before** the body or the id is looked at. An Admin or Super Admin who
+has not yet set up two-step sign-in (§5) answers `403 MFA_SETUP_REQUIRED` on every `/admin/*` route; only
+`/account/mfa/*`, `GET /auth/me` and `POST /auth/logout` work until they have. A suspended account answers
 `403 ACCOUNT_SUSPENDED`. The admin screens hide what a role cannot use, but that is convenience; the
 server is what refuses.
 
@@ -192,9 +194,11 @@ or vanish between pages. `/admin/accounts` and `/admin/staff` add a `summary` of
 | 400 | `TOKEN_INVALID` | An email or reset link that has expired or was already used |
 | 401 | `NOT_AUTHENTICATED` | No session, or it expired, timed out from inactivity (30 minutes for staff, 24 hours for vendors) or was revoked |
 | 401 | `INVALID_CREDENTIALS` | Wrong email or password (also a wrong *current* password on change) |
+| 401 | `INVALID_MFA_CODE` | A wrong, expired or already-used authenticator code or recovery code (the same answer for each) |
 | 403 | `FORBIDDEN` | Signed in, but not allowed here |
 | 403 | `ACCOUNT_SUSPENDED` | The account has been suspended |
 | 403 | `EMAIL_NOT_VERIFIED` | The password was right, but the email is not verified yet |
+| 403 | `MFA_SETUP_REQUIRED` | A staff account has not set up two-step sign-in yet (§5); set it up first |
 | 403 | `CSRF_BLOCKED` | The request did not come from an allowed origin |
 | 404 | `NOT_FOUND` | No such record; also a malformed id on a route that does not validate it |
 | 409 | `CONFLICT` | The action clashes with current state (a poll already running, a site name, `deptId`, or short code already in use) |
@@ -202,7 +206,7 @@ or vanish between pages. `/admin/accounts` and `/admin/staff` add a `summary` of
 | 409 | `EMAIL_ALREADY_REGISTERED` | An Admin tried to create an account with a taken email |
 | 413 | `PAYLOAD_TOO_LARGE` | The body is over 1 MB |
 | 415 | `UNSUPPORTED_MEDIA_TYPE` | A change was not sent as `application/json` |
-| 423 | `ACCOUNT_LOCKED` | Too many failed sign-ins; `details.retryAfterSeconds` says when to try again |
+| 423 | `ACCOUNT_LOCKED` | Too many failed sign-ins or wrong second-step codes; `details.retryAfterSeconds` says when to try again |
 | 429 | `RATE_LIMITED` | Too many requests from this address (or, for Poll Now, this admin); the `RateLimit` headers say when to retry |
 | 500 | `INTERNAL_ERROR` | A server fault. In production the message is fixed text; details go to the log |
 | 503 | `SERVICE_UNAVAILABLE` | A dependency is missing (email is not configured, the password check is down), or a search ran past its time limit |
@@ -212,11 +216,13 @@ message "That value is already in use."
 
 ### Rate limiting and lockout
 
-Five limits count requests, per client address unless stated:
+These limits count requests, per client address unless stated:
 
 | Route | Limit |
 | :--- | :--- |
 | `POST /auth/login` | 10 per 15 minutes |
+| `POST /auth/mfa/verify` | 10 per 15 minutes |
+| `POST /account/mfa/setup`, `/enable`, `/recovery-codes`, `/disable` | 10 per 15 minutes **per account** |
 | `POST /auth/register` | 5 per hour |
 | `POST /auth/forgot-password` and `/auth/reset-password`, together | 5 per hour |
 | `GET /works` (search) | `SEARCH_RATE_LIMIT_PER_MINUTE`, 120 per minute |
@@ -233,6 +239,10 @@ twice as long after each further failure, up to 30 minutes (`423 ACCOUNT_LOCKED`
 or a password reset, clears the count. Failures older than 24 hours are forgotten. An email with **no**
 account is counted and locked in exactly the same way (by a hash of the address), so a `423` does not
 reveal that an account exists.
+
+Wrong **second-step** codes are counted apart from passwords, per account: 4 free failures, then a lock of
+1 minute, doubling to 30 (`423 ACCOUNT_LOCKED`). A correct password does **not** clear it; only a correct
+code does. See §5.
 
 ---
 
@@ -269,7 +279,8 @@ sequenceDiagram
 | :--- | :--- | :--- |
 | `POST /auth/register` | none | Creates a self-registered account and emails a verification link |
 | `POST /auth/verify-email` | none | `{ token }` — marks the email verified. The link is single-use and lasts 24 hours |
-| `POST /auth/login` | none | Starts a session; the cookie is the response's `Set-Cookie` |
+| `POST /auth/login` | none | Starts a session; the cookie is the response's `Set-Cookie`. For an account with two-step sign-in it starts only a 5-minute **challenge** (below) |
+| `POST /auth/mfa/verify` | challenge cookie | `{ code }` — the second step: a 6-digit authenticator code or a recovery code. Ends the challenge and starts the session |
 | `POST /auth/logout` | session | Revokes the session, clears the cookie and sends `Clear-Site-Data: "cache", "storage"` |
 | `GET /auth/me` | session | The signed-in account |
 | `POST /auth/forgot-password` | none | `{ email }` — emails a reset link. Answers `200` with the same message whether or not the email has an account; `500` when email is not configured or the send fails |
@@ -322,6 +333,33 @@ the password is proved:
 3. A wrong password is `401 INVALID_CREDENTIALS` — identical for an active, a suspended, and a
    missing account.
 4. Only with the **right** password: `403 ACCOUNT_SUSPENDED`, then `403 EMAIL_NOT_VERIFIED`.
+5. Only then, an account with two-step sign-in answers `200 { "mfaRequired": true }` and sets a **challenge**
+   cookie instead of a session: it lasts 5 minutes, every other route refuses it (`401`), and it is good
+   for `POST /auth/mfa/verify` alone.
+
+### `POST /auth/mfa/verify`
+
+```bash
+curl -i -X POST http://localhost:4000/api/v1/auth/mfa/verify \
+  -H "Content-Type: application/json" -b cookies.txt -c cookies.txt \
+  -d '{"code":"123456"}'
+```
+
+`code` is the 6-digit code from the authenticator app, **or a recovery code** (`XXXX-XXXX-XXXX-XXXX-XXXX`,
+in either case, with or without the dashes). Anything that is not exactly six digits is checked as a
+recovery code. On success the challenge ends, a **new** session is issued (a new cookie), and the answer is
+the account with how it was proved:
+
+```json
+{ "success": true, "data": { "id": "670f9a0b1c2d3e4f5a6b7c10", "email": "admin@example.com", "role": "admin",
+  "mfaEnabled": true, "mfaSetupRequired": false, "mfa": { "method": "recovery_code", "recoveryCodesRemaining": 7 } } }
+```
+
+(`method` is `totp` or `recovery_code`; `recoveryCodesRemaining` only after a recovery code, which also
+emails the owner.) A wrong, expired or used code is `401 INVALID_MFA_CODE`; after four, the account is
+locked (`423 ACCOUNT_LOCKED`, `details.retryAfterSeconds`). A code is judged against the **server's**
+clock (one 30-second step either side) and works **once**: the same code a second time is refused.
+Without a valid challenge the route answers `401 NOT_AUTHENTICATED`.
 
 ---
 
@@ -459,11 +497,14 @@ All routes here need a session.
   "phone": "081-234-5678", "type": "business",
   "businessProfile": { "companyName": "Example Co., Ltd.", "taxId": "0105500000000" },
   "role": "user", "permissions": [], "status": "active", "emailVerified": true,
+  "mfaEnabled": false, "mfaSetupRequired": false,
   "emailNotificationsEnabled": true, "notificationFrequency": "instant",
   "createdAt": "2026-10-01T02:00:00.000Z", "updatedAt": "2026-10-01T02:00:00.000Z" }
 ```
 
-The password hash, the sign-in lock fields, and the internal id are never included.
+The password hash, the sign-in lock fields, and the internal id are never included. `mfaEnabled` says
+whether two-step sign-in is on; `mfaSetupRequired` is `true` for an Admin or Super Admin who must set it up
+and has not (the website then opens *Account security*). Neither carries a secret.
 
 | Route | Purpose |
 | :--- | :--- |
@@ -476,6 +517,25 @@ The password hash, the sign-in lock fields, and the internal id are never includ
 | `GET /account/notification-settings` | `{ emailNotificationsEnabled, notificationFrequency, pausedTagIds }` |
 | `PATCH /account/notification-settings` | `{ emailNotificationsEnabled?: boolean, notificationFrequency?: "instant" or "daily" }` |
 | `POST /account/change-password` | `{ currentPassword, newPassword, confirmNewPassword }`. The current password is checked against the sign-in lock, so a stolen session cannot guess it without limit. Ends **every other** session; the current one stays. The owner is emailed a notice |
+
+### Two-step sign-in ✅ (use cases 6.2.1, 6.2.10)
+
+An authenticator app (TOTP, RFC 6238) plus ten recovery codes. Admins and Super Admins must set it up;
+vendors may. Every route needs a session, but **no role**, so a staff account that has to set it up can
+reach exactly these. Turning it on, off, or making new recovery codes asks for the account's password
+(counted toward the sign-in lock) and, except for setup, a current code. Why and how: Security.md §15.
+
+| Route | Purpose |
+| :--- | :--- |
+| `GET /account/mfa` | `{ available, enabled, enabledAt, recoveryCodesRemaining, required, setupRequired }`. `available` is `false` on a server with no `MFA_ENCRYPTION_KEY` |
+| `POST /account/mfa/setup` | `{ password }` → `{ secret, otpauthUri, expiresInSeconds }`. A new 160-bit secret (Base32) and the `otpauth://` link for a QR code. It is held for 10 minutes and **not active yet**; asking again replaces it. `409` if it is already on |
+| `POST /account/mfa/enable` | `{ code }` — a code made from the secret just handed out. Turns it on and answers `{ recoveryCodes: [10 codes], otherSessionsRevoked }`. **The recovery codes are shown only here.** Ends every other session and emails the owner |
+| `POST /account/mfa/recovery-codes` | `{ password, code }` → `{ recoveryCodes }`: ten new codes; the old ones stop working at once |
+| `POST /account/mfa/disable` | `{ password, code }` → `{ otherSessionsRevoked }`. `403` for Admin and Super Admin: it is required for them (ask a Super Admin for a reset) |
+
+A request carries no time: a field the schema does not know, a timestamp included, is `400`. An unknown
+or used code is `401 INVALID_MFA_CODE`; a staff account without it set up is `403 MFA_SETUP_REQUIRED`
+everywhere else (§2).
 
 ### Following tags (use case 6.2.5)
 
@@ -564,11 +624,12 @@ Only ever acts on vendor accounts: an Admin or Super Admin id is reported as `40
 | :--- | :--- |
 | `GET /admin/accounts?q=&status=&type=&sort=&page=&pageSize=` | Vendors. `q` searches name, email, company name, and tax id; `status` is `active` or `suspended`; `type` is `individual` or `business`; `sort` is `newest`, `oldest`, or `name`. Also answers `summary: { total, active, suspended }` |
 | `POST /admin/accounts` | `{ name, email, phone?, type, businessProfile? }` → `201 { vendor, setupEmail }`. **No admin ever chooses a password**: a random one is set, and the vendor is emailed a link (valid 1 hour) to choose their own. `setupEmail` is `{ sent, reason? }`, with `reason` `smtp_not_configured` or `send_failed` |
-| `GET /admin/accounts/:id` | One vendor, with `followedTagsCount` and `lastActiveAt` |
+| `GET /admin/accounts/:id` | One vendor, with `followedTagsCount`, `lastActiveAt` and `mfaEnabled` |
 | `PATCH /admin/accounts/:id` | `{ name?, phone? (null clears it), businessProfile? }`. Email and account type are identity and cannot change; a business profile only on a business account |
 | `PATCH /admin/accounts/:id/suspend` · `/reactivate` | Suspending ends every session at once, so a later reactivation does not bring old sign-ins back |
 | `POST /admin/accounts/:id/password-link` | Sends the vendor a fresh set-or-reset link. Refused for a suspended account |
 | `POST /admin/accounts/:id/sign-out` | Ends every session of the vendor ("sign out everywhere") without suspending it. Answers `{ revoked }`; recorded in the audit log |
+| `POST /admin/accounts/:id/mfa-reset` | Removes a vendor's two-step sign-in after they lost their authenticator **and** recovery codes. `{ password, identityCheck, reason }`: the **administrator's own** password; `identityCheck` one of `in_person`, `video_call`, `callback_to_known_number`, `other_documented`; `reason`, 10–500 characters, what was checked. Ends every session of the vendor, emails them, and records who, how and why in the audit log. Answers `{ sessionsRevoked }`; `409` if it is not on |
 | `DELETE /admin/accounts/:id` | **Permanent.** Removes the account, its sessions, follows, notifications, and outstanding links. Answers `{ id, email }` |
 
 ### 6.3 Admin accounts ✅ (Super Admin only)
@@ -584,6 +645,7 @@ The whole `/admin/staff` router is Super Admin only; an Admin gets `403`.
 | `PATCH /admin/staff/:id/suspend` · `/reactivate` | Suspending signs the Admin out everywhere |
 | `POST /admin/staff/:id/sign-out` | Ends every session without suspending — a lost laptop. Answers `{ revoked }` |
 | `POST /admin/staff/:id/password-link` | Sends a set-or-reset link |
+| `POST /admin/staff/:id/mfa-reset` | The same as for a vendor, for a plain **Admin**: `{ password, identityCheck, reason }` with the Super Admin's own password. A Super Admin cannot be reset here (`403`): that is done on the server, `npm run mfa:reset` ([Deployment.md](Deployment.md#5-day-to-day)). Each staff entry also shows `mfaEnabled` and `mfaSetupRequired` |
 | `DELETE /admin/staff/:id` | **Permanent**, with the same cascade as a vendor |
 
 A **Super Admin is listed but read-only** (`manageable: false`): every change, sign-out, and delete of

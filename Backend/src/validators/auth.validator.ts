@@ -57,3 +57,11 @@ export type LoginInput = z.infer<typeof loginSchema>;
 export const verifyEmailSchema = z.object({
   token: z.string().min(1)
 }).strict();
+
+// The second factor: a six-digit authenticator code, or a recovery code (twenty
+// characters with hyphens). The service decides which; here only the size is bounded.
+// No time, no counter, nothing else is accepted: the server's clock decides what a
+// code is worth (ASVS V6.5.8).
+export const mfaCodeSchema = z.string().trim().min(1, 'Enter the code').max(40, 'That code is too long');
+
+export const mfaVerifySchema = z.object({ code: mfaCodeSchema }).strict();

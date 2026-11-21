@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { ApiError } from '@/lib/api';
 import { ConfirmModal } from '@/components/ConfirmModal';
+import { MfaResetModal } from '@/components/MfaResetModal';
 import { ErrorRetry } from '@/components/ErrorRetry';
 import { initialQueryParam } from '@/lib/auditUi';
 import { formatDate, setupEmailMessage, Translate } from '@/lib/adminUi';
@@ -17,6 +18,7 @@ import {
   deleteAdminAccount,
   fetchStaff,
   reactivateAdminAccount,
+  resetAdminMfa,
   sendAdminPasswordLink,
   signOutAdminAccount,
   suspendAdminAccount,
@@ -37,7 +39,8 @@ import {
   ChevronLeft,
   ChevronRight,
   AlertTriangle,
-  Loader2
+  Loader2,
+  ShieldOff
 } from 'lucide-react';
 
 const PAGE_SIZE = 20;
@@ -66,6 +69,8 @@ function StaffFormModal({
   const [permission, setPermission] = useState<AdminPermission | ''>(admin?.permission ?? '');
   const [saving, setSaving] = useState(false);
   const [busyAction, setBusyAction] = useState<'link' | 'signout' | null>(null);
+  const [resettingMfa, setResettingMfa] = useState(false);
+  const [mfaWasReset, setMfaWasReset] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<{ ok: boolean; text: string } | null>(null);
@@ -146,6 +151,7 @@ function StaffFormModal({
     ) : null;
 
   return (
+    <>
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 animate-fade-in">
       <div role="dialog" aria-modal="true" aria-labelledby="staff-form-title" className="bg-white border border-slate-200 rounded-3xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto space-y-5 animate-scale-in">
         <div className="flex items-center justify-between">
@@ -242,6 +248,17 @@ function StaffFormModal({
                 {busyAction === 'signout' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogOut className="w-3.5 h-3.5" />}
                 {t('ออกจากระบบทุกอุปกรณ์', 'Sign out everywhere')}
               </button>
+              {admin.role === 'admin' && admin.mfaEnabled && !mfaWasReset && (
+                <button
+                  type="button"
+                  onClick={() => setResettingMfa(true)}
+                  disabled={busyAction !== null}
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-amber-200 text-xs font-bold text-amber-700 hover:bg-amber-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  <ShieldOff className="w-3.5 h-3.5" />
+                  {t('รีเซ็ตการยืนยันตัวตนสองขั้นตอน', 'Reset two-step sign-in')}
+                </button>
+              )}
             </div>
             {admin.status === 'suspended' && <p className="text-[11px] text-slate-500">{t('บัญชีถูกระงับ — เปิดใช้งานก่อนจึงจะส่งลิงก์ได้', 'Suspended account — reactivate it before sending a link.')}</p>}
             {actionNotice && (
@@ -273,6 +290,26 @@ function StaffFormModal({
         </div>
       </div>
     </div>
+    {resettingMfa && admin && (
+      <MfaResetModal
+        name={admin.name}
+        email={admin.email}
+        onSubmit={input => resetAdminMfa(admin.id, input)}
+        onClose={() => setResettingMfa(false)}
+        onDone={({ sessionsRevoked }) => {
+          setResettingMfa(false);
+          setMfaWasReset(true);
+          setActionNotice({
+            ok: true,
+            text: t(
+              `รีเซ็ตการยืนยันตัวตนสองขั้นตอนของ ${admin.name} แล้ว (ออกจากระบบ ${sessionsRevoked} เซสชัน) ผู้ดูแลต้องตั้งค่าใหม่ก่อนใช้งานส่วนผู้ดูแลระบบ และส่งอีเมลแจ้งแล้ว`,
+              `Two-step sign-in reset for ${admin.name} (${sessionsRevoked} session(s) ended). They must set it up again before using the admin area, and have been emailed.`
+            )
+          });
+        }}
+      />
+    )}
+    </>
   );
 }
 

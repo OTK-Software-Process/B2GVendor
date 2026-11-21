@@ -127,6 +127,11 @@ async function runCheck(check: Check, mongo: MongoServer, emptyEnvFile: string, 
     // rate-limits.check.ts, which sets its own low values.
     SEARCH_RATE_LIMIT_PER_MINUTE: '1000000',
     POLL_RATE_LIMIT_PER_MINUTE: '1000000',
+    // Two-step verification: a fixed, throw-away key (never a real one), and staff are
+    // NOT required to use it here, so the many checks that sign in as an Admin with
+    // only a password keep working. mfa.check.ts switches the requirement on itself.
+    MFA_ENCRYPTION_KEY: 'EATP5lMNulu44CY004/KGqq1+KLkO5BiZE6FMSuIbho=',
+    MFA_REQUIRED_FOR_STAFF: 'false',
     FORCE_COLOR: '0'
   });
 

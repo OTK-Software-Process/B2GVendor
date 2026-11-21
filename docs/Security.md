@@ -25,6 +25,7 @@ use it is [Deployment.md](Deployment.md), and `docker/verify-deployment.sh` prov
 12. [Password policy](#12-password-policy) — V6.1.2, V6.2.5, V6.2.9, V6.2.11, V6.3.7
 13. [Logging](#13-logging) — V16.1.1, V16.2.3–V16.2.5, V16.3.1–V16.3.3, V16.4.1–V16.4.3
 14. [Deployment](#14-deployment) — V3.5.4, V4.1.2, V12.1.1, V12.1.2, V12.2.1, V12.2.2, V12.3.1, V13.2.1–V13.2.3, V13.3.1, V13.3.2, V14.2.4
+15. [Two-step sign-in](#15-two-step-sign-in) — V6.3.3, V6.4.4, V6.5.1–V6.5.6, V6.5.8
 
 ---
 
@@ -80,6 +81,9 @@ Every cryptographic algorithm in use (ASVS V11.1.2). All of it comes from Node's
 | Unknown-email sign-ins | bcrypt against a random dummy hash | `services/auth.service.ts` | Makes an unknown email cost the same time as a real one |
 | Session tokens | 32 random bytes (`crypto.randomBytes`), stored as SHA-256 | `models/session.model.ts` | The cookie holds the raw token; the database only its hash |
 | Email links (verify, reset, unsubscribe) | 32 random bytes, stored as SHA-256 | `models/token.model.ts` | Single-use (verify, reset); sent after the `#` of the link |
+| Authenticator codes (two-step sign-in) | TOTP, RFC 6238: HMAC-SHA1, 6 digits, 30-second step, 160-bit secret from `crypto.randomBytes`, checked in constant time | `utils/totp.ts`, `services/mfa.service.ts` | SHA-1 here is HMAC-SHA1 as RFC 4226 specifies, which every authenticator app implements; it is not collision-sensitive. Each code is accepted once (§15) |
+| Authenticator secrets at rest | AES-256-GCM, a random 96-bit IV per value, the account id as authenticated data, key `MFA_ENCRYPTION_KEY` | `utils/secretBox.ts`, `models/mfaCredential.model.ts` | A value copied to another account does not decrypt; any change to it is detected. Stored as `v1.<iv>.<tag>.<ciphertext>` |
+| Recovery codes | 80 random bits per code from `crypto.randomBytes` (unbiased mapping to 32 characters); stored as the same HMAC-SHA256 pre-hash and bcrypt as passwords | `utils/recoveryCodes.ts`, `services/mfa.service.ts` | Only a hash is kept; each code is accepted once. A 4-character id (not secret) selects the one hash to check |
 | TOR file identity | SHA-256, full 256-bit digest | `services/fileStorage.service.ts` | Also the de-duplication key. Files stored before 2026-11-20 used 96 bits; `npm run backfill:tor-file-keys` renames them |
 | Failed sign-ins for unknown emails | SHA-256 of the lower-cased address | `models/loginFailure.model.ts` | The address itself is never stored |
 | Breached-password lookup | SHA-1 | `integrations/haveIBeenPwned.client.ts` | Required by the service's k-anonymity range API; only a 5-character prefix leaves the server. Not used for any protection |
@@ -89,8 +93,8 @@ Every cryptographic algorithm in use (ASVS V11.1.2). All of it comes from Node's
 | Transport (mail) | TLS 1.2 or newer, certificate and host name checked | `config/transportSecurity.ts` | Port 465, or STARTTLS made mandatory by `REQUIRE_SECURE_BACKENDS` |
 | Transport (outbound calls) | HTTPS | e-GP, data.go.th, HIBP and the AI provider | |
 
-Not used: encryption at rest inside the application (the MongoDB volume relies on the host's disk
-encryption), JWTs or any signed token, custom random number generation (`Math.random` is never used
+Not used: encryption at rest inside the application other than for authenticator secrets (the rest of
+the MongoDB volume relies on the host's disk encryption), JWTs or any signed token, custom random number generation (`Math.random` is never used
 for anything security-related).
 
 ## 3. Keys and secrets
@@ -103,6 +107,7 @@ Every secret the system holds, where it lives, who can reach it and how it is re
 | `OPENROUTER_API_KEY` | Worker | The secret `openrouter_api_key` (the worker only) | Same; revoke the old key in the provider's console after the switch |
 | Google service-account key (`GOOGLE_APPLICATION_CREDENTIALS`) | Worker | The secret `google_credentials`, a JSON file (the worker only) | Same; delete the old key in Google Cloud IAM |
 | `DATA_GO_TH_API_KEY` | Worker, API | The secret `data_go_th_api_key` (both) | Same |
+| `MFA_ENCRYPTION_KEY` ✅ (V6.5.3) | API only | The secret `mfa_encryption_key` (32 random bytes, base64), made by `docker/secrets/generate.sh` and never replaced once it exists | **Not rotated casually**: every authenticator secret in the database was written with it. If it is lost or leaked, replace it and reset each account's two-step sign-in (§15). Keep a copy apart from the database backups |
 | MongoDB credentials ✅ (V13.2.1) | The API (`mongo_api_uri`), the worker (`mongo_worker_uri`): each only its own. MongoDB itself: the three passwords. Operators: the root password | Docker secrets; random 40-character passwords from `docker/secrets/generate.sh`. The root password is given to MongoDB only | At once if leaked, or yearly: change it in MongoDB first, then the files ([Deployment.md](Deployment.md#5-day-to-day)) |
 | TLS private key and certificate ✅ (V12.2.2) | The edge | Caddy's `edge-data` volume (certificates and the ACME account) | Let's Encrypt certificates last 90 days and Caddy renews them by itself |
 | MongoDB certificate authority and server certificate ✅ | MongoDB (server file), the API and the worker (the authority's certificate only) | Secrets `mongo_server_pem` and `mongo_ca_pem`; the authority's private key stays on the host in `secrets/ca/`, never mounted | Server certificate: yearly, `docker/secrets/generate.sh renew-mongo-cert`. Authority: every 5 years |
@@ -142,7 +147,11 @@ Rules:
   a vendor only manages their own follows and profile. The admin screens' background "is a poll
   running?" check (`GET /admin/ingestion/status`) does not count as activity, so an admin tab left
   open still times out.
-- **Signing in:** always issues a new token, and ends the session the same browser already held.
+- **Signing in:** always issues a new token, and ends the session the same browser already held. For an
+  account with two-step sign-in the password alone issues only a **challenge**: a 5-minute session that
+  `requireAuth` refuses everywhere and that only `POST /auth/mfa/verify` accepts. A correct code ends
+  the challenge and issues a NEW session (so a token seen before the second step is useless). Challenges
+  are not listed among a person's devices and do not count toward any limit (§15).
 - **Ending sessions:**
 
   | Event | Sessions ended |
@@ -331,6 +340,7 @@ maintained. They are upgraded first and reviewed whenever they change.
 | `next` | Large attack surface on the public internet; critical advisories in 2026 | Patched within the 7-day window; CI blocks releases with known high/critical issues |
 | `@google-cloud/vertexai`, OpenRouter (via `fetch`) | Send untrusted TOR text to a third party; pulls an older Google auth stack | Off unless `AI_TAGGING_ENABLED=true`; input capped and fenced, output validated (§10) |
 | `express` 4 | The 4.x line is in maintenance (5.x is current) | Kept on the latest 4.x patch; moving to 5.x is the next major upgrade |
+| `qrcode-generator` 2.0.4 (website) | Draws the QR code for two-step sign-in setup from a string that holds the authenticator secret | No dependencies of its own; runs in the browser only, on text the API just sent, and never sends it anywhere (no image service); drawn as SVG elements, so nothing is injected into the page. Pinned to an exact version |
 
 ## 12. Password policy
 
@@ -390,8 +400,13 @@ CR, LF and every control character, so text from a request cannot forge a log li
 | :--- | :--- | :--- |
 | `auth.login.success` | info | A sign-in succeeded (account, role, session id) |
 | `auth.login.failure` | warn | A sign-in failed: `reason` is `invalid_credentials`, `locked`, `suspended` or `email_not_verified`; masked email; whether the account exists |
-| `auth.lockout` | warn | The failure that locked an account (or an unknown address) and until when |
+| `auth.lockout` | warn | The failure that locked an account (or an unknown address) and until when. `scope: "mfa"` for a lock caused by wrong second-step codes |
 | `auth.reauth.failure` | warn | A wrong current password on change-password or when ending a session |
+| `auth.mfa.challenge` | info | The password was right and a second step is owed (a challenge session was issued) |
+| `auth.mfa.failure` | warn | A wrong, replayed or locked-out code. `purpose` (`sign_in`, `mfa_setup`, `mfa_disable`, `mfa_recovery_codes`), `reason` (`invalid_code`, `replayed`, `locked`); never the code |
+| `auth.mfa.recovery_used` | warn | A recovery code was used, with how many remain; the owner is emailed |
+| `account.mfa.setup_started`, `account.mfa.enabled`, `account.mfa.disabled`, `account.mfa.recovery_regenerated` | info | The owner changed their own second factor |
+| `account.mfa.reset` | warn | An administrator (or the server command line) removed someone's second factor: who, whom, which identity check, how many sessions ended |
 | `auth.logout`, `auth.session.revoked`, `auth.session.idle_timeout` | info | A session ended: sign-out, a new sign-in in the same browser, the owner or an Admin ending sessions, inactivity |
 | `auth.signup`, `auth.email_verified` | info | A sign-up (`created` or `existing_email`), an email verified |
 | `auth.password.changed`, `auth.password_reset.requested`, `auth.password_reset.completed` | info | Password changes and resets |
@@ -413,7 +428,7 @@ CR, LF and every control character, so text from a request cannot forge a log li
   disappear only through the 90-day retention. Loki's port is not published to the host.
 - **Alerts (V16.4.3):** Loki's ruler evaluates `docker/logging/rules/security.yaml` every minute and
   sends alerts to **Alertmanager** (`http://127.0.0.1:9093` on the host): many failed sign-ins, account
-  lockouts, CSRF refusals, injection probes, blocked outbound calls, egress denials, malware in a TOR
+  lockouts, many wrong two-step codes, any reset of someone's two-step sign-in, CSRF refusals, injection probes, blocked outbound calls, egress denials, malware in a TOR
   file, bursts of 5xx errors. To escalate by email, fill in the receiver in
   `docker/logging/alertmanager.yml`.
 - **Reading the logs:** from a container on the logging network, e.g.
@@ -444,3 +459,58 @@ machine; "config check" is `npm run check:deployment-config`, which reads the fi
 The non-root exceptions are third-party images, which keep their own default users (Squid, ClamAV, Loki,
 Alloy, Alertmanager); Alloy needs the Docker socket, read-only, to read logs. MongoDB's entrypoint starts as
 root only to give its data directory and its secrets to the `mongodb` user, and `mongod` runs as that user.
+
+## 15. Two-step sign-in
+
+(ASVS V6.3.3, V6.4.4, V6.5.1, V6.5.2, V6.5.3, V6.5.4, V6.5.5, V6.5.6, V6.5.8; code in
+`Backend/src/services/mfa.service.ts`, `utils/totp.ts`, `utils/recoveryCodes.ts`, `utils/secretBox.ts`)
+
+A password alone is not enough for an account that has a second factor: an **authenticator app** (a
+time-based one-time password, TOTP, RFC 6238) and ten **recovery codes** for when the phone is lost.
+
+| ASVS | Requirement in short | In place |
+| :--- | :--- | :--- |
+| V6.3.3 | A second factor for every sign-in of the privileged accounts | **Admin and Super Admin must have one** (`MFA_REQUIRED_FOR_STAFF`, on by default, always on in production). Until they enrol, `requireRole` answers every staff route `403 MFA_SETUP_REQUIRED` and the website opens *Account security*; only sign-out and the setup routes work. **Vendors may turn it on** for themselves. A sign-in is not complete after the password: it issues a challenge, and a full session only after a correct code (§4) ✅ |
+| V6.4.4 | A lost factor is replaced only after an identity check | An Admin resets a **vendor**, the Super Admin resets an **Admin**, and a Super Admin is reset only from the server (`npm run mfa:reset`, which needs access to the container). The form asks for how the identity was checked (`in_person`, `video_call`, `callback_to_known_number`, `other_documented`), why (10–500 characters) and the administrator's **own password**; nobody can reset their own, and nobody resets someone of an equal or higher role. Everything is audit-logged, every session of the account ends, and the owner is emailed ✅ |
+| V6.5.1 | Each code and recovery code works once | The highest 30-second step accepted is stored (`lastUsedStep`) and moved forward with one atomic update, so a code of that step or an older one is refused even when two requests race. A recovery code is marked used by one atomic positional update ✅ |
+| V6.5.2 | Recovery codes are stored hashed | The password hash (HMAC-SHA256 pre-hash, then bcrypt); only a 4-character id, which selects the hash to check, is kept in the clear. The code is shown once, at creation ✅ |
+| V6.5.3 | Seeds and codes come from a CSPRNG | `crypto.randomBytes` for the 160-bit secret and for the codes (rejection sampling, so every character is equally likely). Never `Math.random` ✅ |
+| V6.5.4 | A recovery code has enough entropy to withstand guessing | 16 secret characters of a 32-character alphabet = **80 bits** (the requirement is 20). Wrong guesses are also limited (below) ✅ |
+| V6.5.5 | A TOTP lives no longer than 30 seconds | The step is 30 seconds (RFC 6238's default). By default one step of drift either way is also accepted (`MFA_TOTP_DRIFT_STEPS=1`), as RFC 6238 §5.2 advises for transmission delay and a phone clock a little off, so a code is accepted for up to 60 seconds after its own step ends. **For a strict 30-second lifetime set `MFA_TOTP_DRIFT_STEPS=0`**: only the current step is then accepted. Either way a code works once, and a code outside the window is refused ✅ |
+| V6.5.6 | A lost or stolen factor can be revoked | The owner can turn it off or make new recovery codes (password and a current code asked; the old ones stop working at once), and an administrator can reset it (V6.4.4). A reset ends every session of the account, and turning it off or on ends its other sessions ✅ |
+| V6.5.8 | A TOTP is checked against server time | Time comes from the server's clock only (`config/clock.ts`); no request field carries a time, and the schemas refuse any field they do not know ✅ |
+
+### How it works
+
+- **Setup** (`/account/mfa/setup` then `/enable`): the password is asked, a fresh secret is made and
+  held, encrypted, as *pending* for 10 minutes; it becomes the account's factor only when a code made
+  from it is proven. The ten recovery codes are shown once, in that response. Enabling ends the
+  account's other sessions and emails the owner.
+- **Signing in:** a correct password on an account with a factor returns `{ "mfaRequired": true }` and a
+  5-minute challenge session. `POST /auth/mfa/verify` takes a 6-digit code **or a recovery code** (anything
+  that is not exactly six digits is checked as a recovery code, in upper or lower case, with or without
+  dashes or spaces), ends the challenge and issues a new session. A challenge is refused by every other route.
+- **Wrong codes:** counted apart from wrong passwords. Four free tries, then a lock of 1, 2, 4 … up to 30
+  minutes (`423 ACCOUNT_LOCKED`); a correct password does **not** clear it (or someone who knew the
+  password could guess codes without end), only a correct code does. On top of that, 10 attempts per IP
+  per 15 minutes, and 10 changes of a factor per account per 15 minutes. A wrong code and an unknown
+  recovery code give the same answer (`401 INVALID_MFA_CODE`) and cost the same time.
+- **Storage:** a collection of its own, `mfacredentials`, so no account query, API view or audit diff can
+  carry a secret. The seed is AES-256-GCM encrypted (§2) under `MFA_ENCRYPTION_KEY` (§3), bound to the
+  account id; the API refuses to start without the key while staff are required to use a factor. A
+  response never contains a seed after setup, and the logs never contain a code or a secret (§13).
+- **Staff cannot turn it off.** While `MFA_REQUIRED_FOR_STAFF` is on, an Admin or Super Admin may make
+  new recovery codes but not remove the factor; only another administrator's reset can, and the
+  account then has to enrol again before it can do anything.
+- **Audit:** `account.mfa_enabled`, `account.mfa_disabled`, `account.mfa_recovery_regenerated` and
+  `account.mfa_reset` are written to the audit log, with the role in the metadata so that entries about staff
+  stay visible to the Super Admin only, like every other audit entry about staff.
+
+### What an operator must know
+
+- **The server's clock must be right** (NTP), or correct codes are refused. It is the only clock used.
+- **`MFA_ENCRYPTION_KEY` must be kept** (§3): without it no authenticator can be read.
+- **If someone loses both the phone and the recovery codes,** an administrator resets them (above); the
+  steps are in [Deployment.md](Deployment.md#5-day-to-day).
+- **Not covered:** hardware security keys / passkeys (WebAuthn), SMS or email codes (deliberately not
+  offered: a phone number or inbox is a weaker factor than the app), and a trusted-device "remember me".

@@ -7,7 +7,9 @@ import { audit } from './audit.service';
 import { Request } from 'express';
 import { env } from '../config/env';
 import { Account, IAccount } from '../models/account.model';
-import { createSession, SessionContext } from './session.service';
+import { ISession } from '../models/session.model';
+import { createSession, revokeSessionById, SessionContext } from './session.service';
+import { verifySecondFactor } from './mfa.service';
 import { AppError } from '../utils/AppError';
 import { clearFailedLogins, reserveLoginAttempt, reserveUnknownEmailAttempt } from './loginLockout.service';
 import { assertPasswordNotPwned } from '../integrations/haveIBeenPwned.client';
@@ -17,6 +19,12 @@ import { isEmailConfigured, sendAccountExistsEmail, sendEmailVerificationEmail }
 export interface AuthResult {
   account: IAccount;
   rawToken: string;
+  /**
+   * True when the password was right but the account has two-step verification on:
+   * `rawToken` then belongs to a short-lived CHALLENGE session that can do nothing
+   * except answer the second factor (verifyMfaChallenge). The person is not signed in yet.
+   */
+  mfaRequired: boolean;
 }
 
 function sessionContextFromRequest(req: Request): SessionContext {
@@ -208,8 +216,37 @@ export async function loginWithPassword(
     throw AppError.emailNotVerified();
   }
 
-  const { session, rawToken } = await createSession(account._id, sessionContextFromRequest(req));
-  logger.security('info', 'auth.login.success', { ...who, sessionId: String(session._id) });
+  // Two-step verification is on: the password alone does not sign anyone in. What is
+  // issued is a challenge that lives a few minutes and can only answer the second factor.
+  if (account.mfaEnabled) {
+    const { session, rawToken } = await createSession(account._id, sessionContextFromRequest(req), { mfaPending: true });
+    logger.security('info', 'auth.mfa.challenge', { ...who, sessionId: String(session._id) });
+    return { account, rawToken, mfaRequired: true };
+  }
 
-  return { account, rawToken };
+  const { session, rawToken } = await createSession(account._id, sessionContextFromRequest(req));
+  logger.security('info', 'auth.login.success', { ...who, sessionId: String(session._id), mfa: false });
+
+  return { account, rawToken, mfaRequired: false };
+}
+
+/**
+ * The second half of a sign-in. `challenge` is the session the password step issued.
+ * A correct code (or recovery code) ends the challenge and starts a NEW, full session
+ * -- a different token from the one that existed while only the password was known.
+ * Wrong codes are counted and locked apart from the password's.
+ */
+export async function verifyMfaChallenge(
+  account: IAccount,
+  challenge: ISession,
+  code: string,
+  req: Request
+): Promise<AuthResult & { method: 'totp' | 'recovery_code'; recoveryCodesRemaining?: number }> {
+  const result = await verifySecondFactor(account, code, 'sign_in');
+
+  await revokeSessionById(challenge._id);
+  const { session, rawToken } = await createSession(account._id, sessionContextFromRequest(req), { mfaVerified: true });
+  logger.security('info', 'auth.login.success', { accountId: String(account._id), role: account.role, email: maskEmail(account.email), sessionId: String(session._id), mfa: result.method });
+
+  return { account, rawToken, mfaRequired: false, ...result };
 }

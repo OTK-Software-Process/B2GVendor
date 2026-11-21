@@ -194,7 +194,7 @@ flowchart LR
 | Path | Holds | Rule |
 | :--- | :--- | :--- |
 | `app.ts` · `server.ts` · `worker.ts` | The Express app and its middleware order · the API process · the worker process | `import './audit/install'` stays the **first** import of `app.ts` and `worker.ts`: the audit plugin only covers models compiled after it |
-| `config/` | `env.ts` (every environment variable, validated once at start-up), `cookie.ts`, `polling.ts` (the 2-hour floor), `db.ts` | A bad or missing variable stops the process at boot, not at the first request |
+| `config/` | `env.ts` (every environment variable, validated once at start-up), `cookie.ts`, `polling.ts` (the 2-hour floor), `db.ts`, `mfa.ts` (the two-step key and what must stop the API from starting without it), `clock.ts` (the server's clock, the only one two-step codes are judged by) | A bad or missing variable stops the process at boot, not at the first request |
 | `routes/` | One router per area; `index.ts` mounts them under `/api/v1` | Decides *who may call* (`requireAuth`, `requireAdmin`, `requireSuperAdmin`, `requirePollAccess`, `requireTagAccess`) and *what shape is allowed* (`validate(schema)`), before any handler runs |
 | `validators/` | Zod schemas, all `.strict()` | An unknown field is a 400, not silently ignored |
 | `controllers/` | Read the request, call one service, wrap the result in the response envelope | No database queries, no business rules |
@@ -229,6 +229,7 @@ The feature areas, and where each lives:
 | Area | Services (`Backend/src/services/`) | Use case |
 | :--- | :--- | :--- |
 | Sign-up, sign-in, sessions, password reset | `auth`, `account`, `session`, `token`, `loginLockout`, `email` | 6.2.1 |
+| Two-step sign-in (authenticator app, recovery codes, staff requirement, reset) | `mfa`, with `utils/totp`, `utils/recoveryCodes`, `utils/secretBox`; the challenge step in `auth`, the lock in `loginLockout` | 6.2.1 · 6.2.10 |
 | Search and filter | `work` (query building), `utils/thaiSearch` | 6.2.2 |
 | Work detail, status history, TOR files | `work`, `fileStorage`, `utils/statusHistory` | 6.2.3 · 6.2.4 |
 | Following tags | `follow` | 6.2.5 |
@@ -443,6 +444,7 @@ erDiagram
     ACCOUNT ||--o{ NOTIFICATION : "receives, one per work"
     WORK ||--o{ NOTIFICATION : "announced by"
     ACCOUNT ||--o{ SESSION : "signed in on"
+    ACCOUNT ||--o| MFA_CREDENTIAL : "second factor"
     ACCOUNT ||--o{ TOKEN : "single-use links"
     ACCOUNT ||--o{ AUDIT_LOG : "actor snapshot"
 
@@ -501,7 +503,18 @@ erDiagram
         bool emailVerified
         bool emailNotificationsEnabled
         string notificationFrequency "instant or daily"
+        bool mfaEnabled "two-step sign-in is on"
         date lockedUntil "sign-in lock, see section 7"
+    }
+    MFA_CREDENTIAL {
+        objectId accountId FK "unique, one per account"
+        string secretEnc "authenticator secret, AES-256-GCM, never selected by default"
+        date enabledAt "absent while a setup is only pending"
+        string pendingSecretEnc "handed out at setup, not active until proven"
+        int lastUsedStep "highest 30-second step accepted, so a code works once"
+        array recoveryCodes "id and hash only, usedAt once spent"
+        int failedCount "wrong codes, counted apart from passwords"
+        date lockedUntil "second-step lock"
     }
     FOLLOW {
         objectId accountId FK "unique with tagId"
@@ -540,8 +553,9 @@ erDiagram
     SESSION {
         objectId accountId FK
         string tokenHash UK "only the hash is stored"
-        date expiresAt "TTL index removes it"
+        date expiresAt "TTL index removes it; 5 minutes for a challenge"
         date revokedAt
+        bool mfaPending "a challenge: the password was right, the second step is owed"
     }
     TOKEN {
         objectId accountId FK
@@ -582,8 +596,10 @@ Load-bearing shapes:
    it. The publish-date filter reads whole **Bangkok** days (+07:00). `fiscalYear` is in the Buddhist
    Era, and `fiscalYearSource` says whether the document stated it or it was estimated from the
    project number.
-5. **Secrets are stored only as hashes.** Passwords (bcrypt), session tokens and single-use link tokens
-   are never stored in a form that can be replayed; sessions and tokens expire through TTL indexes.
+5. **Secrets are stored only as hashes.** Passwords (bcrypt), session tokens, single-use link tokens and
+   recovery codes are never stored in a form that can be replayed; sessions and tokens expire through
+   TTL indexes. The one thing that must be readable again, an authenticator's secret, is encrypted
+   (AES-256-GCM, bound to its account) in a collection of its own.
 6. **Embedded arrays are bounded by the feed, not by a cap.** `statusHistory` and `torFiles` grow only
    with real announcements and re-issued documents of one project; an `IngestionRun`'s
    `itemResults` is bounded by what one feed returns. If a document ever needs an unbounded list, it
@@ -608,6 +624,7 @@ Load-bearing shapes:
 | `ingestionruns.siteId + startedAt` | One site's run history, newest first |
 | `accounts.email` **unique** · `createdAt` | Sign-in lookup, and the newest-first account lists |
 | `sessions.tokenHash` **unique** · `expiresAt` TTL | Resolving a cookie; expiry removes the row |
+| `mfacredentials.accountId` **unique** | One second factor per account; the atomic claim of a code or recovery code targets this row |
 | `tokens.tokenHash` **unique** · `expiresAt` TTL | Resolving a link; expiry removes the row |
 | `auditlogs.createdAt`, `entityType + entityId`, `actor.id`, `action`, `requestId` | Every filter of the audit-log screen |
 
@@ -632,6 +649,12 @@ not do — because those are the ones a well-meaning change quietly breaks.
 | Sign-in and sign-up never reveal whether an email has an account | Account enumeration | A dummy bcrypt for unknown emails; the same answer for an unknown email and a wrong password; a taken email at sign-up answers like a new one; an unknown email is locked like a real account; a suspended or unverified state is told only after the right password |
 | Wrong passwords are counted per account, including on change-password | Attackers who rotate IPs, or hold a stolen session, must still be slowed | `reserveLoginAttempt`: 4 free failures, then locks of 1, 2, 4 … up to 30 minutes |
 | Passwords, session tokens and link tokens are stored only as hashes | A database leak cannot be replayed | `passwordHash` is `select: false`; `tokenHash` on sessions and tokens |
+| Admins and Super Admins reach nothing in the admin area without a second factor | A stolen or guessed password must not be enough for the accounts that can change other accounts and sources | `requireRole` answers `403 MFA_SETUP_REQUIRED` when `mfaSetupRequired`; `MFA_REQUIRED_FOR_STAFF` is fixed `true` in `docker-compose.prod.yml`; staff cannot turn it off |
+| A password alone never gives a session to an account with a second factor | Otherwise the second factor protects nothing | `loginWithPassword` issues a challenge (`mfaPending`, 5 minutes) that `requireAuth` refuses; only `requireMfaChallenge` accepts it, and a correct code issues a NEW session |
+| An authenticator code and a recovery code each work once | A code seen over a shoulder or in a log is worthless a moment later | `lastUsedStep` moved forward by one atomic `updateOne`; a recovery code claimed by one atomic positional update |
+| Wrong second-step codes are counted apart from wrong passwords, and a correct password never clears them | Someone who knows the password must not guess codes without end | `reserveMfaAttempt` on `mfacredentials`; only a correct code resets it |
+| A code is judged by the server's clock alone | A client-supplied time would let anyone pick the code | `config/clock.ts`; strict schemas carry no time |
+| An authenticator secret is never returned after setup, logged, or kept in the clear | A leak of the database, a response or a log must not yield a seed | `select: false`, AES-256-GCM, `toJSON` strips it; `check:mfa` searches responses, logs and the stored rows |
 | Only genuine PDFs are stored and served, always typed `application/pdf`, by content-hash key | A remote server's file name or type must never decide what we serve | `saveTorFile` checks the `%PDF-` signature; `isStoredPdf` and `safePdfFilename` on download |
 | Every admin change is audited, and secrets never reach the log | Who did what, and when, must survive | The audit plugin and `AUDITED_MODELS`; any key containing `password`, `token`, `hash`, `secret` is `[REDACTED]`; the model refuses edits and deletes |
 | At most one notification per work per user, and a paused, suspended or unverified recipient is never emailed | FR-3.6; mute means mute | Unique index; `notifyNewWorkMatches` skips paused follows and non-active accounts, and sends email only on first insert |
@@ -748,7 +771,8 @@ Everything that varies by environment is an environment variable, validated in `
 | AI | `AI_TAGGING_ENABLED`, `AI_PROVIDER`, `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `OPENROUTER_BASE_URL`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`, `VERTEX_AI_MODEL`, `GOOGLE_APPLICATION_CREDENTIALS` |
 | Topic filter | `INGESTION_TOPIC_FILTER_ENABLED` (needs `AI_TAGGING_ENABLED`) |
 | Frontend | `NEXT_PUBLIC_API_URL` |
-| Secrets as files (production) | `MONGODB_URI_FILE`, `SMTP_PASS_FILE`, `OPENROUTER_API_KEY_FILE`, `DATA_GO_TH_API_KEY_FILE`: the value comes from that file, not from the environment (`config/secretFiles.ts`) |
+| Two-step sign-in | `MFA_ENCRYPTION_KEY` (32 random bytes, base64; the API refuses to start without it while staff must use two-step sign-in), `MFA_REQUIRED_FOR_STAFF` (default `true`), `MFA_ISSUER`, `MFA_TOTP_DRIFT_STEPS` (default 1) |
+| Secrets as files (production) | `MONGODB_URI_FILE`, `SMTP_PASS_FILE`, `OPENROUTER_API_KEY_FILE`, `DATA_GO_TH_API_KEY_FILE`, `MFA_ENCRYPTION_KEY_FILE`: the value comes from that file, not from the environment (`config/secretFiles.ts`) |
 | Deployment (root `.env`, read by compose) | `APP_HOST`, `API_HOST`, `ACME_EMAIL`, `SECRETS_DIR`, `EDGE_HTTP_PORT`, `EDGE_HTTPS_PORT`, `COMPOSE_FILE` |
 
 The poll interval is **not** an environment variable: an Admin sets it in the app.
@@ -762,12 +786,12 @@ notes of the SRS requirement it names.
 
 | Area | Delivers | State |
 | :--- | :--- | :--- |
-| Accounts and access (FR-1.x) | Sign-up with email verification, one login for everyone, sign-in lockout, password reset and change, profile, Admin roles, vendor and admin account management | ✅ |
+| Accounts and access (FR-1.x) | Sign-up with email verification, one login for everyone, sign-in lockout, password reset and change, profile, Admin roles, vendor and admin account management, two-step sign-in (authenticator app and recovery codes, required for Admin and Super Admin, with an identity-checked reset) | ✅ |
 | Ingestion (FR-2.x) | e-GP polling, TOR download, schedule, run history, source configuration, deptId verify and suggestions, `data.go.th` enrichment, procurement facts, topic filter | ✅ — except active alerts for a failed run (FR-2.7) and a per-poll time limit 🔨 |
 | Tags and notifications (FR-3.x) | Follow, pause, unfollow, in-app and email notifications, daily digest, tag vocabulary | ✅ — agency tags are not assigned automatically (FR-3.2) 🔨; no-login email unsubscribe (FR-3.7) ⬜ |
 | Search and browse (FR-4.x) | Thai-aware search, filters, sorts, status badges, site directory | 🔨 — extracted TOR text is not indexed; budget and date-range filters are in the API but not yet on the search page |
 | Work detail and TOR (FR-5.x) | Detail page, status history, PDF download, hash dedupe | ✅ — served over HTTPS by the production overlay (`docker-compose.prod.yml`) |
-| Security (SRS §5.3) | CSRF, headers, validation, lockout, hashing, rate limits on sign-in, sign-up and reset | ✅ — and the dependency audit + SBOM in CI, session idle timeout, rate limits on search and poll. In a deployment (`docker-compose.prod.yml`): TLS 1.2/1.3 and Let's Encrypt, MongoDB login and TLS, secrets in the secret store, non-root containers ✅ — Let's Encrypt issuance is shown only on a public server |
+| Security (SRS §5.3) | CSRF, headers, validation, lockout, hashing, rate limits on sign-in, sign-up and reset | ✅ — two-step sign-in for staff, and the dependency audit + SBOM in CI, session idle timeout, rate limits on search and poll. In a deployment (`docker-compose.prod.yml`): TLS 1.2/1.3 and Let's Encrypt, MongoDB login and TLS, secrets in the secret store, non-root containers ✅ — Let's Encrypt issuance is shown only on a public server |
 | Verification (SRS §5.6) | Per-area `check:*` scripts against throwaway databases | 🔨 — CI, browser and accessibility tests, load tests ⬜ |
 
 ### Open decisions

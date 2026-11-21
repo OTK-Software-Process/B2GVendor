@@ -1,9 +1,10 @@
 import { Request, Response } from 'express';
-import { registerAccount, loginWithPassword, verifyEmailAddress } from '../services/auth.service';
-import { revokeSessionByRawToken } from '../services/session.service';
+import { registerAccount, loginWithPassword, verifyEmailAddress, verifyMfaChallenge } from '../services/auth.service';
+import { MFA_CHALLENGE_TTL_MS, revokeSessionByRawToken } from '../services/session.service';
 import { created, ok } from '../utils/apiResponse';
 import { SESSION_COOKIE_NAME, sessionCookieOptions, clearSessionCookieOptions } from '../config/cookie';
 import { RegisterInput, LoginInput } from '../validators/auth.validator';
+import { AppError } from '../utils/AppError';
 import { logger } from '../utils/logger';
 import { IAccount } from '../models/account.model';
 
@@ -31,7 +32,7 @@ export async function verifyEmail(req: Request, res: Response): Promise<void> {
 export async function login(req: Request, res: Response): Promise<void> {
   const input = req.body as LoginInput;
 
-  const { account, rawToken } = await loginWithPassword(input, req);
+  const { account, rawToken, mfaRequired } = await loginWithPassword(input, req);
 
   // ASVS V7.2.4: signing in always starts a NEW session -- and the one this
   // browser already held (same account or another) is ended on the server, so
@@ -41,8 +42,26 @@ export async function login(req: Request, res: Response): Promise<void> {
     logger.security('info', 'auth.session.revoked', { reason: 'new_sign_in', accountId: String(account._id) });
   }
 
+  if (mfaRequired) {
+    // Right password, second factor still owed: a short-lived challenge, not a sign-in.
+    // The cookie lives as long as the challenge does; the account is NOT returned.
+    res.cookie(SESSION_COOKIE_NAME, rawToken, { ...sessionCookieOptions, maxAge: MFA_CHALLENGE_TTL_MS });
+    ok(res, { mfaRequired: true });
+    return;
+  }
+
   res.cookie(SESSION_COOKIE_NAME, rawToken, sessionCookieOptions);
   ok(res, account.toJSON());
+}
+
+/** POST /auth/mfa/verify -- the answer to the second-factor challenge; on success the person is signed in. */
+export async function verifyMfa(req: Request, res: Response): Promise<void> {
+  if (!req.account || !req.authSession) throw AppError.notAuthenticated();
+  const { account, rawToken, method, recoveryCodesRemaining } = await verifyMfaChallenge(req.account, req.authSession, req.body.code as string, req);
+
+  // A NEW session token: the one that existed while only the password was known is ended.
+  res.cookie(SESSION_COOKIE_NAME, rawToken, sessionCookieOptions);
+  ok(res, { ...account.toJSON(), mfa: { method, ...(recoveryCodesRemaining !== undefined ? { recoveryCodesRemaining } : {}) } });
 }
 
 export async function logout(req: Request, res: Response): Promise<void> {
